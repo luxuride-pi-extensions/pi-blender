@@ -9,14 +9,14 @@
  *   4. "blender" on PATH
  */
 
-import { existsSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 // Import cycle: blender/utils.ts imports resolveBlenderArgv from this module,
 // so this module must not import anything from blender/utils.ts. It may still
 // import from blender/reap.ts and blender/liveness.ts, which depend only on
 // config.js.
-import { getBlankBlendPath, getBlenderBridgeDir, getBundledBlankBootstrapPath, getBundledBlenderBridgePath, writeInstanceFile } from "./config.js";
+import { getBlankBlendPath, getBlenderBridgeDir, getBlenderInstanceId, getBundledBlankBootstrapPath, getBundledBlenderBridgePath, writeInstanceFile } from "./config.js";
 import { formatReapResult, reapOrphanedBridgeDirs } from "./blender/reap.js";
 // isHeartbeatFresh is aliased on import because launch.ts has a local
 // no-argument wrapper of the same name below; the module version takes a dir.
@@ -59,6 +59,100 @@ const LIVE_BRIDGE_SUPERVISE_INTERVAL_MS = 15_000;
  * has already reclaimed or ignore a live one.
  */
 const LIVE_BRIDGE_LOCK_STALE_MS = 600_000;
+
+/**
+ * How long a cross-process launch claim is honoured before it is reclaimed.
+ *
+ * The claim is written microseconds before the spawn, so its only job is to
+ * cover the window where a Blender has been spawned but has not written its
+ * first heartbeat yet — during which isLiveBridgeAlive() is false in every
+ * process sharing the dir, and every one of them would otherwise launch its own
+ * UI. That window is the same cold-start budget the launcher already tolerates,
+ * so the claim expires with it: a process that dies between claiming and
+ * spawning must not lock every other process in the session out of Blender for
+ * longer than one cold start would have taken anyway.
+ */
+const LAUNCH_CLAIM_STALE_MS = LIVE_BRIDGE_LAUNCH_WATCHDOG_MS;
+
+/**
+ * Claim the right to start the one UI for this bridge dir, across processes.
+ *
+ * `bridgeLaunchStarted` is module state, and module state is per-process. Once
+ * a session's processes share one bridge dir (see config.ts), that flag can no
+ * longer answer "is someone already starting a Blender here" — it only answers
+ * "did THIS process try". With a shared dir and a manager plus several workers
+ * all issuing their first tool call within a second of each other, every one of
+ * them sees no heartbeat, all of them set their own flag, and the user gets a
+ * Blender per subagent. The create-exclusive claim below is the same mechanism
+ * acquireBridgeLock uses, for the same reason: the create IS the lock.
+ *
+ * Returns false when another live process already holds it, which callers treat
+ * as "someone else is on it" rather than as an error.
+ */
+function tryClaimLaunch(): boolean {
+	const path = join(getBlenderBridgeDir(), "launch.claim");
+	try {
+		mkdirSync(getBlenderBridgeDir(), { recursive: true });
+		const handle = openSync(path, "wx");
+		try {
+			// writeFileSync accepts the raw fd; only the exclusive CREATE is
+			// load-bearing here, so the content does not need its own atomic
+			// publish (a peer reading it mid-write sees unreadable, which
+			// releaseLaunchClaim treats as "not provably someone else's").
+			writeFileSync(
+				handle,
+				JSON.stringify({ pid: process.pid, instanceId: getBlenderInstanceId(), at: Date.now() }),
+			);
+		} finally {
+			closeSync(handle);
+		}
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "EEXIST") {
+			// A dir we cannot write to is a real problem, but failing the launch
+			// over it would leave the user with no Blender and no explanation.
+			// Fall through to launching on the in-process flag alone.
+			return true;
+		}
+		// A claim older than the cold-start budget belongs to a process that
+		// died between claiming and spawning. Reclaim it rather than blocking
+		// every process in the session out of Blender indefinitely.
+		try {
+			if (Date.now() - statSync(path).mtimeMs > LAUNCH_CLAIM_STALE_MS) {
+				rmSync(path, { force: true });
+				return tryClaimLaunch();
+			}
+		} catch {
+			// The holder released it between our EEXIST and this stat. Retrying
+			// the create is the correct response to a vanished claim.
+			return tryClaimLaunch();
+		}
+		return false;
+	}
+}
+
+/**
+ * Release this process's claim, and only this process's.
+ *
+ * The pid check matters because claims outlive individual events: a slow
+ * Blender becomes alive long after the launch it was claimed for, and by then
+ * the claim may have been reclaimed and re-taken by another process. Removing
+ * a claim this process no longer holds would delete a live peer's, and the peer
+ * would then be free to start a second UI.
+ */
+function releaseLaunchClaim(): void {
+	const path = join(getBlenderBridgeDir(), "launch.claim");
+	try {
+		const holder = JSON.parse(readFileSync(path, "utf-8")) as { pid?: number };
+		if (holder?.pid !== process.pid) return;
+	} catch {
+		// Unreadable claim: the create-time content is this process's own, and
+		// an unparseable file is not evidence of someone else's claim. The
+		// staleness reclaim above is what recovers a genuinely abandoned one.
+	}
+	rmSync(path, { force: true });
+}
 
 export interface BlenderArgv {
 	command: string;
@@ -165,9 +259,16 @@ function armBridgeWatchdog(): void {
 	if (bridgeWatchdog) return;
 	bridgeWatchdog = setTimeout(() => {
 		bridgeWatchdog = undefined;
-		if (isLiveBridgeAlive()) return;
+		if (isLiveBridgeAlive()) {
+			// The UI is up. The claim has done its job — it only ever covered the
+			// pre-heartbeat window — and holding it for the rest of the session
+			// would keep peers out of a legitimate relaunch should Blender die.
+			releaseLaunchClaim();
+			return;
+		}
 		// Spawned, but never alive. Release the launch flag so a later call can
 		// retry instead of trusting a Blender that is not there.
+		releaseLaunchClaim();
 		bridgeLaunchStarted = false;
 		console.error(
 			`[pi-vibe-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
@@ -203,6 +304,10 @@ export function isLiveBridgeAlive(): boolean {
 export function resetBridgeLaunch(): void {
 	bridgeLaunchStarted = false;
 	clearBridgeWatchdog();
+	// The in-process flag is not the only thing that suppresses a launch: a
+	// claim this process still holds would keep peers out even after a reset, so
+	// a forced relaunch has to give the claim back too.
+	releaseLaunchClaim();
 }
 
 export function ensureLiveBridgeLaunched(): void {
@@ -309,6 +414,9 @@ export function ensureLiveBridgeLaunchedForce(): void {
 }
 
 function launchBridge(): void {
+	// Cross-process first: a peer in this session that is already starting a
+	// Blender owns the launch, and this process must not add a second window.
+	if (!tryClaimLaunch()) return;
 	bridgeLaunchStarted = true;
 	bridgeSpawnInFlight = true;
 	// Claim + sweep belong to the launch, not to session_start: see
@@ -318,6 +426,9 @@ function launchBridge(): void {
 	// away.
 	void ensureInstanceClaimed();
 	if (process.env.VIBE_BLENDER_NO_BLENDER?.trim() === "1") {
+		// Nothing will be spawned, so the claim must not outlive this call: peers
+		// would skip their own launch for a UI that is never coming.
+		releaseLaunchClaim();
 		bridgeSpawnInFlight = false;
 		return;
 	}
@@ -354,6 +465,7 @@ function launchBridge(): void {
 			// caller's only symptom is a timeout with no cause.
 			child.on("error", (error) => {
 				clearBridgeWatchdog();
+				releaseLaunchClaim();
 				bridgeLaunchStarted = false;
 				console.error(
 					`[pi-vibe-blender] warning: failed to start Blender (${command} ${args.join(" ")}): ${error.message}. Fix BLENDER_PATH or install Blender; the next blender_* call will retry.`,
@@ -365,6 +477,7 @@ function launchBridge(): void {
 			armBridgeWatchdog();
 		} catch (error) {
 			clearBridgeWatchdog();
+			releaseLaunchClaim();
 			const message = error instanceof Error ? error.message : String(error);
 			const target = launched ? `${launched.command} ${launched.args.join(" ")}`.trim() : "Blender";
 			console.error(`[pi-vibe-blender] warning: failed to launch Blender (${target}): ${message}`);

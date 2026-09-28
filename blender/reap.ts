@@ -134,32 +134,77 @@ export async function reapOrphanedBridgeDirs(): Promise<ReapResult> {
  *     a live owner is a pi process that is starting its Blender right now.
  *  4. A dir with no instance file and no heartbeat cannot be classified, so it
  *     is left alone rather than guessed at.
+ *
+ * Rule 3 is about ANY owner, not the single one `instance.json` records. A dir
+ * is shared by every process in one pi session's delegation tree (see
+ * config.ts), and a subagent that has finished and exited is the common case,
+ * not the exceptional one. Reading only the last-written record would classify
+ * a dir whose surviving owner is very much alive as an orphan the moment that
+ * one worker exited, and the sweep would delete the requests directory out from
+ * under the session's live Blender.
  */
 async function classifyBridgeDir(dir: string): Promise<"adopt" | "remove" | string> {
 	if (isHeartbeatFresh(dir)) {
 		return isHeartbeatPidAlive(dir) ? "adopt" : "remove";
 	}
 
-	let parsed: InstanceFile | null = null;
-	try {
-		parsed = JSON.parse(await readFile(join(dir, "instance.json"), "utf-8")) as InstanceFile;
-	} catch {
-		parsed = null;
-	}
-	if (!parsed) {
+	const owners = await readOwnerRecords(dir);
+	if (owners === null) {
 		// No instance file and no heartbeat: could be a hand-made bridge dir,
 		// or a shared dir someone pointed PI_BLENDER_BRIDGE_DIR at. Not ours to
 		// delete on a guess.
 		return "no instance file and no heartbeat; left alone";
 	}
 
-	const ownerPid = toPid(parsed.pid);
-	if (ownerPid === null) {
-		return "instance file has no usable pid; left alone";
+	// Any live owner keeps the dir. An owner that is starting, or that is simply
+	// running without having launched a UI, is still going to want this dir.
+	for (const ownerPid of owners) {
+		if (pidIsRunning(ownerPid)) {
+			return "owner pi still running, bridge not started yet";
+		}
 	}
-	// pidIsRunning is only reached when the heartbeat is absent or stale, so
-	// this is the "pi is up but has not started its UI yet" case.
-	return pidIsRunning(ownerPid) ? "owner pi still running, bridge not started yet" : "remove";
+	return "remove";
+}
+
+/**
+ * Every pid recorded as an owner of this dir, or null when the dir carries no
+ * ownership record at all.
+ *
+ * Reads the per-process records in `instances/` first and falls back to the
+ * single `instance.json`, which is what a dir written by a pi running the
+ * previous version (or by a sweep in a concurrently-upgraded session) has.
+ *
+ * "No usable pid anywhere" and "no record at all" deliberately return the same
+ * thing — null, meaning unclassifiable. A dir full of records that will not
+ * parse is exactly as undecidable as a dir with none, and this is the branch
+ * that ends in `rm -rf`: an empty-but-present record set must never be the one
+ * input that deletes, because the unparseable-by-accident case is far likelier
+ * than the genuinely-dead-owners case it would be mistaken for.
+ */
+async function readOwnerRecords(dir: string): Promise<number[] | null> {
+	const pids: number[] = [];
+	const addPid = (parsed: InstanceFile | null): void => {
+		const pid = toPid(parsed?.pid);
+		if (pid !== null && !pids.includes(pid)) pids.push(pid);
+	};
+	try {
+		for (const entry of await readdir(join(dir, "instances"))) {
+			if (!entry.endsWith(".json")) continue;
+			addPid(await readInstanceFile(join(dir, "instances", entry)));
+		}
+	} catch {
+		// No per-process records: a dir from before they existed.
+	}
+	addPid(await readInstanceFile(join(dir, "instance.json")));
+	return pids.length > 0 ? pids : null;
+}
+
+async function readInstanceFile(path: string): Promise<InstanceFile | null> {
+	try {
+		return JSON.parse(await readFile(path, "utf-8")) as InstanceFile;
+	} catch {
+		return null;
+	}
 }
 
 /**
