@@ -21,6 +21,49 @@ BRIDGE_DIR = os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get
     "agent",
     "blender-bridge",
 )
+# The per-instance scratch blank that blank-bootstrap.py opens this session on.
+# launch.ts passes it in the environment (PI_BLENDER_BLANK_BLEND_PATH), and
+# config.ts derives the identical default, so this is the same path Node side
+# means by getBlankBlendPath(). It is a THROWAWAY file by construction:
+# blank-bootstrap.py deletes every object in it and re-saves it unconditionally
+# on each launch, so nothing in it is ever worth keeping. The script needs to
+# know that, because it otherwise applies the same precious-work guard to the
+# blank as to a user's model.blend — see ensure_requested_blend_open.
+#
+# Compared as normalised absolute paths, because this arrives as a string from
+# the environment and may be relative, "~"-prefixed, or carry a redundant
+# trailing separator, while the other side is already os.path.abspath()'d.
+def resolve_blank_blend_path():
+    raw = os.environ.get("PI_BLENDER_BLANK_BLEND_PATH")
+    if not raw or not raw.strip():
+        return None
+    expanded = os.path.expanduser(raw.strip())
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(os.getcwd(), expanded)
+    return os.path.abspath(expanded)
+
+
+BLANK_BLEND_PATH = resolve_blank_blend_path()
+
+
+def is_discardable_scratch_blend(blend_path):
+    """True if `blend_path` is this session's throwaway blank, not real work.
+
+    The answer to "may I throw away the unsaved changes in this file?" is yes
+    for the blank, because the next launch overwrites it from scratch anyway,
+    and no for everything else, because a workspace model.blend may hold the
+    only copy of someone's work. An empty current path (an unsaved, never-saved
+    scene) is also treated as discardable: there is no file to lose.
+
+    With no blank path in the environment (a Blender started outside the
+    extension) this returns False for every real file, i.e. the old
+    conservative behaviour.
+    """
+    if not blend_path:
+        return True
+    return bool(BLANK_BLEND_PATH) and blend_path == BLANK_BLEND_PATH
+
+
 REQUESTS_DIR = os.path.join(BRIDGE_DIR, "requests")
 RESPONSES_DIR = os.path.join(BRIDGE_DIR, "responses")
 # A request is moved here by whichever poller wins the atomic rename, so a
@@ -268,10 +311,23 @@ def ensure_requested_blend_open(request):
     if current_blend_path == requested_blend_path:
         return requested_blend_path
 
-    if bpy.data.is_dirty:
+    if bpy.data.is_dirty and not is_discardable_scratch_blend(current_blend_path):
         current_label = current_blend_path or "the current unsaved Blender scene"
         raise RuntimeError(
             f'Blender has unsaved changes in {current_label}. Save or discard them before vibe-blender can switch to "{requested_blend_path}".'
+        )
+
+    if bpy.data.is_dirty:
+        # Discarding the blank is not data loss, it is the blank's normal life:
+        # it is regenerated from nothing on the next launch. Refusing here used
+        # to make the per-instance UI permanently unusable — the first open of a
+        # workspace marks the blank dirty, and from then on every switch was
+        # blocked until something killed the Blender, which the supervisor then
+        # relaunched. That relaunch-on-a-refusal loop is what looked like the
+        # extension "opening Blender again", so switching away from the scratch
+        # blank is allowed and the leftover state is simply dropped.
+        print(
+            f'[vibe-blender] discarding unsaved changes in scratch blank "{current_blend_path or "unsaved scene"}"'
         )
 
     bpy.ops.wm.open_mainfile(filepath=requested_blend_path)
@@ -316,7 +372,7 @@ def handle_reload_blend(request):
     same_blend = current_blend_path == requested_blend_path
 
     discarded_unsaved = bool(bpy.data.is_dirty)
-    if discarded_unsaved and not same_blend:
+    if discarded_unsaved and not same_blend and not is_discardable_scratch_blend(current_blend_path):
         current_label = current_blend_path or "the current unsaved Blender scene"
         raise RuntimeError(
             f'Blender has unsaved changes in {current_label}. Save or discard them before vibe-blender can switch to "{requested_blend_path}".'
