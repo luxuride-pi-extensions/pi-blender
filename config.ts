@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,11 +135,18 @@ export function getBlenderBridgeDir(): string {
 export function writeInstanceFile(): void {
 	const dir = getBlenderBridgeDir();
 	mkdirSync(dir, { recursive: true });
+	// Atomic publish, matching writeManifest in blender/workspace.ts. A peer
+	// reading this file while it is half-written would see invalid JSON, and
+	// the ownership check treats unreadable-as-dead -- so a plain writeFile
+	// here could hand a LIVE peer's workspace to a newcomer on a torn read.
+	const path = join(dir, "instance.json");
+	const tempPath = join(dir, `instance.${process.pid}.tmp`);
 	writeFileSync(
-		join(dir, "instance.json"),
+		tempPath,
 		JSON.stringify({ pid: process.pid, instanceId: getBlenderInstanceId(), startedAt: new Date().toISOString() }),
 		"utf-8",
 	);
+	renameSync(tempPath, path);
 }
 
 /**
