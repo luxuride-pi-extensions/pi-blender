@@ -21,9 +21,16 @@
  * The Blender UI is NOT launched at pi/session start. It is launched lazily
  * when the user engages Blender: the /blender command force-launches it via
  * ensureLiveBridgeLaunchedForce(), and any blender_* tool call triggers the
- * lazy ensureLiveBridgeLaunched() path in blender/bridge.ts. Both check the
- * bridge heartbeat first, so a Blender that is already up (even in another pi
- * process) is never re-spawned into a second window on the same bridge dir.
+ * lazy ensureLiveBridgeLaunched() path in blender/bridge.ts. Nothing is written
+ * under the bridge root before that first launch -- see launch.ts
+ * ensureInstanceClaimed.
+ *
+ * Each pi process gets its OWN bridge dir and therefore its own Blender, so
+ * "a Blender that is already up" only ever refers to one this process
+ * launched. That is what makes two instances safe to run at once, and it is why
+ * a second instance opening the same workspace is refused rather than shared:
+ * two UIs on one model.blend overwrite each other on save. See
+ * blender/ownership.ts and the loadWorkspaceManifest guard.
  */
 
 import { extname } from "node:path";
