@@ -88,7 +88,17 @@ export async function classifyWorkspaceOwner(manifest: BlenderWorkspaceManifest)
 	if (recordedPid === null) return "dead";
 	// The dir belongs to a different process than the one that wrote the claim.
 	if (recordedPid !== owner.pid) return "dead";
-	if (!pidIsRunning(recordedPid)) return "dead";
+
+	// The owner pi is GONE but its Blender may still be running and still
+	// holding this exact blend open. That is the case a claim file alone
+	// cannot see, and it is the dangerous one: taking over here would open a
+	// SECOND UI on a model.blend the first one is still writing. So before
+	// declaring the claim dead, ask the dir itself whether a beating UI is
+	// sitting on our blend. This is the same evidence findLiveOwnersOfBlend
+	// reads, applied to the enforcement path rather than only to the snapshot.
+	if (!pidIsRunning(recordedPid)) {
+		return isLiveUiHolding(bridgeDir, manifest.blendPath) ? "live" : "dead";
+	}
 
 	// The peer's pi is alive. Its UI may still be booting, so a missing
 	// heartbeat is NOT grounds for a takeover — that is the same reasoning as
@@ -96,6 +106,18 @@ export async function classifyWorkspaceOwner(manifest: BlenderWorkspaceManifest)
 	// heartbeat whose pid is confirmed dead contradicts a live owner.
 	if (isHeartbeatFresh(bridgeDir) && !isHeartbeatPidAlive(bridgeDir)) return "dead";
 	return "live";
+}
+
+/**
+ * Whether a bridge dir's UI is provably up and holding `blendPath`.
+ *
+ * A beat with a confirmed dead pid is a crash, not a UI. A heartbeat with no
+ * usable pid is the legacy pre-pid format, which cannot be trusted to name a
+ * blend, so it does not count as holding anything.
+ */
+function isLiveUiHolding(bridgeDir: string, blendPath: string): boolean {
+	if (!isHeartbeatFresh(bridgeDir) || !isHeartbeatPidAlive(bridgeDir)) return false;
+	return readHeartbeatBlendPath(bridgeDir) === blendPath;
 }
 
 /** Details for the refusal message, or null when there is no live peer. */
