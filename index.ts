@@ -984,8 +984,40 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		// a thrown error has nowhere useful to go, and the worst case of every
 		// failure here is a Blender window the user closes by hand — which is
 		// exactly the situation the next process's reaper also cleans up.
-		pi.on("session_shutdown", async (event) => {
+		pi.on("session_shutdown", async (event, ctx) => {
 			if (event.reason !== "quit") return;
+			// A SUBAGENT must never shut the shared UI down. This is the cause of
+			// the "a second Blender appeared over a live one" incident.
+			//
+			// config.ts deliberately gives every process in one session's
+			// delegation tree the SAME instance id, so the manager and each of
+			// its workers drive ONE private Blender. The unit of ownership is the
+			// SESSION, but the unit of process lifetime is not: pi-subagents runs
+			// every subagent as its own node process whose entire life is a single
+			// child session, and finishing that session calls session.dispose(),
+			// which pi emits as session_shutdown with reason "quit" (see
+			// AgentSessionRuntime.dispose in pi-coding-agent, and finish() in
+			// pi-subagents src/runs/background/run-child-session.js). So a worker
+			// that simply finished its brief tore down the manager's Blender —
+			// and because it is a shared dir, the liveness check then correctly
+			// reported the bridge dead, the next blender_* call or the 15s
+			// supervisor relaunched from blank-bootstrap.py, and the fresh UI came
+			// up on the pristine per-instance blank rather than on model.blend.
+			// That is the whole chain: the relaunch was never a liveness bug, it
+			// was a correct relaunch after a correct shutdown.
+			//
+			// Only the top-level pi process owns the UI's lifetime. A child leaves
+			// it running for whoever is still driving it, and if nobody is, the
+			// parent's own quit handler below releases it — or, if the parent
+			// died first, the reaper in blender/reap.ts adopts or cleans it up
+			// exactly as it did before.
+			//
+			// Detected the same way the manager gate detects a child turn: the
+			// pi-subagents prompt runtime stamps <active_agent name="..."/> into
+			// every child system prompt. This applies to a spawned
+			// blender-manager child too — it is a child, and the session that
+			// spawned it is still alive and still wants the UI.
+			if (CHILD_AGENT_PROMPT_PATTERN.test(ctx.getSystemPrompt())) return;
 			// A pi that never launched a UI has nothing to release, and asking
 			// would cold-launch one purely to shut it down.
 			if (!isLiveBridgeAlive()) return;
