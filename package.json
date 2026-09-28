@@ -2,10 +2,6 @@
 	"name": "pi-vibe-blender",
 	"version": "0.1.3",
 	"description": "pi extension: Vibe Blender integration (live Blender session, render, scene inspection) with flatpak support",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/lux-vibe/pi-vibe-blender.git"
-	},
 	"keywords": [
 		"pi-extension",
 		"blender",

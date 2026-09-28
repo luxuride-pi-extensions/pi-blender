@@ -84,7 +84,7 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 ## Install
 
 ```bash
-git clone https://github.com/lux-vibe/pi-vibe-blender
+git clone <this repo's URL>
 cd pi-vibe-blender
 npm install
 npm run setup
