@@ -4,6 +4,7 @@ import json
 import math
 import os
 import shutil
+import time
 import traceback
 
 # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
@@ -1098,12 +1099,25 @@ def touch_heartbeat():
     # The TS launch guard treats a stale/missing heartbeat as "the UI is
     # gone" and re-spawns Blender, so this must be refreshed every poll
     # cycle.
+    #
+    # The content carries the pid, so the TS side can ask the OS whether that
+    # process actually exists instead of trusting a file's mtime alone. A
+    # fresh-looking heartbeat from a dead Blender would otherwise make the
+    # guard believe a UI exists and refuse to relaunch it. The pid is a hint,
+    # not proof: the mtime is still the freshness signal, and the process
+    # check can only ever turn "alive" into "dead", never the reverse.
     path = os.path.join(BRIDGE_DIR, "heartbeat")
+    payload = json.dumps({"pid": os.getpid(), "at": time.time()})
     try:
-        os.utime(path)
+        # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(payload)
     except OSError:
-        # First poll of a fresh bridge dir: create the file, then touch it.
+        # First poll of a fresh bridge dir, or a read-only one. Fall back to a
+        # pure timestamp touch: mtime alone is the legacy contract and still
+        # enough for the freshness check.
         try:
+            # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
             with open(path, "w", encoding="utf-8"):
                 pass
             os.utime(path)

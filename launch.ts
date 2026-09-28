@@ -9,7 +9,7 @@
  *   4. "blender" on PATH
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { getBlankBlendPath, getBlenderBridgeDir, getBundledBlankBootstrapPath, getBundledBlenderBridgePath } from "./config.js";
@@ -37,6 +37,29 @@ const LIVE_BRIDGE_HEARTBEAT_STALE_MS = 10_000;
  * dead UI as "already launched" for the rest of the pi process.
  */
 const LIVE_BRIDGE_LAUNCH_WATCHDOG_MS = 120_000;
+/**
+ * How often the supervisor re-checks the bridge while it is healthy.
+ *
+ * This is what makes a Blender that dies mid-session come back on its own.
+ * Nothing in the tool path can notice: every tool call blocks on a bridge
+ * request that will simply time out, and a request that times out is
+ * indistinguishable from a slow one, so a user who closed Blender has to
+ * notice the failure themselves and ask again. A supervisor turns that into
+ * the next call launching a fresh UI.
+ *
+ * 15 s is well inside the 10 s staleness window plus one poll cycle, so a
+ * transient stall is not mistaken for a death, and it costs one stat() call
+ * per tick rather than a bridge request.
+ */
+const LIVE_BRIDGE_SUPERVISE_INTERVAL_MS = 15_000;
+/**
+ * Matches LIVE_BRIDGE_LOCK_STALE_MS in blender/utils.ts, and duplicated for the
+ * same reason as the lock read above: importing from utils.ts here would close
+ * an import cycle (utils.ts imports resolveBlenderArgv from this module).
+ * The two must agree, or the supervisor will either wait out a lock the bridge
+ * has already reclaimed or ignore a live one.
+ */
+const LIVE_BRIDGE_LOCK_STALE_MS = 600_000;
 
 export interface BlenderArgv {
 	command: string;
@@ -84,6 +107,9 @@ let bridgeSpawnInFlight = false;
 // Fires when a spawned Blender has still not written a heartbeat after the
 // cold-start budget; see LIVE_BRIDGE_LAUNCH_WATCHDOG_MS.
 let bridgeWatchdog: ReturnType<typeof setTimeout> | undefined;
+// Re-checks the bridge while a session runs, so a Blender that dies
+// mid-session is restarted instead of silently timing out the next request.
+let bridgeSupervisor: ReturnType<typeof setInterval> | undefined;
 
 function clearBridgeWatchdog(): void {
 	if (bridgeWatchdog) {
@@ -115,10 +141,55 @@ function armBridgeWatchdog(): void {
  * intentional, so the pending launch is not interrupted and the request
  * keeps its cold-start timeout budget.
  */
+/**
+ * Whether the pid recorded in the heartbeat file is still a live process.
+ *
+ * This is a second signal layered on the heartbeat's mtime, not a replacement
+ * for it. mtime proves "something touched this recently"; it cannot prove that
+ * something is still there. A heartbeat written just before a crash satisfies
+ * the freshness check for a further 10 s, and a file copied or restored with
+ * its timestamps can look fresh indefinitely. The pid answers the question
+ * mtime cannot.
+ *
+ * The direction is deliberately one-way. A live process with no readable
+ * heartbeat is reported alive, because a bridge that has not reached its first
+ * poll yet is a starting Blender and must not be relaunched over. Only a
+ * confidently dead pid turns a fresh heartbeat into "dead".
+ */
+function heartbeatPidIsAlive(): boolean {
+	let pid: number;
+	try {
+		const raw = readFileSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE), "utf-8");
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null) return true;
+		const candidate = (parsed as { pid?: unknown }).pid;
+		// A heartbeat with no usable pid is the pre-pid format (an older
+		// live-bridge.py, or the utime fallback). Fall back to mtime alone
+		// rather than declaring a possibly-running UI dead.
+		if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate <= 0) return true;
+		pid = candidate;
+	} catch {
+		// Unreadable or unparseable: the mtime check decides, alone.
+		return true;
+	}
+
+	try {
+		// signal 0 performs the permission and existence checks without
+		// delivering anything, so this cannot disturb a running Blender.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// EPERM means the process exists but belongs to another user, which
+		// still counts as alive. Only ESRCH is a real death.
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
 export function isLiveBridgeAlive(): boolean {
 	try {
 		const mtimeMs = statSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE)).mtimeMs;
 		if (Date.now() - mtimeMs < LIVE_BRIDGE_HEARTBEAT_STALE_MS) {
+			if (!heartbeatPidIsAlive()) return false;
 			clearBridgeWatchdog();
 			return true;
 		}
@@ -142,6 +213,78 @@ export function resetBridgeLaunch(): void {
 export function ensureLiveBridgeLaunched(): void {
 	if (bridgeSpawnInFlight || isLiveBridgeAlive() || bridgeLaunchStarted) return;
 	launchBridge();
+}
+
+/**
+ * Keep a live UI alive across the session, restarting it if it dies.
+ *
+ * Nothing in the tool path can notice a death on its own. Every tool call
+ * blocks on a bridge request that simply times out, and a timeout is
+ * indistinguishable from a slow render, so a user who closed Blender would
+ * have to notice the failure themselves and ask again. A supervisor turns that
+ * into the next call launching a fresh UI.
+ *
+ * Started once per pi process, the first time a launch is actually attempted.
+ * Deliberately NOT called from session_start: a session that has never engaged
+ * Blender has no heartbeat file at all, which is indistinguishable from a dead
+ * bridge, so a session_start supervisor would launch a Blender UI for every pi
+ * user who never asked for one — the exact thing the lazy-launch contract
+ * exists to prevent. Tying it to launchBridge() means supervision begins when
+ * the user engages Blender and never before.
+ *
+ * Restarting on a death costs a window, so the tick is deliberately lazy about
+ * it. It only relaunches when nothing is holding the bridge lock, because
+ * relaunching a UI while a request is in flight would put two Blenders on one
+ * bridge dir — the duplicate-window race the request claim in live-bridge.py
+ * exists to make harmless, but harmless is not the same as tidy. A tick that
+ * finds the bridge busy simply waits for the next one.
+ */
+function startBridgeSupervisor(): void {
+	if (bridgeSupervisor) return;
+	bridgeSupervisor = setInterval(() => {
+		if (isLiveBridgeAlive()) return;
+		// Never resurrect a UI into a request someone is still waiting on.
+		if (isBridgeLocked()) return;
+		// A heartbeat this fresh means the UI is starting, not dead: the
+		// watchdog owns that window and releasing the flag here would race it.
+		if (isHeartbeatFresh()) return;
+		resetBridgeLaunch();
+		ensureLiveBridgeLaunchedForce();
+	}, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
+	// Never hold the pi process open for a supervisor.
+	bridgeSupervisor.unref?.();
+}
+
+/**
+ * Whether a bridge request currently holds the lock.
+ *
+ * This duplicates the path in blender/utils.ts rather than importing
+ * readBridgeLock() for two reasons: that function is async and the supervisor
+ * tick is a synchronous interval, and blender/utils.ts already imports
+ * resolveBlenderArgv from this module — importing back would close a cycle.
+ *
+ * Freshness rather than mere existence is the right test. A lock file older
+ * than LIVE_BRIDGE_LOCK_STALE_MS is force-reclaimed by acquireBridgeLock, so a
+ * supervisor that waited on it would refuse to relaunch a dead Blender for as
+ * long as a crashed pi process left the file behind.
+ */
+function isBridgeLocked(): boolean {
+	try {
+		const mtimeMs = statSync(join(getBlenderBridgeDir(), "bridge.lock")).mtimeMs;
+		return Date.now() - mtimeMs < LIVE_BRIDGE_LOCK_STALE_MS;
+	} catch {
+		return false;
+	}
+}
+
+/** Whether the heartbeat was touched recently, ignoring the pid check. */
+function isHeartbeatFresh(): boolean {
+	try {
+		const mtimeMs = statSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE)).mtimeMs;
+		return Date.now() - mtimeMs < LIVE_BRIDGE_HEARTBEAT_STALE_MS;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -180,6 +323,7 @@ function launchBridge(): void {
 		bridgeSpawnInFlight = false;
 		return;
 	}
+	startBridgeSupervisor();
 
 	void (async () => {
 		// Declared outside the try: the failure reporter below needs to name
