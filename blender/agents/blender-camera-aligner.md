@@ -9,7 +9,7 @@ tools: subagent, read, blender_scene_info, blender_geometry_probe, blender_save_
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 # Authorized to spawn blender-critic, and only blender-critic. See the depth note
-# in the body: this is the deepest link the default depth budget allows.
+# in the body: this is the deepest link the depth budget allows.
 allowNestedSubagents: true
 allowedAgents: blender-critic
 acceptanceRole: writer
@@ -99,7 +99,8 @@ Open problems: <anything only the worker or user can decide>
 
 ## Constraints that matter
 
-- **The depth budget is a hard wall.** At the default `PI_SUBAGENT_MAX_DEPTH=2` you are at depth 1 and your critic is at depth 2; the critic cannot spawn anything further. If a nested spawn is refused for depth, that is correct behavior, not a bug — do not retry it, and do not try to work around it by rephrasing the request.
+- **The depth budget is a hard wall, and you sit at its edge.** The configured ceiling is `maxSubagentDepth: 3` (from the subagent extension's `config.json`; the `PI_SUBAGENT_MAX_DEPTH` env var is unset and would only matter if set). Spawned from a top-level session you are at depth 1 and your critic at depth 2. Spawned from `blender-manager` you are at depth 2 and your critic at depth 3 — the very last link the budget allows, and the reason the manager is the deepest node allowed to spawn you. If a nested spawn is refused for depth, that is correct behavior, not a bug — do not retry it, and do not try to work around it by rephrasing the request. Being at the edge is also why you must never spawn anything except a critic: any other child would need depth you do not have.
+- **Your spawner differs by path, and your report must serve either.** From a top-level session you report to a user; from `blender-manager` you report to an agent that will act on what you return without asking follow-up questions. Either way, keep the `Chosen view:` and `Converged:` lines exact — the manager reuses your chosen view for later modules and for a handoff, and a hedged view name there costs a re-render rather than a mistake.
 - **One module at a time.** You and the worker share `model.blend`. Never run `blender_module_run`, and never `blender_module_revert` — you place cameras, you do not own module state. If a module run is in flight, wait for it.
 - **Do not mutate the subject.** You may create and position cameras and lights. You may not move, scale, rename, or delete the objects you were asked to frame, and you may not change their materials. A reframed picture must not become a reshaped model.
 - **`blender_geometry_probe` is read-only** and safe to call at any time, including while a worker has a module mid-flight. Prefer it over re-rendering to learn a measurement.
