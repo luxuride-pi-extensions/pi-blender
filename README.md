@@ -27,6 +27,10 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
                       for that field)
 scripts/install-agents.mjs  generates the machine-specific agent copies
                             (`--check` verifies them without writing)
+scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
+                            symlink, typebox link, agent install, todo
+                            provider check, Blender resolution report
+                            (`--check` is read-only and exits 1 on any problem)
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 ```
 
@@ -83,28 +87,50 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 git clone https://github.com/lux-vibe/pi-vibe-blender
 cd pi-vibe-blender
 npm install
-ln -sfn "$PWD" ~/.pi/agent/extensions/vibe-blender
-npm run install:agents
+npm run setup
 ```
 
-The symlink is what pi loads. `npm run install:agents` is a separate step
-because the agent definitions cannot live in the repo: their `extensions:`
-frontmatter needs the absolute path of the extension directory, and
-pi-subagents resolves only `.`/`..` entries — no `~`, no env vars
-(`src/agents/agents.js:1802-1813`). The repo keeps `/path/to/...` placeholders
-and the installer substitutes them, so no machine-specific path is ever
-committed. It also needs `@juicesharp/rpiv-todo` installed in the agent npm
-tree, because `blender-manager` lists it as a tool and a foreground child does
-not inherit ambient extensions; without the provider listed, the child is
-handed a `todo` it can never call.
+`npm run setup` does everything a fresh clone needs and is safe to re-run:
+
+```
+ok     extension symlink — ~/.pi/agent/extensions/vibe-blender -> <clone>
+ok     typebox resolvable — node_modules/typebox (pi 0.87.1)
+ok     agent definitions — 6 in sync in ~/.pi/agent/agents
+ok     todo provider for blender-manager — @juicesharp/rpiv-todo
+ok     Blender resolvable — flatpak org.blender.Blender (autodetected)
+```
+
+Four things have to be true before the extension works, and all four point
+outside the repository — which is why a clone alone is not enough:
+
+- **the symlink** is what pi loads; the repo is never modified
+- **`typebox`** is bundled with pi but not installed into third-party
+  extensions, so `node_modules/typebox` is a symlink into your pi release
+  (gitignored, recreated per machine, resolved by semver so a new release does
+  not get skipped by a lexicographic sort)
+- **the agent definitions** carry `/path/to/...` placeholders because
+  pi-subagents resolves only `.`/`..` entries — no `~`, no env vars
+  (`src/agents/agents.js:1802-1813`) — so `install-agents.mjs` substitutes
+  machine-specific absolute paths at install time and no such path is ever
+  committed
+- **`@juicesharp/rpiv-todo`** must be present, because `blender-manager` lists
+  a `todo` tool and a foreground child does not inherit ambient extensions;
+  without the provider listed the child is handed a `todo` it can never call.
+  Setup reports this rather than installing it, since it is a separate package
+  in your agent npm tree
+
+Blender itself is only *reported*, never required at setup time — resolution
+mirrors `launch.ts` (`BLENDER_PATH`, macOS app, flatpak autodetect, `PATH`), so
+a machine that configures Blender later is not blocked here.
 
 ```bash
-npm run check:agents    # verify installed copies match the repo, write nothing
+npm run check:setup     # read-only: reports problems, repairs nothing, exit 1 on any
 ```
 
-Requires `typebox` reachable by jiti — the `node_modules/typebox` symlink
-points at the current pi release; repoint it if pi's install layout changes
-(jiti walks up from the extension dir, so any resolvable node_modules works).
+`--check` is genuinely read-only, including the agent check: it compares the
+installed copies against the repo and fails on drift instead of silently
+repairing it first. That distinction matters — a check that writes before it
+verifies can never report the fault it exists to find.
 
 ## Usage
 
