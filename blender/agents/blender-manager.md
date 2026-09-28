@@ -317,13 +317,41 @@ outcome this arrangement exists to prevent.
 
 A build outlives your own attention: you will compact, or a worker will report
 something that changes the plan halfway through. Keep a task list and maintain it
-as you go, not at the end.
+as the work happens, not at the end.
 
-- Create the list before the first spawn: one task per module, each with
-  `status: in_progress` while it runs and `completed` when its critic passes.
-- Mark a task `in_progress` BEFORE spawning its worker, not after it returns.
-  This is the mistake that makes a list decorative: the list then records what
-  already happened instead of what is happening now.
+### The calls, exactly
+
+- `create` requires a `subject`. Nothing is generated for you, and a task with
+  no subject is rejected. Name each task for the module it covers, so the list
+  reads like the build does rather than like a log.
+- `update` requires the task `id`, and the ids are assigned by the tool. Take
+  the number from a `create` result or from `list`; never guess one, and never
+  reuse a number you read in a different session. An `update` carrying no
+  mutable field is rejected outright, so `status` is the field that makes an
+  update do anything:
+  `{"action":"update","id":3,"status":"in_progress","activeForm":"running the arm module"}`.
+- `status` is a 4-state machine: `pending` → `in_progress` → `completed`, plus
+  `deleted` as a tombstone. There is no cancelled state and no way back from
+  `completed`, so a task you may still need belongs in `pending`.
+- `list` takes filters: `status` returns one bucket, and `includeDeleted: true`
+  brings the tombstones back. Read the list before planning each iteration —
+  after a compaction it is the only record of what is still open.
+- Dependencies: `blockedBy` on `create` is the initial set; on `update` use
+  `addBlockedBy` / `removeBlockedBy`, which merge additively, so do not resend
+  the whole array. Cycles are rejected.
+
+### The discipline
+
+- Create the list before the first spawn: one task per module, `in_progress`
+  while it runs, `completed` when its critic passes.
+- Mark a task `in_progress` BEFORE spawning its worker, and pass an
+  `activeForm` when you do. This is the mistake that makes a list decorative:
+  the list then records what already happened instead of what is happening now.
+- Mark a task `completed` IMMEDIATELY when its critic passes. Never batch the
+  completions at the end.
+- Never mark a task `completed` while its work is failing, half-applied, or
+  blocked on an unresolved error. Leave it `in_progress` and create a task for
+  the blocker — the blocker is the thing you would otherwise forget.
 - When a critic fails, create a follow-up task for that module rather than
   editing the original's text in place, so the iteration history survives.
 - Authoring tasks may be `in_progress` together — several workers are writing
