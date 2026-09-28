@@ -1,7 +1,7 @@
 import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
-import { requestLiveBlenderOpenBlend } from "./bridge.js";
+import { checkLiveBlenderBlend, requestLiveBlenderOpenBlend } from "./bridge.js";
 import { assertWorkspaceOwnership, buildWorkspaceOwner, classifyWorkspaceOwner, describeLiveOwner } from "./ownership.js";
 import type { BlenderWorkspaceManifest, WorkspaceInitOptions, WorkspaceInitResult } from "./types.js";
 import {
@@ -490,6 +490,26 @@ export async function blenderWorkspaceInit(options: WorkspaceInitOptions): Promi
 			signal: options.signal,
 			timeoutMs: isLiveBridgeAlive() ? LIVE_BRIDGE_INIT_TIMEOUT_MS : undefined,
 		});
+		// A response is not a state. It proves that some Blender on this bridge
+		// dir ran the open, and that Blender can be gone — or be a different
+		// window than the one the next tool call gets answered by — before this
+		// function returns. Reporting openedInLiveBlender: true on the strength
+		// of the response alone is how a session whose UI had just been
+		// relaunched onto its bootstrap blank was told it was looking at the
+		// workspace blend, and only discovered otherwise on the next call. So
+		// read what the live UI is actually on before claiming it.
+		const live = await checkLiveBlenderBlend(result.blendPath, { signal: options.signal });
+		if (!live.matches) {
+			return {
+				...result,
+				openedInLiveBlender: false,
+				liveBlenderMessage: live.heartbeatFresh
+					? `The live Blender session ran the open but is showing "${
+							live.liveBlendPath ?? "an unsaved scene"
+						}" rather than "${result.blendPath}". Another Blender may have taken over this bridge; check blender_session_context before editing.`
+					: `The Blender that ran the open is no longer running (no bridge heartbeat), so no live session is on "${result.blendPath}". The workspace is on disk and the next blender_* call will launch a UI.`,
+			};
+		}
 		return {
 			...result,
 			openedInLiveBlender: true,

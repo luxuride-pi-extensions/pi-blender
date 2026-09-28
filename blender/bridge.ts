@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
 import { ensureLiveBridgeLaunched, isLiveBridgeAlive } from "../launch.js";
+import { isHeartbeatFresh, readHeartbeatBlendPath } from "./liveness.js";
 import type { BlenderRenderViewSource, BlenderViewportShading, GeometryProbeResult } from "./types.js";
 import {
 	acquireBridgeLock,
@@ -12,6 +13,20 @@ import {
 	LIVE_BRIDGE_POLL_MS,
 	LIVE_BRIDGE_TIMEOUT_MS,
 } from "./utils.js";
+
+/**
+ * How long checkLiveBlenderBlend waits for the heartbeat to name the blend that
+ * was just opened, and how often it re-reads in that window.
+ *
+ * Sized against POLL_INTERVAL_SECONDS (0.5 s, live-bridge.py) rather than
+ * invented: the poller writes its heartbeat at the TOP of each cycle, so the
+ * open a request performed is only visible on the FOLLOWING cycle. Two cycles
+ * plus a poll of slack covers a normally-scheduled one without turning a real
+ * failure into a multi-second stall, and HEARTBEAT_STALE_MS (10 s) is far above
+ * it, so a UI that is merely slow to come up is never misreported as gone.
+ */
+const LIVE_BLEND_PATH_SETTLE_MS = 1_500;
+const HEARTBEAT_RECHECK_MS = 100;
 
 function getLiveBridgePaths(): {
 	bridgeDir: string;
@@ -49,6 +64,66 @@ async function requestLiveBlenderBridge<T>(options: {
 		return await runLockedBridgeRequest<T>(options);
 	} finally {
 		await lock.release().catch(() => undefined);
+	}
+}
+
+/**
+ * Whether the live UI is showing `blendPath` right now, read from the file the
+ * bridge rewrites every poll rather than from a request of its own.
+ *
+ * This exists because a successful bridge response is NOT evidence about the
+ * UI's state. A response only proves that SOME Blender polling this dir ran
+ * the request, and that Blender can be gone — or be one of several — by the
+ * time the caller reads the file. `blender_workspace_init` used to report
+ * openedInLiveBlender: true on the strength of the response alone, which is
+ * how a session that had just lost its UI to a supervisor relaunch was told it
+ * was looking at the workspace blend while the only live window sat on the
+ * bootstrap blank.
+ *
+ * A file read rather than a `get-session-context` request, deliberately: it
+ * needs no lock, cannot queue behind a request that is already holding the
+ * bridge, and adds no window for the UI to die in.
+ *
+ * The wait is load-bearing, not politeness. live-bridge.py's poll_requests()
+ * calls touch_heartbeat() BEFORE it processes the request queue, so the
+ * heartbeat written during the poll that ran the open still names the PREVIOUS
+ * blend. Reading the file the instant the response appears therefore samples
+ * the old state and reports a false mismatch on a perfectly healthy session
+ * that just opened the file. The next poll (POLL_INTERVAL_SECONDS, 0.5 s) fixes
+ * it, so this retries within a few poll cycles before concluding anything.
+ *
+ * This names the poller that is beating NOW, which is the one the next request
+ * will be answered by unless there is more than one alive — with two pollers on
+ * one dir, this is a sample written every 0.5 s, not a guarantee. The check
+ * narrows the claim; it cannot make it absolute.
+ */
+export async function checkLiveBlenderBlend(
+	blendPath: string,
+	options?: { signal?: AbortSignal; settleMs?: number },
+): Promise<{ matches: true } | { matches: false; heartbeatFresh: boolean; liveBlendPath: string | null }> {
+	const bridgeDir = getBlenderBridgeDir();
+	// The poller writes its heartbeat once per POLL_INTERVAL_SECONDS before
+	// draining the queue, so allow a couple of cycles for the open to show up.
+	// Bounded because a UI that never reports the file is exactly the case the
+	// caller needs an answer about; an unbounded wait would turn a wrong claim
+	// into a hang.
+	const settleMs = options?.settleMs ?? LIVE_BLEND_PATH_SETTLE_MS;
+	const deadline = Date.now() + settleMs;
+	for (;;) {
+		// No heartbeat at all is its own answer: there is no live session to
+		// have opened anything, and a stale one means the poller that answered
+		// the request has stopped. Retrying cannot change either, so return at
+		// once rather than sitting out the full settle window.
+		if (!isHeartbeatFresh(bridgeDir)) {
+			return { matches: false, heartbeatFresh: false, liveBlendPath: null };
+		}
+		const liveBlendPath = readHeartbeatBlendPath(bridgeDir) ?? null;
+		// Plain string equality, the same test session-context makes: both
+		// sides are absolute paths, and inventing a normalisation here would
+		// only let the two disagree about the same file.
+		if (liveBlendPath === blendPath) return { matches: true };
+		if (Date.now() >= deadline) return { matches: false, heartbeatFresh: true, liveBlendPath };
+		await delay(HEARTBEAT_RECHECK_MS, options?.signal);
 	}
 }
 
