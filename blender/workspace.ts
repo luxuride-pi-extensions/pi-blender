@@ -403,6 +403,14 @@ export async function ensureWorkspaceInitialized(options: WorkspaceInitOptions):
 		sourceBlendPath: options.sourceBlend ? normalizeUserPath(options.cwd, options.sourceBlend) : undefined,
 		savedViews: {},
 		renderOutputs: [],
+		// Seeded explicitly, not left to the reader's `?? []`. readManifest
+		// normalises a missing array, so a manifest written without the key still
+		// works -- but it is then a manifest whose module history is ABSENT rather
+		// than empty, and any reader that goes around readManifest, any human
+		// reading the file, and any diff of it all see `moduleRuns: null` and
+		// cannot tell "no runs yet" from "the writer lost the field". Same
+		// reasoning as savedViews/renderOutputs right above.
+		moduleRuns: [],
 	};
 	await writeManifest(manifest);
 	await ensureWorkspaceScriptExists(workspacePath);
