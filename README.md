@@ -182,13 +182,16 @@ Start pi in any project dir. The extension:
   collection under a `Studio` prefix, so they are easy to exclude from
   measurements.
 - registers the `/blender` slash command — everything after `/blender`
-  becomes the Blender task and engages the extension
+  becomes the Blender task and engages the extension. The session it engages is
+  a thin **router**, not the manager: it launches the `blender-manager`
+  subagent, which is the top level of the hierarchy and owns the whole build,
+  and the router relays what it returns
 - registers `/blender-exit`, which lifts the manager gate without ending the
   session or touching `model.blend`. Manager mode otherwise lasts until
   `/new`, which breaks a session that interleaves Blender with other work (a
   Unity bridge writing C#). The `blender_*` tools, `/blender` and the skills
   stay available afterwards; only the parent's `write`/`edit`/image restriction
-  ends. A spawned `blender-manager` is gated by *name*, not by this flag, so
+  ends. The `blender-manager` subagent is gated by *name*, not by this flag, so
   it is unaffected either way. The command is **suggested only in manager
   mode**: the instruction to mention it lives in the guidance section, which is
   injected only while `/blender` is active, so a non-Blender session is never
@@ -253,9 +256,9 @@ Start pi in any project dir. The extension:
   because the repair is usually a revert that discards work. Parts that
   genuinely depend on each other are spawned in sequence instead of fanned
   out
-- the bundled subagent definitions are `blender-manager` (a spawnable
-  manager-for-a-whole-build, so a non-Blender session such as a Unity bridge
-  can hand over one self-contained task), `blender-worker` (authors one
+- the bundled subagent definitions are `blender-manager` (the **top level** of
+  a Blender build, entered from `/blender`, which plans and delegates the whole
+  thing), `blender-worker` (authors one
   module), `blender-critic` (read-only render judge, one image budget per
   run), `blender-diagnostician` (read-only geometry measurement),
   `blender-camera-aligner` (blind camera placement that nests its own
@@ -266,16 +269,19 @@ Start pi in any project dir. The extension:
   cross-module contamination) and `blender-merger` (one-shot join of the
   finished parts, which reports "no merge needed" and runs nothing when the
   parts are already coherent). They are
-  **templates** installed by `npm run install:agents`. Both `blender-manager`
-  (matched by name, whether spawned or entered via `/blender`) and the
-  `/blender` parent are gated so they delegate instead of authoring code; the
-  spawned manager is additionally limited to spawning the seven agents above
-  that it is permitted to nest (`blender-worker`, `blender-critic`,
-  `blender-diagnostician`, `blender-finalizer`,
-  `blender-reference-describer`, `blender-script-runner`, `blender-merger`),
-  while the `/blender` parent keeps the full roster because it is the session
-  that can afford the aligner's extra nesting depth. `blender-manager` needs
-  `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own children; set
+  **templates** installed by `npm run install:agents`. The hierarchy is FLAT at
+  the top: `/blender` (the router) → `blender-manager` (depth 1) → its
+  subagents (depth 2) → the aligner's own critics (depth 3). Both the router
+  (matched by the manager-mode flag) and `blender-manager` (matched by name)
+  are gated so they delegate instead of authoring code, and the manager is
+  limited by name to the eight agents it may nest: `blender-worker`,
+  `blender-script-runner`, `blender-merger`, `blender-critic`,
+  `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner` and
+  `blender-reference-describer`. `blender-camera-aligner` is reachable only
+  because of that flat top: the router costs no depth, so the aligner at depth
+  2 still has room for the depth-3 critics it nests itself.
+  `blender-manager` needs `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own
+  children; set
   `{"maxSubagentDepth": 3}` in `~/.pi/agent/extensions/subagent/config.json`
   (config, not the env var: child sessions carry a `runtime.maxDepth` that the
   env var never reaches)

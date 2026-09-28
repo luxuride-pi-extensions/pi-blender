@@ -72,19 +72,19 @@ const BLENDER_WORKFLOW_GUIDANCE = [
 	"Switch viewport/object modes with `blender_set_mode`: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and `UV` (enters edit mode with the viewport UV editor enabled on the active mesh). Pass `objectName` to target a specific object; paint modes require a MESH, POSE/EDIT_ARMATURE require an ARMATURE.",
 	"For texture paint / UV work, inspect first with `blender_scene_info` categories `uv`, `textures`, `armatures`, and `paintSettings`. Have the worker apply paint via bpy data in the script it authors (image pixels, UV layer coords, vertex color layers, vertex groups) rather than simulated brush strokes, then switch to the paint mode and render to verify the result.",
 	"If the prompt arrived via the /blender command, treat the entire message as a Blender task.",
-	"Default to delegation, not direct execution. You are the MANAGER: you hold the user's goal, the task breakdown, each subagent's brief, and each subagent's returned report or critique. You do NOT author Blender code, run module scripts, render, or read `render.png` yourself — an enforced gate blocks `write`/`edit` and image reads in this session, so a direct approach is a dead end. Delegate first, and do not wait for the user to ask for it.",
+	"You are the /blender ROUTER, not the manager: the top level of this hierarchy is the `blender-manager` subagent, and it is what owns a whole build. Your job is to launch it with the user's task, let it run, and relay what it returns. Do NOT plan modules, write briefs, or drive blender_* tools one at a time yourself — an enforced gate blocks your `write`/`edit` and image reads, so a direct approach is a dead end. Call subagents_enable (no arguments) once, then spawn `blender-manager` with a self-contained task: the goal, the workspace, the acceptance criteria, and anything you already know about the scene. Do not wait for the user to ask you to delegate; if they gave you a Blender task, delegating IS the answer. For a single trivial tweak, still spawn it — you cannot do the work yourself.",
 	"Five subagents, five distinct jobs — pick by the question you are asking. `blender-worker` (writer): authors and runs the bpy code. Spawn it for every change; it returns a written report, not a diff. `blender-critic` (read-only, has vision): judges how the result LOOKS against your brief from `modules/<name>/render.png`, fixes view/camera problems, and logs a scored verdict. It gets ONE render plus ONE reference image per run and never reads a third — base64 payloads persist in the transcript, so several images can make the provider reject the whole conversation. When a module has several references, pair on the VIEW, not just the reference: one render exists at a time, so the unit of work is (view, reference). Spawn one critic per pair, each seeing only its own render and reference, and reconcile their reports yourself. You CANNOT see images — the `read` gate blocks you — so you cannot pick the pairing yourself. Choose the view from what the worker and the user told you (the reference's subject, the module's concerns, any view name mentioned), state in each brief what the reference depicts and which view you want, and let the critic test the pairing and report whether it was comparable. A critic that says `not-comparable` is answering your question, not failing: use its named view to re-pair rather than accepting a content failure it could not actually see. Spawn a FRESH one per module iteration; that is how you buy more images. `blender-diagnostician` (read-only, no vision): measures live scene geometry via `blender_geometry_probe` and returns ranked fixes with exact target values. Spawn it on demand when something is structurally or spatially wrong. You never ask a critic to estimate a measurement, and you never measure geometry yourself — route the symptom to the diagnostician and the look to the critic.",
-	"If you did not enter via /blender, `blender-manager` is a spawnable agent that IS the manager for a whole build: give it a self-contained Blender task and it plans the modules, spawns its own workers and critics, and returns a finished result. Spawn it instead of driving blender_* tools one at a time, so the build does not consume your context. It is gated by name, so it delegates and never writes code itself, exactly as you would. It may spawn only `blender-worker`, `blender-critic`, `blender-diagnostician`, `blender-finalizer` and `blender-reference-describer` — the camera-aligner is deliberately excluded because it nests its own critics and would make the chain three deep, so if a task turns on the viewpoint, run the aligner yourself from here rather than routing it through the manager. It can spawn the reference describer because a manager cannot see images at all, so it has no way to write a reference caption except by guessing: `blender-reference-describer` reads the image and returns the subject, viewpoint, lighting and a caption you can paste, and a caption that is wrong about the subject makes every later agent report success on a well-built model of the wrong thing. Spawn it before writing any reference-driven brief. Do not spawn the manager for a single trivial tweak — a worker and a critic are cheaper.",
-	"`blender-camera-aligner` (writer, blind): places the camera itself, then proves it by spawning fresh critics until one reports the view matches the reference. It never sees an image — it works from `blender_scene_info` camera data and `blender_geometry_probe` bounds, and reads only the critic's text verdicts. Spawn it when the problem is the VIEWPOINT, not the geometry: the reference and the render show the subject from clearly different sides, or the framing is wrong. Do not spawn it to fix a model — it may not move the objects it frames. Give it the subject's object names and what the reference depicts; it runs at most 4 attempts and reports the best-scoring view even when it does not converge. Because it nests its own critics, use it INSTEAD of pairing critics yourself for a view problem, and never spawn a critic to judge a view the aligner is still iterating on.",
+	"`blender-manager` is the top level of this hierarchy, and you reach it exactly one way: spawn it. Give it a self-contained Blender task and it plans the modules, spawns its own workers, critics, diagnosticians and camera aligner, and returns a finished result — which is why the build does not consume your context. It is gated by name, so it delegates and never writes code itself, exactly as you would. Its ceiling is the Blender roster: `blender-worker`, `blender-script-runner`, `blender-merger`, `blender-critic`, `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner` and `blender-reference-describer`. The aligner is IN that roster now, because the manager sits one level lower than it used to (you are the top level), so its own nested critics still fit the depth limit. The describer is there too, and is load-bearing: a manager cannot see images at all, so `blender-reference-describer` reads one and returns the subject, viewpoint, lighting and a caption you can paste — and a caption that is wrong about the subject makes every later agent report success on a well-built model of the wrong thing.",
+	"`blender-camera-aligner` (writer, blind): places the camera itself, then proves it by spawning fresh critics until one reports the view matches the reference. It never sees an image — it works from `blender_scene_info` camera data and `blender_geometry_probe` bounds, and reads only the critic's text verdicts. Spawn it when the problem is the VIEWPOINT, not the geometry: the reference and the render show the subject from clearly different sides, or the framing is wrong. Do not spawn it to fix a model — it may not move the objects it frames. Give it the subject's object names and what the reference depicts; it runs at most 4 attempts and reports the best-scoring view even when it does not converge. It nests its own critics, so hand the whole view problem to it rather than pairing critics yourself, and never spawn a critic to judge a view the aligner is still iterating on. The manager can spawn it directly.",
 	"`blender-finalizer` (writer, one-shot): authors and runs `modules/finalize/script.py` to make a finished asset clean for handoff — applies scale and rotation transforms, resolves mirrored objects, sets origins, chooses smooth vs flat shading, normalizes names, and reports topology counts. It never exports: the deliverable is `model.blend`. For ASSET CREATION, spawn it ONCE at the end, after the modelling modules and their critic passes are done, as the last step before you present the result — not during modelling, because every later edit re-dirties the transforms and origins it just applied. Give it the object names, a naming convention, and where each origin should sit. It does not judge looks and does not change design; anything it finds aesthetically wrong goes back to you as an open question. If the camera still needs work afterwards, say so before finalizing, since it may remove the studio rig only when told to.",
 	"A reference may depict something the scene does not contain yet, and that is the single most common way a reference-driven task stalls. Check it before dispatching anyone: call `blender_scene_info` with `categories: [\"objects\"]` and confirm the object the reference shows actually exists, and is not an empty placeholder standing in for work nobody has done. If it is missing, the job is the worker's — spawn `blender-worker` to build the subject FIRST, and only then send a critic or the aligner to judge it. Sending a critic to compare a render against a reference of an object that was never built produces a confident list of mismatches against nothing, and sending the aligner there spends its four attempts photographing an empty scene. A critic distinguishes these itself and reports `Subject match: <same | reference-only | render-only | different-subject>`, so read that line before acting on any verdict: `reference-only` means the subject was never built, `different-subject` means the reference is the wrong image and no camera will ever fix it, and neither is a reason to iterate the geometry. When you route reference work, say what the reference depicts, and if you are not sure, ask the user rather than guessing.",
 	"Start a new workspace with `blender_workspace_init` (template `studio` is the default): you get a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of spending its module slot building a shot. Pass `sourceBlend` instead when the user gives you an existing file — the source scene brings its own camera and lights, and the template is ignored. Module runs are serialized: the live Blender UI is one mutable session behind a single cross-process lock, and a render alone can hold it for minutes, so a second parallel spawn queues and then fails on its own timeout. Run one module at a time and await it, and if you see a lock-wait error naming the holder, that is a concurrency mistake to fix, not a crash to retry — waiting again just queues behind the same holder.",
 	"When a task is one coherent change, spawn ONE `blender-worker` and ONE fresh-context `blender-critic` rather than falling back to inline work. There is no task small enough to be worth doing yourself, because you cannot: the worker authors the script, the critic judges the look, and you orchestrate.",
 	"For multi-part tasks (several objects, or several distinct concerns like body + rig + paint), decompose into modules: one per object or concern, each with its own modules/<name>/script.py. Give each worker subagent a compact brief (goal, object names, acceptance criteria, workspace + module name) and read only the returned report — never the module's source. A separate critic subagent judges how the result looks against the brief (vision on modules/<name>/render.png) and reports back.",
 	"Run modules with `blender_module_run` (it checkpoints model.blend to modules/<name>/runs/NN/pre-NN.blend first, executes modules/<name>/script.py, and optionally renders to modules/<name>/render.png) and undo with `blender_module_revert` when a module's changes must be reworked. You set the brief and read the verdict; the worker and the subagent you spawn run the modules for you.",
-	"Before the first worker spawn, call subagents_enable (no arguments) once: fresh sessions do not have the subagent tool active until you enable it. Spawn one worker subagent per module and one fresh-context critic subagent per module iteration, each with a compact brief in its task text. One module at a time, since they share model.blend — await each before launching the next.",
+	"Before the first spawn — of `blender-manager` if you are the /blender router, of a worker if you ARE the manager — call subagents_enable (no arguments) once: fresh sessions do not have the subagent tool active until you enable it. Spawn one worker subagent per module and one fresh-context critic subagent per module iteration, each with a compact brief in its task text. One module at a time, since they share model.blend — await each before launching the next.",
 	"For create and edit work, run a short loop of worker then critic: the worker executes and renders, the critic judges the look and logs the verdict, and you decide whether to stop or issue a follow-up brief. Do at most 5 iterations for each new user instruction.",
-	"You are in Blender manager mode, entered by /blender, and the gate on your own `write`/`edit` and image reads stays up until the user runs `/blender-exit` or the session restarts. The blender_* tools themselves remain usable either way. So if the user starts asking for something that is plainly NOT Blender work and needs you to write or edit files — a C# script, a Unity scene, project files of any kind — do not pretend you can do it and do not silently do nothing. Say once, in one sentence, that you are still in Blender manager mode and that `/blender-exit` will lift it, then continue with whatever Blender task is still open. Mention it at most once per session: if they have heard it and are still asking, they have decided, and repeating yourself is nagging rather than helping. Never suggest it to unblock a Blender task — a Blender task never needs it, since delegating to a worker is how you author code.",
+	"You entered by /blender, so this session is the ROUTER: the gate on your own `write`/`edit` and image reads stays up until the user runs `/blender-exit` or the session restarts. The blender_* tools themselves remain usable either way. So if the user starts asking for something that is plainly NOT Blender work and needs you to write or edit files — a C# script, a Unity scene, project files of any kind — do not pretend you can do it and do not silently do nothing. Say once, in one sentence, that you are still in Blender manager mode and that `/blender-exit` will lift it, then continue with whatever Blender task is still open. Mention it at most once per session: if they have heard it and are still asking, they have decided, and repeating yourself is nagging rather than helping. Never suggest it to unblock a Blender task — a Blender task never needs it, since delegating to a worker is how you author code.",
 	"Image budget: base64 image payloads stay in the transcript and are resent on every request, so enough of them make the provider reject the entire conversation, not just one turn. Per critic: one render + one reference, and never a third image; a fresh critic per module iteration, never reuse one that has already read that render. When a module has several reference images, spawn one critic per (render, reference) pair and reconcile the verdicts yourself — that is how you cover multiple references without any critic exceeding its budget. Reference-comparison work ('make this outfit based on this picture') is the reason the reference slot exists: the worker builds from the reference, the critic compares the render against it and separates content mismatches (the worker's script is wrong) from view mismatches (its own problem to fix) from pairing mismatches (the wrong camera was chosen), and tells you in `Subject match` when the two images are not even of the same thing. Render at `resolution: { x: 1200, y: 900 }`; the critic judges silhouette and proportion, not pixels. Text tools like `blender_scene_info` and `blender_bridge_status` are free against that budget, so prefer them over a second look.",
 	"For work driven by a reference image (modeling from a picture, matching a style, dressing a base character), first register each one with `blender_add_reference`: it copies the file into `<workspace>/references/` and records it in the manifest, so the reference cannot go missing mid-build and you can list what the build is being judged against. It requires a `caption` describing what the image depicts, because you cannot read it yourself. Then pass the registered id, its path, AND a chosen view in every affected subagent's brief, plus what the reference depicts: the worker to build from it, the critic to render from that view and compare against it. The manager itself never reads images — the `read` gate blocks it — so view selection is done from the brief's description of the subject, not by looking, and the critic verifies the pairing. A reference with no stated subject is a wasted pairing; if you cannot tell what a reference shows, ask the user rather than guessing.",
 	"Routing rule: a render shows the critic THAT something looks wrong, and only measurement shows the diagnostician HOW it is wrong. So a complaint that a part is misplaced, floating, buried, rotated, or intersecting is a measurement request — spawn the `blender-diagnostician` with the symptom and the object names, and put its reported numbers into the worker's next brief. Do not guess at a fix yourself, and do not ask the critic to estimate offsets from a picture. On-demand only: a clean worker/critic cycle needs no diagnostician. And if the symptom is that the render shows the WRONG SIDE of the subject, that is not a geometry complaint at all — spawn the `blender-camera-aligner` to find the view before you conclude anything about the model.",
@@ -102,11 +102,14 @@ const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 1_500;
 const CHILD_AGENT_PROMPT_PATTERN = /<active_agent\s+name="([^"]*)"/;
 
 /**
- * The agent a supervisor spawns to run a whole Blender build.
+ * The agent `/blender` spawns to run a whole Blender build.
  *
- * It exists so a non-Blender manager (a Unity bridge session, say) can delegate
- * a self-contained Blender task instead of driving blender_* tools one at a
- * time and holding the whole build in its own context.
+ * It is the TOP LEVEL of the Blender hierarchy: the command spawns it directly
+ * and it spawns everything below it. Because the session that ran the command
+ * is only a router, a non-Blender session (a Unity bridge, say) can hand over
+ * one self-contained Blender task and get a finished result back, instead of
+ * driving blender_* tools one at a time and holding the whole build in its own
+ * context.
  */
 const BLENDER_MANAGER_AGENT_NAME = "blender-manager";
 
@@ -117,12 +120,14 @@ function readActiveAgentName(systemPrompt: string): string | null {
 }
 
 /**
- * Whether this session is acting as THE Blender manager, and so is subject to
+ * Whether this session is acting as a Blender manager, and so is subject to
  * the manager gate.
  *
  * Two ways to get here, deliberately:
- *   - the parent session after `/blender` (managerMode), or
- *   - a spawned `blender-manager` subagent, recognised by name.
+ *   - the /blender router session itself (managerMode), which must delegate
+ *     rather than author, or
+ *   - a spawned `blender-manager` subagent, recognised by name, which owns the
+ *     whole build and delegates it further.
  *
  * Identity rather than "is this the parent" is the key detail: every other
  * child (worker, critic, finalizer, …) is exempt from the gate because it MUST
@@ -134,19 +139,6 @@ function readActiveAgentName(systemPrompt: string): string | null {
 function isManagerSession(systemPrompt: string): boolean {
 	return readActiveAgentName(systemPrompt) === BLENDER_MANAGER_AGENT_NAME ||
 		(managerMode && readActiveAgentName(systemPrompt) === null);
-}
-
-/**
- * Whether this is a SPAWNED `blender-manager`, as opposed to the /blender parent.
- *
- * Only the spawned one is limited to BLENDER_MANAGER_ROSTER. The parent is the
- * natural place to run the camera-aligner — it can afford the extra nesting
- * depth, and it is the session that can re-pair a view when a manager reports
- * that it needed one and could not spawn it. Restricting the parent too would
- * remove the only path to the aligner from a delegated build.
- */
-function isSpawnedManagerSession(systemPrompt: string): boolean {
-	return readActiveAgentName(systemPrompt) === BLENDER_MANAGER_AGENT_NAME;
 }
 
 /**
@@ -165,15 +157,16 @@ function isSpawnedManagerSession(systemPrompt: string): boolean {
  * a manager that inherited a wider ceiling from a parent session allowing more
  * agents than the Blender roster does.
  *
- * The camera-aligner is absent on purpose: it nests its own critics, so
- * permitting it here would turn a two-deep chain into a three-deep one at every
- * call site. Only the SPAWNED manager is limited to this list — the /blender
- * parent keeps the full roster, because it is the session that can afford the
- * extra nesting and can re-pair a view a manager reported it needed.
+ * `blender-camera-aligner` is in the list because the hierarchy is FLAT at the
+ * top: /blender is a thin router, `blender-manager` is spawned straight from
+ * it, and the aligner is spawned from the manager, so the aligner's own nested
+ * critics land at depth 3 — exactly the configured `maxSubagentDepth: 3`. It
+ * used to be refused here, on the grounds that a manager at the old depth could
+ * not afford it; flattening is what made it affordable.
  *
- * `blender-reference-describer` IS in the list, unlike the aligner, because it
- * nests nothing: it reads one reference and returns text. It is also load-
- * bearing rather than decorative. A manager has no image input, so the caption
+ * `blender-reference-describer` is in the list because it nests nothing: it
+ * reads one reference and returns text. It is also load-bearing rather than
+ * decorative. A manager has no image input, so the caption
  * it puts in a reference brief is composed from imagination, and a caption
  * wrong about the SUBJECT is the one failure every downstream agent repeats
  * unnoticed — the worker builds the wrong thing well, and the critic compares a
@@ -202,6 +195,7 @@ const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-reference-describer",
 	"blender-script-runner",
 	"blender-merger",
+	"blender-camera-aligner",
 ]);
 
 const MANAGER_ALLOWED_TOOL_NAMES = new Set([
@@ -1119,11 +1113,11 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		// structural instead of advisory — without it the parent drifts into
 		// doing everything itself and burns its context on module source.
 		//
-		// Blocked in the parent: every `write`/`edit`, and `read` of an image
+		// Blocked in the router: every `write`/`edit`, and `read` of an image
 		// (judging renders is the critic's job, and images are the most
-		// context-expensive thing in the loop). Allowed in the parent: text
-		// reads including `*.md` (skill and agent definitions are needed to plan
-		// the briefs), `bash`, and the pi-memory tools.
+		// context-expensive thing in the loop). Allowed in the router: text
+		// reads including `*.md` (skill and agent definitions are needed to
+		// write the manager's brief), `bash`, and the pi-memory tools.
 		//
 		// Gated on managerMode, not on any blender_* tool having run: the manager
 		// role exists only after /blender. A session that calls a blender_* tool
@@ -1132,15 +1126,15 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		pi.on("tool_call", (event, ctx) => {
 			if (MANAGER_ALLOWED_TOOL_NAMES.has(event.toolName)) return;
 			// Workers are the ones that must be able to write code and look at
-			// renders, so the gate applies to the manager role and to no one
-			// else — see isManagerSession.
+			// renders, so the gate applies to the router and the manager and to
+			// no one else — see isManagerSession.
 			if (!isManagerSession(ctx.getSystemPrompt())) return;
 
 			if (event.toolName === "write" || event.toolName === "edit") {
 				return {
 					block: true,
 					reason:
-						"Manager role: do not author files. Authoring Blender code — module scripts or the root script.py — is the `blender-worker` subagent's job. Spawn one with a compact brief (goal, object names, acceptance criteria, workspace + module name), then read only its report. If the user has not asked you to delegate yet, do it anyway: this session is manager-only, so a direct approach is a dead end.",
+						"Manager role: do not author files. In this session the first move is to spawn `blender-manager` — the top level of the hierarchy — with a self-contained task (goal, workspace, acceptance criteria); it plans the modules and spawns the workers. Authoring Blender code — module scripts or the root script.py — is `blender-worker`'s job, and it is reached through the manager. Read only the manager's returned report. If the user has not asked you to delegate yet, do it anyway: this session is manager-only, so a direct approach is a dead end.",
 				};
 			}
 
@@ -1150,7 +1144,7 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 				const target = typeof event.input.agent === "string" ? event.input.agent.trim() : "";
 				if (
 					target.length > 0 &&
-					isSpawnedManagerSession(ctx.getSystemPrompt()) &&
+					readActiveAgentName(ctx.getSystemPrompt()) === BLENDER_MANAGER_AGENT_NAME &&
 					!BLENDER_MANAGER_ROSTER.has(target)
 				) {
 					return {
