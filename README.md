@@ -9,7 +9,7 @@ stock pi, with fixes for a **flatpak** Blender install.
 
 ```
 index.ts            extension entry (13 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
-launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor)
+launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
 blender/            module from packages/coding-agent/src/blender/ (+ set-mode, paint scene-info categories, module run/revert)
@@ -73,6 +73,17 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `live-bridge.py` claims each request with an atomic rename before
    executing it, so even two pollers can never run one request twice.
    `VIBE_BLENDER_NO_BLENDER=1` still opts out entirely.
+   The 15 s **liveness supervisor that restarts a closed UI runs only in the
+   root session** (`launch.ts` `startBridgeSupervisor`, gated on
+   `PI_SUBAGENT_CHILD` — the same discriminator the shutdown guard in
+   `index.ts` uses). A subagent child never supervises: it does not own the
+   UI's lifetime, and a long-lived async runner process that outlives its
+   session would otherwise keep respawning a stray window on the blank
+   bootstrap blend, surviving every close, with the reaper unable to help
+   because its owner pid is genuinely alive. If a child launched the *first*
+   UI of a session and you then close it, nothing reopens it and the next
+   `blender_*` call reports a dead bridge — a reported failure beats a
+   silently respawned empty window.
 6. **Blank scene on launch** — the UI launch runs `blank-bootstrap.py`
    first: it strips the default startup Cube/Camera/Light and saves the
    result to `$XDG_CACHE_HOME/vibe-blender/blank/<instance-id>.blend`

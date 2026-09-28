@@ -105,7 +105,7 @@ All eight of these are yours to spawn, and no others.
 - `blender-camera-aligner` (no vision, has mutation): matches the CAMERA to a
   registered reference image. Spawn it when the task is "make this render look
   like that picture" — the geometry is already right and only the viewpoint is
-  wrong. It runs its own convergence loop (up to 4 attempts, one fresh critic
+  wrong. It runs its own convergence loop (up to 3 attempts, one fresh critic
   each) and you do NOT spawn those critics yourself; see below. Spawn it
   directly: the hierarchy is flat at the top, so you sit at depth 0 and the
   aligner's own critics land at depth 2, inside the configured
@@ -156,6 +156,30 @@ So the shape of a multi-part build is:
 When a build is a SINGLE part, keep the old shape — one worker, one critic — and
 do not add a runner for a queue of one.
 
+### Fan-out width is a direct multiplier on total cost
+
+Every worker you spawn is a full context of its own, and it is paid for whether
+or not it succeeds. Latency is the thing fan-out actually buys, and it is real
+— but tokens are what a run spends, and N workers cost N contexts plus N
+briefs. Two workers for a job two workers can do is the win. Five for a job
+three can do is a 67% overhead you chose.
+
+So before fanning out, count honestly and prefer the narrower decomposition:
+
+- Is this really four parts, or two parts plus a merge, plus a cleanup? A
+  **merger is one cheap module; an extra worker is not.** "Body + head + hair
+  + finishing" is usually body + head, merged, then finalized — three workers,
+  not four.
+- Do any of these parts share a decision? If part B only makes sense once you
+  have seen part A come out right, that is not fan-out, it is sequence. Fan out
+  only what is genuinely independent.
+- Four concurrent workers already saturate the point of concurrency. Past four
+  you are paying linear cost for no wall-clock gain, because execution is
+  serialized by the runner anyway.
+
+If the honest count is one or two, run one or two. A single worker that owns the
+whole model is not a failure of architecture.
+
 ### Brief each worker to its own part
 
 Every worker brief must state, explicitly:
@@ -163,7 +187,18 @@ Every worker brief must state, explicitly:
 - the **exact object names it owns**, and
 - that it must **not modify, move, rename or delete anything else**, and
 - the **object names of the sibling parts it must expect to be absent for now**,
-  when its part depends on one existing.
+  when its part depends on one existing, and
+- the **exact `categories` list** for any `blender_scene_info` call it should
+  make — name the list in the brief, e.g. `categories: ["objects"]` or
+  `["objects", "materials"]`. A worker left to choose will sometimes omit
+  `categories` entirely, and the unfiltered payload on a real workspace is
+  thousands of tokens on every call for data it does not need. Deciding once,
+  here, is cheaper than letting six workers each discover it.
+
+The brief is the only thing a worker knows. Every fact you omit is a fact it
+spends turns rediscovering, and it rediscovers them in a transcript you never
+see. A two-line brief that pins the object names and the categories list is the
+cheapest thing you will write all run.
 
 The last point is what prevents a fan-out from deadlocking itself: if the head
 worker's brief assumes the body already exists, it will fail, and the fix is not
@@ -184,6 +219,28 @@ and logs a verdict, but it cannot move a camera — so a worker/critic loop arou
 a camera change cannot converge; it just re-renders the same wrong view. The
 aligner is the only node that can execute the change, and it proves each attempt
 with its own fresh critic. That pairing is why it is in this list.
+
+### Run the aligner once, and only once the geometry is right
+
+The aligner is the most expensive single thing you can spawn: each attempt is a
+render plus a fresh nested critic reading a reference image, and a run that uses
+its whole budget is four of those. It is also the most wasteful when the subject
+is still wrong, because it converges a camera onto a model that is about to
+change — and then every subsequent critic judges a moving target from a framing
+that was tuned for a different one.
+
+So gate it:
+
+- **Do not spawn it while `[object]` issues are still open.** Its own docs make
+  this explicit: it stops when the subject is missing, and there is no reason
+  to let it burn attempts converging onto geometry a worker is about to change.
+- **Spawn it once geometry has passed**, then reuse its view name for every
+  later critic on that subject — and carry it into every subsequent brief. A
+  second aligner pass on the same subject is the one thing you must not do; the
+  scene moved, not the problem.
+- **A `[view]` issue on a later render is not a reason to re-align.** The view
+  already exists. Send it back to the worker as a framing note, or re-pair the
+  critic with the view the aligner returned.
 
 When a task turns on the viewpoint, you cannot run the pass yourself, but you can
 run the agent that can: gather what it needs — register the reference, get the
@@ -273,14 +330,31 @@ from a critic.
 ## Routing rule
 
 A render shows the critic THAT something looks wrong; only measurement shows
-the diagnostician HOW. A misplaced, floating, buried, rotated or intersecting
-part is a **measurement** request — spawn `blender-diagnostician` with the
-symptom and the object names, and it will probe the live scene with
-`blender_geometry_probe`, which beats a picture every time. You never probe
-yourself: you ask for the measurement. Then put its reported numbers into the
-worker's next brief. Never guess a fix yourself and never ask a critic to estimate an
-offset from a picture. On demand only: a clean worker/critic cycle needs no
-diagnostician.
+the diagnostician HOW. Never ask a critic to estimate an offset from a picture,
+and never guess a fix yourself.
+
+**Try the worker first.** `blender-worker` holds `blender_geometry_probe`, which
+is read-only and returns exactly the numbers a placement complaint needs —
+world-space bounds, each part's own thin axis and how far off it is, per-axis
+bounding-box overlap, `unappliedScale`. A part that is too big, rotated, floating
+or buried is very often a number the worker simply did not have, and one probe
+call inside the existing worker context costs a fraction of spawning a
+diagnostician to produce the same figures as a separate report.
+
+So the default for a placement complaint is: put the symptom and the two object
+names in the worker's next brief and let it measure and fix in one pass.
+
+**Spawn `blender-diagnostician` when measurement alone is the answer** — because
+the part is right and something else is wrong, or because you need to choose
+*which* of two objects is the reference, or because the worker's own measurement
+disagreed with the render twice. The diagnostician is a specialist whose value
+is that it reasons from measured geometry instead of a picture; that value only
+exceeds its cost when the fix is not obviously the worker's to make. You never
+probe yourself: you either ask the worker to measure as part of its fix, or you
+ask the diagnostician for the measurement. Either way, put the resulting numbers
+into the next brief as values.
+
+On demand only: a clean worker/critic cycle needs neither.
 
 The exception is a render showing the WRONG SIDE of the subject, which is not a
 geometry complaint at all — that is the aligner's job, above.
@@ -340,7 +414,11 @@ diagnostician's numbers are the thing to spend.
    measured.
 5. Spawn a fresh critic on the render, read the verdict, decide: accept, issue a
    follow-up brief, or spawn the diagnostician. At most 5 iterations per user
-   instruction.
+   instruction. **If two consecutive iterations return the same failure, stop
+   iterating and diagnose** — a critic repeating one verdict is measuring a
+   condition your next brief did not change, and a third identical brief buys
+   the same picture again. Read the two verdicts side by side: they are the
+   cheapest diagnostic you will ever get.
 6. If the parts need merging, spawn `blender-merger` once. If they do not, do
    not spawn it — a merge nobody asked for is a destructive change to a
    finished build.

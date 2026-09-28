@@ -9,7 +9,10 @@ tools: read, blender_module_run, blender_scene_info, blender_geometry_probe, ble
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 acceptanceRole: writer
-thinking: high
+# Medium, not high. Your loop is mechanical: run, diff object names against the
+# declared `owns` list, report. The only judgment is whether a diff is a
+# violation, and that is a lookup, not a search.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
@@ -68,6 +71,11 @@ run, read the scene again and diff it against the entry's `owns` list. Report
 any object that changed, appeared, or disappeared that was not in `owns`. This
 is a measurement, not a judgement call: you report what the diff shows, the
 manager decides what it means.
+
+If a run produces the same exit code and the same last stderr line as the run
+before it, stop and report it as a repeated failure instead of continuing the
+queue: identical output means the state the script depends on did not change, so
+another run of the same script is the same tokens for the same answer.
 
 If a run contaminates another module, do not try to repair it. Report the
 violation with the exact object names and let the manager decide, because the

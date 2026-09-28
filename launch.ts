@@ -362,9 +362,30 @@ export function ensureLiveBridgeLaunched(): void {
  * bridge dir — the duplicate-window race the request claim in live-bridge.py
  * exists to make harmless, but harmless is not the same as tidy. A tick that
  * finds the bridge busy simply waits for the next one.
+ *
+ * A SUBAGENT child process never supervises, and this is the fix for "close the
+ * stray Blender and it comes back". A child does not own the UI's lifetime:
+ * index.ts's session_shutdown already exempts every child from shutting the
+ * shared UI down, because a worker whose run simply finished would otherwise
+ * destroy the manager's window. A child that ALSO supervises is the same
+ * asymmetry pointing the other way — it keeps a UI alive (and keeps respawning
+ * it) for a session that may have moved on, and it has no way to know, because
+ * a long-lived async runner process outlives the turns that launched it. The
+ * respawn lands on the per-instance blank bootstrap blend, so what comes back
+ * is a window holding nothing the user cares about, and it survives every
+ * subsequent close. The reaper cannot clean it up either: the owner pid is
+ * genuinely still running, which is the only thing the reaper trusts.
+ *
+ * The consequence is deliberate and bounded: if a child launched the FIRST UI
+ * of a session and the user then closes it, nothing relaunches it, because the
+ * root process never launched one and has no supervisor of its own to run. The
+ * next blender_* call reports a dead bridge instead of quietly opening a fresh
+ * empty window over a model.blend the user was looking at, which is the better
+ * of the two failures.
  */
 function startBridgeSupervisor(): void {
 	if (bridgeSupervisor) return;
+	if (isSubagentChildProcess()) return;
 	bridgeSupervisor = setInterval(() => {
 		if (isLiveBridgeAlive()) return;
 		// Never resurrect a UI into a request someone is still waiting on.
@@ -379,6 +400,19 @@ function startBridgeSupervisor(): void {
 	}, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
 	// Never hold the pi process open for a supervisor.
 	bridgeSupervisor.unref?.();
+}
+
+/**
+ * Whether this process hosts subagent child sessions rather than a user session.
+ *
+ * pi-subagents sets PI_SUBAGENT_CHILD=1 in the async runner that backs every
+ * spawned subagent (src/runs/background/subagent-runner.js). The same value is
+ * already the discriminator for the shutdown guard in index.ts, and it is read
+ * the same way here on purpose: one fact, one test, so the process that refuses
+ * to close the UI is exactly the process that refuses to reopen it.
+ */
+function isSubagentChildProcess(): boolean {
+	return process.env.PI_SUBAGENT_CHILD === "1";
 }
 
 /**

@@ -9,7 +9,9 @@ tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scen
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 acceptanceRole: writer
-thinking: high
+# Medium, not high. You run once at the end, applying a fixed cleanup checklist
+# to a scene that is already built. There is no search here to think through.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

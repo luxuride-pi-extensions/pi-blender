@@ -9,7 +9,10 @@ tools: read, blender_geometry_probe, blender_scene_info, blender_session_context
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 acceptanceRole: read-only
-thinking: high
+# Medium, not high. You are reading a fixed set of probe numbers and picking
+# which correction outranks which. There is no search to reason through, and a
+# worker waiting on you pays for every token you emit.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

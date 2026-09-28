@@ -6,7 +6,10 @@ tools: read, ls, find, contact_supervisor
 # the whole job -- so it declares no provider and there is nothing for the
 # installer to stamp.
 acceptanceRole: read-only
-thinking: high
+# Medium, not high. You read exactly one image and write a description. Accuracy
+# here comes from describing carefully what you see, not from reasoning longer
+# about it, and the whole agent's cost is one image payload.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

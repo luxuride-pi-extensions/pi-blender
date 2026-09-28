@@ -32,6 +32,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkTemplate } from "./agent-template-checks.mjs";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE_DIR = join(REPO_ROOT, "blender", "agents");
 
@@ -96,6 +98,28 @@ function substitute(source, replacements) {
  */
 const retired = ["blender-manager.md"];
 
+/**
+ * Files that live in this directory and are prompts, not agent definitions.
+ *
+ * They are excluded by name rather than retired afterwards, because the glob
+ * below installs EVERY *.md it finds. An agent definition is a spawnable
+ * prompt; a prompt with no `name:` in its frontmatter is still a file a spawn
+ * could try to load, so the cost of installing one by mistake is a nameless
+ * agent rather than a harmless extra file.
+ *
+ * blender-manager.md is also in `retired` because an old copy may already be
+ * installed from before it became a prompt, and add-only would leave it.
+ */
+const notAgents = ["exchange.md"];
+
+/**
+ * Whether an extension directory pi can actually load is resolvable, which is
+ * what the shared checks ask about when a template names a `blender_*` tool.
+ */
+function extensionIsResolvable(extension) {
+	return existsSync(join(homedir(), ".pi", "agent", "extensions", extension));
+}
+
 const options = parseArgs(process.argv.slice(2));
 const extensionDir = resolveExtensionDir(options);
 const todoEntry = resolveTodoEntry(options);
@@ -105,7 +129,7 @@ const replacements = [
 ];
 
 const sources = readdirSync(SOURCE_DIR)
-	.filter((name) => name.endsWith(".md") && !retired.includes(name))
+	.filter((name) => name.endsWith(".md") && !retired.includes(name) && !notAgents.includes(name))
 	.sort();
 
 if (sources.length === 0) {
@@ -114,9 +138,19 @@ if (sources.length === 0) {
 }
 
 let drifted = 0;
+let warned = 0;
 for (const name of sources) {
 	const target = join(options.out, name);
-	const expected = substitute(readFileSync(join(SOURCE_DIR, name), "utf8"), replacements);
+	const original = readFileSync(join(SOURCE_DIR, name), "utf8");
+	const expected = substitute(original, replacements);
+
+	// Checks run on the STAMPED text, because that is what gets installed: a
+	// template naming a tool its tools: omits produces a child that is handed
+	// an uncallable tool and never says so.
+	for (const problem of checkTemplate(expected, { isResolvable: extensionIsResolvable })) {
+		console.error(`WARNING ${name}: ${problem}`);
+		warned += 1;
+	}
 
 	if (options.check) {
 		if (!existsSync(target)) {
@@ -161,6 +195,7 @@ if (options.check) {
 		process.exit(1);
 	}
 	console.log(`\nAll ${sources.length} agent definitions are in sync.`);
+	if (warned > 0) console.log(`${warned} template problem(s) reported above.`);
 } else {
 	console.log(`\nInstalled ${sources.length} agent definition(s) into ${options.out}`);
 	console.log(`  extension: ${extensionDir}`);

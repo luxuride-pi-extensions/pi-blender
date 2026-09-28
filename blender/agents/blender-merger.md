@@ -9,7 +9,11 @@ tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scen
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 acceptanceRole: writer
-thinking: high
+# Medium, not high. You run once, on parts that already exist, and your job is
+# join/weld/bind — mechanical work against named objects. The judgment that
+# matters (what to merge, whether a merge is needed at all) was already spent by
+# the manager in deciding to spawn you.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true

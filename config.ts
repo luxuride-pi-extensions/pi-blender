@@ -41,6 +41,23 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as localCore from "./manager-core.local.js";
+import { loadManagerCoreOrLocal } from "./manager-core.js";
+
+/**
+ * The shared manager core, or this extension's own copy of it.
+ *
+ * Resolved once at module load so every path in this file and every call site
+ * in index.ts agree on one definition of "where pi keeps things". See
+ * manager-core.ts for the resolution order.
+ */
+const core = loadManagerCoreOrLocal(localCore);
+
+/** Read a prompt file, or a sentence naming what failed and where. */
+function readPromptFile(path: string, role: string): string {
+	return core.readPromptFile(path, role);
+}
+
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
 export const APP_NAME = "vibe-blender";
@@ -159,15 +176,35 @@ export function getBundledBlankBootstrapPath(): string {
  * worse than one that reports the prompt is gone.
  */
 export function getManagerPrompt(): string {
+	const manager = readPromptFile(join(EXTENSION_DIR, "blender", "agents", "blender-manager.md"), "Blender manager");
+	return `${manager}\n\n${readExchangeContract()}`;
+}
+
+/**
+ * The brief skeleton and stop conditions, appended to the manager prompt.
+ *
+ * Read separately rather than pasted into blender-manager.md so the exchange
+ * shape can be reviewed and edited as one artifact. It holds the BRIEF (which
+ * the manager writes) and the STOP CONDITIONS (which both ends obey), but not
+ * the report shapes: a child only ever has its own agent definition in context,
+ * so a report block kept here would be a second copy nothing reads.
+ *
+ * A missing file degrades to a one-line rule rather than failing the whole
+ * prompt. The manager is still correct without it — it just improvises brief
+ * shape, and the stop conditions are the part worth warning about, because
+ * their absence is what produced the 44-turn run that repeated one traceback
+ * four times. This file is read WITHOUT stripping frontmatter: it is not an
+ * agent template, and the shared reader strips frontmatter from everything.
+ */
+function readExchangeContract(): string {
 	try {
-		const source = readFileSync(join(EXTENSION_DIR, "blender", "agents", "blender-manager.md"), "utf8");
-		return source.replace(/^---[\s\S]*?\n---\n/, "").trim();
+		return readFileSync(join(EXTENSION_DIR, "blender", "agents", "exchange.md"), "utf8").trim();
 	} catch (error) {
 		return (
-			"The manager prompt could not be read from blender/agents/blender-manager.md, so this " +
-			`session has no detailed manager instructions (${error instanceof Error ? error.message : String(error)}). ` +
-			"Say so plainly and ask the user to check that file exists; do not fall back to guessing at " +
-			"which agent owns which work."
+			"The exchange contract at blender/agents/exchange.md could not be read " +
+			`(${error instanceof Error ? error.message : String(error)}), so briefs are improvised. ` +
+			"Still hold the stop conditions: a second byte-identical error or a second identical critic " +
+			"verdict means stop and report, never iterate again."
 		);
 	}
 }

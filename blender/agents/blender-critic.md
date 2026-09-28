@@ -9,7 +9,11 @@ tools: read, blender_scene_info, blender_log_critique, contact_supervisor, blend
 # installed it; re-point it if you move the extension.
 extensions: /path/to/pi-vibe-blender
 acceptanceRole: read-only
-thinking: high
+# Medium, not high. The critic reads exactly one render and one reference and
+# reports a verdict — there is no search to think through, and the image
+# payloads it carries are the dominant cost, not the reasoning. Fresh critics
+# are how you buy more scrutiny; high thinking on each of them multiplies that.
+thinking: medium
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: true
@@ -101,7 +105,7 @@ Say which kind each issue is, because they go to different people. Do not report
 1. Read `modules/<name>/render.png` with the `read` tool so you actually see the image. If the file is missing or unreadable, say so and return FAIL with reason "no render". This is your one render.
 2. If your brief names a reference image, read it once. This is your one reference.
 3. Compare what you see against the acceptance criteria only. Ignore anything the brief does not ask for.
-4. Optionally call `blender_scene_info { workspace, categories: [...] }` to confirm facts you cannot see in the render (object names, counts, materials, UV/texture/armature/paint data). Facts from scene info are evidence; the render is the primary judgment. `blender_scene_info` and `blender_bridge_status` cost nothing against the image budget, so prefer them over a second look.
+4. Optionally call `blender_scene_info { workspace, categories: [...] }` to confirm facts you cannot see in the render (object names, counts, materials, UV/texture/armature/paint data). Facts from scene info are evidence; the render is the primary judgment. `blender_scene_info` and `blender_bridge_status` cost nothing against the image budget, so prefer them over a second look. Always pass a narrow `categories` list — omitting it returns the whole scene payload for information you almost never need.
 5. Classify every issue as one of:
    - **object problem** — geometry, proportions, materials, missing/extra parts, artifacts. The worker must fix the script.
    - **view problem** — framing, coverage, or perspective hides or distorts the subject. You cannot fix it (see the image-budget section): report it as `[view]` with the view you want and the concrete change in `nextAction`, and let the spawner execute it. Do not call `blender_save_view` to adjust a camera, and do not spend a re-render on a view you may not read.
