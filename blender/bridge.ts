@@ -301,6 +301,12 @@ export async function requestLiveBlenderRender(options: {
 }): Promise<{
 	outputPath: string;
 	cameraName: string | null;
+	/**
+	 * Present only on the background path, which sets the scene engine and
+	 * reports which enum member it landed on. A live render goes through the
+	 * viewport and never touches the engine, so it is absent.
+	 */
+	resolvedEngine?: string;
 	resolution: { x: number; y: number; percentage: number };
 }> {
 	return await requestLiveBlenderBridge({

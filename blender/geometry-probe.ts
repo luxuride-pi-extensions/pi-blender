@@ -17,6 +17,17 @@ import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
  * judgement call: gap distance, penetration depth, thin-axis angle and ring
  * roundness are the facts a fix should be argued from.
  */
+/**
+ * How many plain-bridge round-trips a probe may take by default.
+ *
+ * A probe is the only read the extension does that scales with scene size:
+ * `bounds`/`axis` sample vertices, and `topology` builds a full bmesh per mesh.
+ * 4x the 30s round-trip is 120s — enough for a heavy scene, and exactly the
+ * cold-start budget, so a dead bridge still reports at the same time a cold
+ * one would have come up.
+ */
+const PROBE_TIMEOUT_MULTIPLIER = 4;
+
 export async function blenderGeometryProbe(options: GeometryProbeOptions): Promise<GeometryProbeWorkspaceResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const bridgeResult = await requestLiveBlenderGeometryProbe({
@@ -29,7 +40,15 @@ export async function blenderGeometryProbe(options: GeometryProbeOptions): Promi
 		// A probe on a heavy scene builds BVH trees for every sampled mesh, so
 		// give it more headroom than a plain bridge round-trip, but stay far
 		// below the cold-start budget so a dead bridge still reports quickly.
-		timeoutMs: options.signal ? undefined : (options.timeoutMs ?? LIVE_BRIDGE_TIMEOUT_MS * 4),
+		//
+		// The caller's explicit timeoutMs always wins, INCLUDING when a signal is
+		// present. This used to read `options.signal ? undefined : (…)`, which
+		// meant the headroom applied to nobody: every tool call carries a signal,
+		// so the probe always fell back to the 30s LIVE_BRIDGE_TIMEOUT_MS the
+		// comment above is trying to avoid, and a `topology` check (one bmesh
+		// pass per mesh) on a heavy scene timed out while holding the global
+		// bridge lock.
+		timeoutMs: options.timeoutMs ?? LIVE_BRIDGE_TIMEOUT_MS * PROBE_TIMEOUT_MULTIPLIER,
 	});
 
 	const warnings: string[] = [];

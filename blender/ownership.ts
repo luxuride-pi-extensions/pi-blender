@@ -72,6 +72,24 @@ export async function classifyWorkspaceOwner(manifest: BlenderWorkspaceManifest)
 	if (!owner || toPid(owner.pid) === null) return "unknown";
 	if (owner.instanceId === getBlenderInstanceId()) return "self";
 
+	// A PINNED bridge dir has no per-instance subdirs, so the instance.json
+	// lookup below is not merely unhelpful, it is actively wrong: the root IS
+	// the bridge dir, `join(root, owner.instanceId)` names a directory nothing
+	// ever creates, the read always fails, and every foreign claim therefore
+	// classifies as "dead" and gets taken over silently. That failed OPEN on the
+	// exact hazard this file exists to prevent: with PI_BLENDER_BRIDGE_DIR set,
+	// two pi processes get two Blender UIs on one model.blend and overwrite each
+	// other, and the guard reported no conflict.
+	//
+	// Under an override the claim's own pid is the strongest evidence
+	// available, because there is no separate "who is using this dir now"
+	// record to consult. A claim written by a process that is still running is
+	// a live peer; nothing else is knowable, and refusing on a dead pid would
+	// wedge the workspace behind a crashed session.
+	if (hasBridgeDirOverride()) {
+		return pidIsRunning(owner.pid) ? "live" : "dead";
+	}
+
 	const bridgeDir = join(getBlenderBridgeRootDir(), owner.instanceId);
 	let recordedPid: number | null = null;
 	try {
@@ -126,7 +144,10 @@ export async function describeLiveOwner(manifest: BlenderWorkspaceManifest): Pro
 	return {
 		instanceId: manifest.owner.instanceId,
 		pid: manifest.owner.pid,
-		bridgeDir: join(getBlenderBridgeRootDir(), manifest.owner.instanceId),
+		// Under a pinned bridge dir this IS the bridge dir, not a per-instance
+		// subdir of it — the same reason classifyWorkspaceOwner skips the
+		// instance.json lookup there.
+		bridgeDir: hasBridgeDirOverride() ? getBlenderBridgeRootDir() : join(getBlenderBridgeRootDir(), manifest.owner.instanceId),
 		claimedAt: manifest.owner.claimedAt,
 		blendPath: manifest.owner.blendPath,
 	};

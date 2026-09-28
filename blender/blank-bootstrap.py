@@ -10,9 +10,12 @@ live-bridge.py registers its poll timer. It:
      clean scene and no manual "save/discard" step is needed.
 
 Env:
-  PI_BLENDER_BLANK_BLEND_PATH — override the output path (defaults to
-  ~/.cache/vibe-blender/blank.blend, flatpak-visible via the bind-mounted
-  XDG cache home).
+  PI_BLENDER_BLANK_BLEND_PATH — override the output path. launch.ts always
+  sets it, to $XDG_CACHE_HOME/vibe-blender/blank/<instance-id>.blend (flatpak-
+  visible via the bind-mounted XDG cache home), so the default below only
+  applies to a hand-started Blender. It deliberately lands on a different
+  filename from the per-instance ones: a manual run must not clobber the
+  scratch blank a live instance is using.
 """
 
 import os
@@ -20,7 +23,12 @@ import os
 # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
 import bpy  # pyright: ignore[reportMissingImports]
 
-DEFAULT_BLANK_BLEND_PATH = os.path.join(os.path.expanduser("~"), ".cache", "vibe-blender", "blank.blend")
+DEFAULT_BLANK_BLEND_PATH = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
+    "vibe-blender",
+    "blank",
+    "manual.blend",
+)
 
 
 def main():

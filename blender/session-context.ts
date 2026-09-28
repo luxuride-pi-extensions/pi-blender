@@ -1,8 +1,13 @@
 import { dirname } from "node:path";
 import { requestLiveBlenderSessionContext } from "./bridge.js";
 import { findLiveOwnersOfBlend } from "./ownership.js";
-import type { BlenderSessionContextCategory, SessionContextOptions, SessionContextResult } from "./types.js";
-import { fileExists, LIVE_BRIDGE_TIMEOUT_MS, normalizeWorkspacePath } from "./utils.js";
+import type {
+	BlenderSessionContextCategory,
+	SessionContextOptions,
+	SessionContextResult,
+	SessionContextWarningCode,
+} from "./types.js";
+import { fileExists, LIVE_BRIDGE_TIMEOUT_MS, normalizeWorkspacePath, WARNING_SEVERITY } from "./utils.js";
 import { getManifestPath, loadWorkspaceManifest } from "./workspace.js";
 
 function shouldInclude(
@@ -19,6 +24,11 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 	});
 
 	const warnings: string[] = [];
+	const warningCodes: SessionContextWarningCode[] = [];
+	const warn = (code: SessionContextWarningCode, message: string): void => {
+		warningCodes.push(code);
+		warnings.push(message);
+	};
 	const requestedWorkspacePath = options.workspace ? normalizeWorkspacePath(options.cwd, options.workspace) : null;
 	let requestedBlendPath: string | null = null;
 	let workspacePath: string | null = null;
@@ -30,7 +40,8 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 		matchesWorkspace = bridgeResult.blendPath === manifest.blendPath;
 		workspacePath = matchesWorkspace ? manifest.workspacePath : null;
 		if (!matchesWorkspace) {
-			warnings.push(
+			warn(
+				"workspace-mismatch",
 				bridgeResult.blendPath
 					? `Live Blender is on "${bridgeResult.blendPath}", not the requested workspace blend "${manifest.blendPath}".`
 					: `Live Blender is on an unsaved scene, not the requested workspace blend "${manifest.blendPath}".`,
@@ -47,7 +58,7 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 	}
 
 	if (!bridgeResult.isSaved) {
-		warnings.push("Live Blender is on an unsaved scene.");
+		warn("unsaved-scene", "Live Blender is on an unsaved scene.");
 	}
 
 	// A peer holding the same blend. Reported rather than enforced here, because
@@ -61,7 +72,8 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 		const peers = await findLiveOwnersOfBlend(bridgeResult.blendPath).catch(() => []);
 		if (peers.length > 0) {
 			sharedWith = peers;
-			warnings.push(
+			warn(
+				"shared-with-peer",
 				`Another live pi instance also has this blend open (${peers
 					.map((peer) => `instance ${peer.instanceId}${peer.pid ? ` pid ${peer.pid}` : ""}`)
 					.join(", ")}). Anything saved here overwrites what that instance has.`,
@@ -69,13 +81,14 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 		}
 	}
 	if (bridgeResult.isDirty) {
-		warnings.push("Live Blender has unsaved changes.");
+		warn("unsaved-changes", "Live Blender has unsaved changes.");
 	}
 	if (!bridgeResult.viewport.hasViewport) {
-		warnings.push("No live VIEW_3D viewport is open in Blender.");
+		warn("no-viewport", "No live VIEW_3D viewport is open in Blender.");
 	}
 	if (bridgeResult.selection.selectedObjectCount > 1) {
-		warnings.push(
+		warn(
+			"ambiguous-selection",
 			`There are ${bridgeResult.selection.selectedObjectCount} selected objects, so ambiguous references like "it" may require clarification.`,
 		);
 	}
@@ -86,6 +99,7 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 		workspacePath,
 		matchesWorkspace,
 		sharedWith,
+		warningCodes,
 		warnings,
 		file: shouldInclude(options.include, "file")
 			? {
@@ -164,15 +178,24 @@ export function formatCompactSessionContextPrompt(result: SessionContextResult):
 		lines.push(`- Viewport: ${viewportSummary.join(", ")}`);
 	}
 
-	const compactWarnings = result.warnings.filter(
-		(warning) =>
-			warning.includes("unsaved") ||
-			warning.includes("Another live pi instance") ||
-			warning.includes('ambiguous references like "it"') ||
-			warning.includes("not the requested workspace"),
-	);
-	if (compactWarnings.length > 0) {
-		lines.push(`- Warning: ${compactWarnings[0]}`);
+	// Filter and rank by CODE, not by matching English prose. The old
+	// substring filter meant that rewording "Another live pi instance" would
+	// silently drop the peer warning from every manager turn, and that the
+	// "not the requested workspace" key was unreachable here anyway (this path
+	// passes no workspace, so that warning can never fire). Only the single most
+	// severe line fits, and a peer overwriting the file outranks a vague
+	// selection.
+	let worstIndex = -1;
+	let worstSeverity = 0;
+	result.warningCodes.forEach((code, index) => {
+		const severity = WARNING_SEVERITY[code];
+		if (severity > worstSeverity) {
+			worstSeverity = severity;
+			worstIndex = index;
+		}
+	});
+	if (worstIndex >= 0) {
+		lines.push(`- Warning: ${result.warnings[worstIndex]}`);
 	}
 
 	if (lines.length === 0) {

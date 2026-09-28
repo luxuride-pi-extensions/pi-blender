@@ -9,16 +9,17 @@ stock pi, with fixes for a **flatpak** Blender install.
 
 ```
 index.ts            extension entry (13 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
-launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (session_start + liveness re-spawn)
+launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
 blender/            module from packages/coding-agent/src/blender/ (+ set-mode, paint scene-info categories, module run/revert)
   live-bridge.py      file-based bridge polled inside a running Blender UI
-  blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch
+  blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch (per-instance path)
   skills/             /skill:blender-create, blender-edit, blender-analyze, blender-with-reference, blender-paint, blender-modules, blender-live-state
   agents/             blender-manager + blender-worker + blender-critic
                       + blender-diagnostician + blender-camera-aligner
-                      + blender-finalizer subagent definitions (six distinct
+                      + blender-finalizer + blender-script-runner
+                      + blender-merger subagent definitions (nine distinct
                       roles)
                       TEMPLATES — run `npm run install:agents`, which copies
                       them to ~/.pi/agent/agents/ and substitutes their
@@ -50,6 +51,11 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `…/bridge/<instance-id>`, so concurrent instances never contend for one
    mutable scene. The override disables that scheme entirely — one flat dir,
    no sweep — so a pinned dir's contents are treated as yours, not as instances.
+   That also changes what a workspace claim can mean: with no per-instance
+   `instance.json` to consult, the check falls back to whether the recorded
+   owner's pid is still running, so a pinned dir is a promise you keep
+   yourself — two pi processes on one pinned dir will both pass it. Pin the
+   dir only when you deliberately want one shared scene.
 4. **Nothing is written until Blender is launched** — the instance dir claim
    and the sweep of other instances' dirs hang off the *first launch*
    (`launch.ts` `ensureInstanceClaimed`), not off `session_start`. A pi
@@ -69,8 +75,11 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `VIBE_BLENDER_NO_BLENDER=1` still opts out entirely.
 6. **Blank scene on launch** — the UI launch runs `blank-bootstrap.py`
    first: it strips the default startup Cube/Camera/Light and saves the
-   result to `blank.blend` (flatpak-visible under the XDG cache home), so
-   the live session starts from a clean, saved, non-dirty scene. No manual
+   result to `$XDG_CACHE_HOME/vibe-blender/blank/<instance-id>.blend`
+   (flatpak-visible under the bind-mounted XDG cache home), so the
+   live session starts from a clean, saved, non-dirty scene. The per-instance
+   filename is why two pi processes can each hold a scratch blank without
+   fighting over one file. No manual
    "save/discard startup scene" step is needed before editing. Note this also
    means a `template: "blank"` workspace has **no camera and no lights** at
    all — use the default `studio` template unless you have a reason not to.
@@ -101,9 +110,9 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | Var | Default |
 | --- | --- |
 | `BLENDER_PATH` | auto (flatpak autodetect, else `blender` on PATH) |
-| `PI_BLENDER_BRIDGE_DIR` | `~/.cache/vibe-blender/bridge` |
+| `PI_BLENDER_BRIDGE_DIR` | `~/.cache/vibe-blender/bridge` (each pi process uses `…/<instance-id>/`; setting this pins ONE shared dir and disables per-instance isolation — see §3) |
 | `PI_BLENDER_TMP_DIR` | `~/.cache/vibe-blender/tmp` |
-| `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/vibe-blender/blank.blend` |
+| `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/vibe-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
 | `VIBE_BLENDER_NO_BLENDER` | unset (set `1` to never auto-launch UI) |
 
 ## Install
@@ -120,7 +129,7 @@ npm run setup
 ```
 ok     extension symlink — ~/.pi/agent/extensions/vibe-blender -> <clone>
 ok     typebox resolvable — node_modules/typebox (pi 0.87.1)
-ok     agent definitions — 6 in sync in ~/.pi/agent/agents
+ok     agent definitions — 9 in sync in ~/.pi/agent/agents
 ok     todo provider for blender-manager — @juicesharp/rpiv-todo
 ok     Blender resolvable — flatpak org.blender.Blender (autodetected)
 ```
@@ -230,26 +239,42 @@ Start pi in any project dir. The extension:
   session: concurrent requests interleave and corrupt state. A single module
   run can hold that lock for minutes (a render alone allows 360 s), so a
   parallel spawn *queues* and then fails on its own timeout rather than
-  erroring immediately — run one module at a time. A lock-wait timeout names
-  the current holder, its pid, and how long it has been held, so it reads as
-  "wait your turn" instead of a mysterious timeout. `blender_bridge_status`
-  reports whether the UI is alive, busy, and how many requests are pending
+  erroring immediately. A lock-wait timeout names the current holder, its pid,
+  and how long it has been held, so it reads as "wait your turn" instead of a
+  mysterious timeout. `blender_bridge_status` reports whether the UI is alive,
+  busy, and how many requests are pending
+- **authoring parallelises, execution does not.** Workers writing separate
+  `modules/<name>/script.py` files never interfere, so a multi-part build
+  spawns one `blender-worker` per part in the same turn. Their *runs* all
+  execute inside the one live session behind that lock, so the manager hands
+  the queue to a single `blender-script-runner`, which runs them in dependency
+  order and diffs the scene around each run to catch a module that touched an
+  object it did not own — contamination is reported, never silently repaired,
+  because the repair is usually a revert that discards work. Parts that
+  genuinely depend on each other are spawned in sequence instead of fanned
+  out
 - the bundled subagent definitions are `blender-manager` (a spawnable
   manager-for-a-whole-build, so a non-Blender session such as a Unity bridge
-  can hand over one self-contained task), `blender-worker` (writes/runs a
+  can hand over one self-contained task), `blender-worker` (authors one
   module), `blender-critic` (read-only render judge, one image budget per
   run), `blender-diagnostician` (read-only geometry measurement),
   `blender-camera-aligner` (blind camera placement that nests its own
-  critics) and `blender-finalizer` (one-shot asset hygiene: applies
+  critics), `blender-finalizer` (one-shot asset hygiene: applies
   transforms, resolves mirrors, sets origins and shading, normalizes names;
-  it does not export — the deliverable is `model.blend`). They are
+  it does not export — the deliverable is `model.blend`),
+  `blender-script-runner` (serializes module runs and audits them for
+  cross-module contamination) and `blender-merger` (one-shot join of the
+  finished parts, which reports "no merge needed" and runs nothing when the
+  parts are already coherent). They are
   **templates** installed by `npm run install:agents`. Both `blender-manager`
   (matched by name, whether spawned or entered via `/blender`) and the
   `/blender` parent are gated so they delegate instead of authoring code; the
-  spawned manager is additionally limited to spawning `blender-worker`,
-  `blender-critic`, `blender-diagnostician` and `blender-finalizer`, while the
-  `/blender` parent keeps the full roster because it is the session that can
-  afford the aligner's extra nesting depth. `blender-manager` needs
+  spawned manager is additionally limited to spawning the seven agents above
+  that it is permitted to nest (`blender-worker`, `blender-critic`,
+  `blender-diagnostician`, `blender-finalizer`,
+  `blender-reference-describer`, `blender-script-runner`, `blender-merger`),
+  while the `/blender` parent keeps the full roster because it is the session
+  that can afford the aligner's extra nesting depth. `blender-manager` needs
   `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own children; set
   `{"maxSubagentDepth": 3}` in `~/.pi/agent/extensions/subagent/config.json`
   (config, not the env var: child sessions carry a `runtime.maxDepth` that the

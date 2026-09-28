@@ -180,6 +180,19 @@ function isSpawnedManagerSession(systemPrompt: string): boolean {
  * correct render against a reference for a different object. Refusing the spawn
  * would force the manager to improvise exactly that caption, so the roster has
  * to permit the agent that reads the image.
+ *
+ * `blender-script-runner` is in the list because a build fans out to several
+ * workers at once, and their SCRIPTS do not share a handle but their RUNS do:
+ * all of them execute inside the one live Blender session behind a
+ * cross-process lock, so parallel `blender_module_run` calls block each other
+ * and then fail on a checkpoint computed against a file that has since been
+ * saved. One agent owns that serialization point, and it is the runner, not
+ * each worker.
+ *
+ * `blender-merger` is in the list because joining the finished parts is a
+ * distinct job with a distinct failure mode, not a part worker's job: it runs
+ * once, late, and it consumes inputs, so its script has to be idempotent in a
+ * way no part script needs to be.
  */
 const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-worker",
@@ -187,6 +200,8 @@ const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-diagnostician",
 	"blender-finalizer",
 	"blender-reference-describer",
+	"blender-script-runner",
+	"blender-merger",
 ]);
 
 const MANAGER_ALLOWED_TOOL_NAMES = new Set([
@@ -947,6 +962,12 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 							"The axis a part's thin direction should align with — `Z` for a mug handle's ring axis, `Z` for a vertical stem. Omit to skip the alignment comparison.",
 					}),
 				),
+				timeoutMs: Type.Optional(
+					Type.Number({
+						description:
+							"Bridge timeout override in ms. Defaults to 120000 (4x the 30s round-trip) because a probe scales with scene size — raise it for a `topology` check on a heavy scene, lower it when you are probing a small object list and want a dead bridge to report sooner.",
+					}),
+				),
 			}),
 			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 				const result = await blenderGeometryProbe({
@@ -957,6 +978,7 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 					checks: params.checks,
 					tolerance: params.tolerance,
 					expectedAxis: params.expectedAxis,
+					timeoutMs: params.timeoutMs,
 					signal: _signal,
 				});
 

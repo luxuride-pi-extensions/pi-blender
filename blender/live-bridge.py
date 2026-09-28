@@ -16,10 +16,17 @@ from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
 from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 
 BRIDGE_DIR = os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get("VIBE_BLENDER_BRIDGE_DIR") or os.path.join(
-    os.path.expanduser("~"),
-    ".vibe-blender",
-    "agent",
-    "blender-bridge",
+    # Same XDG convention config.ts uses for its own default. This is only
+    # reached when Blender was started BY HAND with --python live-bridge.py and
+    # with neither bridge var set, because launch.ts always passes
+    # PI_BLENDER_BRIDGE_DIR explicitly. That case is a footgun worth naming:
+    # the pi side would keep reading
+    # $XDG_CACHE_HOME/vibe-blender/bridge/<instance-id>, so a UI beating here
+    # is invisible to it and every tool call reports a plain 30s timeout rather
+    # than "no UI is running". Hence the warning below.
+    os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
+    "vibe-blender",
+    "bridge",
 )
 # The per-instance scratch blank that blank-bootstrap.py opens this session on.
 # launch.ts passes it in the environment (PI_BLENDER_BLANK_BLEND_PATH), and
@@ -481,61 +488,104 @@ def handle_render(request):
     scene = viewport["scene"]
     view_source = request.get("viewSource", "camera")
     viewport_shading = viewport_shading_type(request.get("viewportShading", "material-preview"))
-    camera_object = ensure_render_camera(scene, request.get("cameraName")) if view_source == "camera" else None
-    resolution = request.get("resolution") or {}
 
-    scene.render.resolution_x = int(resolution.get("x", scene.render.resolution_x))
-    scene.render.resolution_y = int(resolution.get("y", scene.render.resolution_y))
-    scene.render.resolution_percentage = int(resolution.get("percentage", scene.render.resolution_percentage))
+    # Every one of these is scene state, and a render is not a preview: unlike
+    # the viewport settings below, the values set here survive the call and are
+    # then written into model.blend by the next execute-python's save_mainfile().
+    # That is how a 400x300 scratch render used to leave the user's model at
+    # 400x300, JPEG-flipped, with the render camera still assigned as
+    # scene.camera -- a silent, permanent edit to their work caused by asking
+    # for a look at it. Snapshot and restore instead; a render is read-only
+    # with respect to the file it is asked to photograph.
+    render_settings = scene.render
+    previous_scene_camera = scene.camera
+    previous_resolution = (
+        render_settings.resolution_x,
+        render_settings.resolution_y,
+        render_settings.resolution_percentage,
+    )
+    previous_file_format = render_settings.image_settings.file_format
+    previous_filepath = render_settings.filepath
+    previous_cycles_samples = scene.cycles.samples if hasattr(scene, "cycles") else None
 
-    samples = request.get("samples")
-    if samples is not None and hasattr(scene, "cycles"):
-        scene.cycles.samples = int(samples)
-
-    # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
+    # Assigned before the try, so the response never depends on control flow
+    # that a failed render may have skipped.
     output_path = request["outputPath"]
-    # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.filepath = output_path
+    camera_object = None
+    result = None
 
-    with bpy.context.temp_override(
-        window=viewport["window"],
-        screen=viewport["screen"],
-        area=viewport["area"],
-        region=viewport["region"],
-        space_data=viewport["space"],
-        scene=scene,
-    ):
-        space = viewport["space"]
-        region_3d = viewport["region_3d"]
-        previous_shading_type = space.shading.type
-        previous_show_overlays = space.overlay.show_overlays
-        previous_perspective = region_3d.view_perspective
-        previous_view_camera = getattr(space, "camera", None)
-        try:
-            space.overlay.show_overlays = False
-            space.shading.type = viewport_shading
-            if view_source == "camera":
-                space.camera = camera_object
-                region_3d.view_perspective = "CAMERA"
-            bpy.ops.render.opengl(write_still=True, view_context=True)
-        finally:
-            space.overlay.show_overlays = previous_show_overlays
-            space.shading.type = previous_shading_type
-            region_3d.view_perspective = previous_perspective
-            if previous_view_camera is not None and previous_view_camera.type == "CAMERA":
-                space.camera = previous_view_camera
+    try:
+        camera_object = ensure_render_camera(scene, request.get("cameraName")) if view_source == "camera" else None
+        resolution = request.get("resolution") or {}
 
-    return {
-        "outputPath": output_path,
-        "cameraName": scene.camera.name if scene.camera else None,
-        "resolution": {
-            "x": int(scene.render.resolution_x),
-            "y": int(scene.render.resolution_y),
-            "percentage": int(scene.render.resolution_percentage),
-        },
-    }
+        render_settings.resolution_x = int(resolution.get("x", render_settings.resolution_x))
+        render_settings.resolution_y = int(resolution.get("y", render_settings.resolution_y))
+        render_settings.resolution_percentage = int(
+            resolution.get("percentage", render_settings.resolution_percentage)
+        )
+
+        samples = request.get("samples")
+        if samples is not None and previous_cycles_samples is not None:
+            scene.cycles.samples = int(samples)
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        render_settings.image_settings.file_format = "PNG"
+        render_settings.filepath = output_path
+
+        with bpy.context.temp_override(
+            window=viewport["window"],
+            screen=viewport["screen"],
+            area=viewport["area"],
+            region=viewport["region"],
+            space_data=viewport["space"],
+            scene=scene,
+        ):
+            space = viewport["space"]
+            region_3d = viewport["region_3d"]
+            previous_shading_type = space.shading.type
+            previous_show_overlays = space.overlay.show_overlays
+            previous_perspective = region_3d.view_perspective
+            previous_view_camera = getattr(space, "camera", None)
+            try:
+                space.overlay.show_overlays = False
+                space.shading.type = viewport_shading
+                if view_source == "camera":
+                    space.camera = camera_object
+                    region_3d.view_perspective = "CAMERA"
+                bpy.ops.render.opengl(write_still=True, view_context=True)
+            finally:
+                space.overlay.show_overlays = previous_show_overlays
+                space.shading.type = previous_shading_type
+                region_3d.view_perspective = previous_perspective
+                if previous_view_camera is not None and previous_view_camera.type == "CAMERA":
+                    space.camera = previous_view_camera
+
+        # Read the render's own values for the response while the overridden
+        # settings are still in place.
+        result = {
+            "outputPath": output_path,
+            "cameraName": camera_object.name if camera_object is not None else None,
+            "resolution": {
+                "x": int(render_settings.resolution_x),
+                "y": int(render_settings.resolution_y),
+                "percentage": int(render_settings.resolution_percentage),
+            },
+        }
+    finally:
+        # Restore on the outer try, not the inner one: a render that throws
+        # partway through must not leave the user's file modified either.
+        scene.camera = previous_scene_camera
+        (
+            render_settings.resolution_x,
+            render_settings.resolution_y,
+            render_settings.resolution_percentage,
+        ) = previous_resolution
+        render_settings.image_settings.file_format = previous_file_format
+        render_settings.filepath = previous_filepath
+        if previous_cycles_samples is not None and hasattr(scene, "cycles"):
+            scene.cycles.samples = previous_cycles_samples
+
+    return result
 
 
 def set_mode_request(request):
@@ -1281,6 +1331,12 @@ def poll_requests():
 
 
 ensure_bridge_dirs()
+if not (os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get("VIBE_BLENDER_BRIDGE_DIR")):
+    print(
+        f'[vibe-blender] warning: no bridge dir in the environment; falling back to "{BRIDGE_DIR}". '
+        "The pi extension reads its own per-instance dir and will NOT see this UI, so every blender_* call "
+        "will time out. Start Blender through the extension (or set PI_BLENDER_BRIDGE_DIR) instead."
+    )
 recover_orphaned_claims()
 if not bpy.app.timers.is_registered(poll_requests):
     bpy.app.timers.register(poll_requests, first_interval=POLL_INTERVAL_SECONDS, persistent=True)

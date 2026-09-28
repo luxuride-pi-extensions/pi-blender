@@ -18,7 +18,9 @@ Before spawning your **first worker or critic subagent**, call `subagents_enable
 Spawn workers and critics as the **bundled agent types**, not generic ones: `blender-worker` (writes and runs module code) and `blender-critic` (read-only render judge). They ship with the extension, carry the right tool allowlist, and load it themselves — a generic `worker` has neither the blender tools nor the workspace skills, which is the most common cause of a stalled modular run.
 
 - **Manager** = the main session (you). You hold the user's goal, the module breakdown, each module's **brief**, and each module's **report** and **critique**. You NEVER read module source code — that is the whole point: your context stays small. You MUST spawn subagents for all work; you plan, brief, and orchestrate only. The main session ALWAYS plays the manager role for multi-part Blender work — never do the work directly.
-- **Worker** = one `blender-worker` subagent per module. It receives the brief + workspace + module name, authors/edits `modules/<name>/script.py`, runs it via `blender_module_run`, and returns a report. It owns its module's code.
+- **Worker** = one `blender-worker` subagent per module. It receives the brief + workspace + module name, authors/edits `modules/<name>/script.py`, and returns a report. It owns its module's code.
+- **Script runner** = one `blender-script-runner` when more than one worker is authoring at once. It runs the queued module scripts one at a time and reports contamination. Workers do NOT execute their own scripts in that case.
+- **Merger** = one `blender-merger`, once, after every part exists, and only when the parts actually need joining.
 - **Critic** = a `blender-critic` subagent (fresh context) per module per iteration. It judges how the result **looks** against the brief — vision on `modules/<name>/render.png` plus the report — and returns a critique. It does not edit anything.
 
 If `blender-worker` / `blender-critic` are not offered by the subagent tool, the bundled agent directory is not being discovered: check `subagents.defaultExtensions` (or `subagents.defaultSubagentOnlyExtensions`) in settings — the children need the `vibe-blender` extension loaded to see these agent types and their blender tools.
@@ -27,17 +29,20 @@ Rules:
 - Keep the brief **compact** (< ~20 lines): goal, exact object names in the scene, visual acceptance criteria, constraints (materials, colors, proportions), workspace path, module name, and which subagents (if any) it depends on.
 - Keep the report **compact** (< ~20 lines): what was built/changed (object names + key parameters), script status (exit code, notable warnings), what render.png shows, open questions. No source code, no logs.
 - Worker and critic must NOT paste `script.py` contents into their outputs. If the manager needs code detail, it says so and reads the file itself — one-off, not routine.
-- **One module at a time per blend.** Modules share `model.blend`; concurrent `blender_module_run` calls would clobber each other's checkpoints. Run workers sequentially in the parent (await each before launching the next), or explicitly order dependent modules (body → head → rig → paint).
-- Dependencies: a module that references other modules' objects (e.g. armature parenting to body) gets a brief that names those objects and states they must already exist.
+- **Authoring runs in parallel; execution does not.** Workers writing separate `modules/<name>/script.py` files do not interfere, so spawn several in the same turn. Their RUNS do interfere: everything executes inside one live Blender session behind a cross-process lock, so a second `blender_module_run` blocks on the first and then fails against a checkpoint computed before the first run saved `model.blend`. So: spawn the workers together, then hand the queue to one `blender-script-runner` to execute serially. For a single-module change, keep the old shape (one worker, one critic) and do not add a runner for a queue of one.
+- **Dependencies decide whether you can fan out.** If a module's brief assumes another module's objects already exist, those two cannot be spawned together. Fan out the independent modules; run the dependent ones in sequence after.
+- **Scope every brief to one part.** Each worker brief must name the exact object names that worker OWNS, state that it must not modify/move/rename/delete anything else, and say which sibling parts it should expect to be absent. A brief that says "build the model" produces competing models in one blend.
+- **Merging is a separate, later step.** Part workers do not join their work to anything. If the finished parts need one continuous surface, a single skin, or an armature bind, spawn `blender-merger` once after the parts exist; if they are already correct as separate objects with correct transforms and nobody asked for a join, do not spawn it.
 
 ## Module run loop (per module)
 
 0. (Once, before the first module) Ensure delegation is enabled: `subagents_enable` (see above).
 1. Manager writes the brief (in the subagent task text). Run `blender_bridge_status` first if you are unsure whether the live UI is up — the worker's first tool call will otherwise pay the cold-start cost blindly.
-2. **Worker subagent** (`blender-worker`):
-   1. (First run only) writes `modules/<name>/script.py` in the workspace — a self-contained bpy script that is **idempotent-safe**: it should create or modify its objects by name and skip/rebuild what it owns (guard with `bpy.data.objects.get(...)`), so re-runs don't duplicate.
-   2. Calls `blender_module_run {workspace, moduleName, render: true}`. Every run writes its own checkpoint at `modules/<name>/runs/NN/pre-NN.blend` **before** executing, and the run is recorded in the workspace manifest (`moduleRuns`). A failed run records nothing and does not consume an iteration.
+2. **Worker subagents** (`blender-worker`, one per module — spawn several in the same turn when the parts are independent):
+   1. (First run only) writes `modules/<name>/script.py` in the workspace — a self-contained bpy script that is **idempotent-safe**: it should create or modify its objects by name and skip/rebuild what it owns (guard with `bpy.data.objects.get(...)`), so re-runs don't duplicate. It touches only the object names its brief says it owns.
+   2. Calls `blender_module_run {workspace, moduleName, render: true}` — **unless a script-runner owns execution**. Every run writes its own checkpoint at `modules/<name>/runs/NN/pre-NN.blend` **before** executing, and the run is recorded in the workspace manifest (`moduleRuns`). A failed run records nothing and does not consume an iteration.
    3. On failure: read the error, fix `script.py`, re-run (max 3 self-fix attempts). If still failing, report the failure — do not revert by yourself unless the brief says so.
+2b. **Script runner** (`blender-script-runner`, when more than one worker authored): gets the ordered queue of `{module, owns}` entries, runs each with `blender_module_run` in order, and diffs the scene around each run to catch a module that touched an object it did not own. It reports which parts actually exist after each run, and reports contamination rather than repairing it (the repair is usually a revert, which discards work).
 3. **Critic subagent** (`blender-critic`, fresh context, after the worker reports success):
    1. Gets the brief + the worker's report.
    2. Opens `modules/<name>/render.png` (read tool / image) and inspects the look against the acceptance criteria. May call `blender_scene_info {categories: ["objects","uv","textures","paintSettings","armatures"]}` for facts.
@@ -57,6 +62,7 @@ Worker and critic cover most work. Four situations need someone else — you sti
 - **Measured structural fault** (floating, buried, rotated, intersecting, or "the handle is in the wrong place"): spawn `blender-diagnostician` with the symptom and object names. It returns real distances, angles, and signed penetrations. Put its numbers in the worker's next brief. Never estimate an offset yourself, and never ask a critic to infer one from a picture — a render shows that something is wrong, not by how much.
 - **Wrong viewpoint rather than wrong geometry** (the reference shows a different side, the framing crops the part, the pose differs): spawn `blender-camera-aligner`. It never sees an image; it reads critic text verdicts and moves the camera until `View match: matched`. Do not spawn a critic to judge a view the aligner is still iterating on.
 - **Asset handoff** (the user wants a reusable asset, not a scene): when the last module passes, spawn `blender-finalizer` ONCE. It applies scale/rotation transforms, resolves mirrored objects, sets origins, picks smooth vs flat shading, and normalizes names. Only after that: every later edit re-dirties what it applied. It does not export — the deliverable is `model.blend`.
+- **The parts need joining** (one continuous surface, a single skin, an armature-bound character, one exportable object): spawn `blender-merger` ONCE after every part module has run. It authors `modules/merge/script.py`, reports whether a merge was needed at all, keeps the source parts unless told otherwise, and reports part problems rather than silently fixing geometry inside the merge.
 - **Several references at once**: one `render.png` exists at a time, so the unit of work is a (view, reference) pair. Spawn one critic per pair, each seeing only its own render and its own reference, then reconcile the reports as text. A `not-comparable` verdict names the view it wants — that is a routing answer, not a failure.
 
 Check the subject exists before dispatching any judge: `blender_scene_info {categories: ["objects"]}`. `reference-only` means it was never built; `different-subject` means the wrong image, and no camera fixes that.
@@ -70,7 +76,7 @@ Check the subject exists before dispatching any judge: `blender_scene_info {cate
 
 ## Manager report to the user
 
-When all modules PASS (or the cap is hit), summarize per module: name, one-line outcome, PASS/FAIL, render path. Do not include code. Suggest the next instruction (e.g. "want me to paint the body next?").
+When all modules PASS (or the cap is hit), summarize per module: name, one-line outcome, PASS/FAIL, render path. Say whether a script-runner ran them or the workers ran their own, and report any contamination it found. Say whether a merge was needed and what it did, or that no merge was needed. Do not include code. Suggest the next instruction (e.g. "want me to paint the body next?").
 
 Always include the live-state line in every brief: the worker and critic do NOT receive the manager's injected live Blender state block, so if the brief depends on "the selected object" or "the current view", state the concrete object/camera names explicitly (or tell the worker to resolve them with `blender_session_context` first).
 
@@ -81,16 +87,16 @@ You are a Blender module worker.
 Workspace: outputs/robot
 Module: body  (script: outputs/robot/modules/body/script.py)
 Goal: build a low-poly robot torso + hips as one mesh "robot_body" at origin, ~1.2m tall torso, beveled boxy style, material "m_robot_body" (dark gray metal, roughness 0.35).
+You own exactly one object: robot_body. Do not create, modify, move, rename or delete anything else — other workers own the other parts in parallel.
 Accept: silhouette reads as a robot torso in a front render; no floating geometry; exactly one object named robot_body.
-Do not modify other objects. When done run blender_module_run {workspace, moduleName: "body", render: true} and report in <20 lines (objects created, exit status, what render.png shows). No source code in the report.
+When done run blender_module_run {workspace, moduleName: "body", render: true} and report in <20 lines (objects created, exit status, what render.png shows). No source code in the report.
 ```
 
 ## Example brief (critic)
 
 ```
-You are a Blender module critic. Do not edit anything.
-Workspace: outputs/robot, module: body.
-Brief: <the worker brief above>
-Worker report: <the worker report>
-Look at outputs/robot/modules/body/render.png. Judge ONLY: does it look like the brief asks for? List concrete visual issues; label each "object" or "view". Verdict PASS or FAIL + one-line reasoning.
+You are a Blender script runner. You own execution for this workspace; the workers only author scripts.
+Workspace: outputs/robot
+Queue, in order: [{module: "body", owns: ["robot_body"]}, {module: "head", owns: ["robot_head"]}, {module: "arm_l", owns: ["robot_arm_l"]}]
+Record the scene with blender_scene_info {categories: ["objects"]} first, run each module with blender_module_run in the order given, diff the scene against each entry's owns list after each run, and report any object that changed, appeared or disappeared outside its owns list. Report contamination, do not repair it.
 ```

@@ -4,12 +4,35 @@ import { isAbsolute, join, resolve } from "node:path";
 import { getBlenderAssetsDir, getBlenderBridgeDir, getBlenderTempDir } from "../config.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
-import type { BlenderRunResult, BlenderSavedView, RunBlenderJsonOptions } from "./types.js";
+import type {
+	BlenderRunResult,
+	BlenderSavedView,
+	RunBlenderJsonOptions,
+	SessionContextWarningCode,
+} from "./types.js";
 
 export const MANIFEST_FILE = "blender-workspace.json";
 export const WORKSPACE_SCRIPT_FILE = "script.py";
 export const CRITIQUE_LOG_FILE = "critique.log";
 export const DEFAULT_RENDER_EXTENSION = ".png";
+
+/**
+ * How much a session-context warning matters when only one line fits in the
+ * per-turn prompt.
+ *
+ * A peer holding the same blend outranks everything: it is the one warning
+ * about a destructive outcome for the user's file rather than about the shape
+ * of the current selection. Ties keep source order, so the first-raised
+ * warning still wins among equals.
+ */
+export const WARNING_SEVERITY: Record<SessionContextWarningCode, number> = {
+	"shared-with-peer": 3,
+	"workspace-mismatch": 2,
+	"unsaved-scene": 2,
+	"unsaved-changes": 1,
+	"no-viewport": 1,
+	"ambiguous-selection": 1,
+};
 /**
  * Default wait for a bridge request when the caller does not supply one.
  *

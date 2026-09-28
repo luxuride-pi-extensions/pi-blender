@@ -327,6 +327,17 @@ export interface SessionContextResult {
 	 * loadWorkspaceManifest, on the path that would actually open it.
 	 */
 	sharedWith: BlenderSharedWithPeer[];
+	/**
+	 * The same warnings, tagged with a stable code each.
+	 *
+	 * The compact per-turn prompt must not decide what matters by matching
+	 * English prose: rewording "Another live pi instance" would silently drop a
+	 * peer-safety warning from every manager turn, with no test and no type
+	 * error to notice. A code is what callers filter on, so the wording of a
+	 * human-readable message is free to change.
+	 */
+	warningCodes: SessionContextWarningCode[];
+	/** The human-readable text for each entry of `warningCodes`, same order. */
 	warnings: string[];
 	file: BlenderSessionFileContext | null;
 	scene: BlenderSessionSceneContext | null;
@@ -334,6 +345,21 @@ export interface SessionContextResult {
 	mode: BlenderSessionModeContext | null;
 	viewport: BlenderSessionViewportContext | null;
 }
+
+/**
+ * Why a session-context warning was raised.
+ *
+ * `workspace-mismatch` cannot appear in the per-turn snapshot, because that
+ * path calls the context tool with no workspace to compare against; it exists
+ * for explicit `blender_session_context` calls.
+ */
+export type SessionContextWarningCode =
+	| "workspace-mismatch"
+	| "unsaved-scene"
+	| "shared-with-peer"
+	| "unsaved-changes"
+	| "no-viewport"
+	| "ambiguous-selection";
 
 export interface SaveViewOptions {
 	cwd: string;
@@ -413,6 +439,15 @@ export interface RenderResult {
 	outputName: string;
 	view: string;
 	cameraName: string | null;
+	/**
+	 * The engine identifier the run actually used, which is NOT always the one
+	 * that was asked for: the engine enum was renamed between Blender releases
+	 * ("BLENDER_EEVEE" <-> "BLENDER_EEVEE_NEXT"), so a background render of
+	 * `eevee` can land on a different member of this build's enum. Null on the
+	 * live path, which renders through the viewport and leaves the scene engine
+	 * alone.
+	 */
+	resolvedEngine: string | null;
 	resolution: { x: number; y: number; percentage: number };
 	samples: number | null;
 	renderMethod: BlenderRenderMethod;

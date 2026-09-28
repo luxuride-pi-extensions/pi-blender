@@ -22,9 +22,36 @@ import sys
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
 scene = bpy.context.scene
 
-render_engine = payload.get("renderEngine")
-if render_engine:
-    scene.render.engine = render_engine
+# The engine enum identifier is version-dependent: "BLENDER_EEVEE" became
+# "BLENDER_EEVEE_NEXT" and the naming differs again on newer builds. Probing
+# the real enum is the only thing that cannot go stale, and the studio
+# template in workspace.ts already probes it this way.
+def set_engine(scene, desired):
+    if not desired:
+        return scene.render.engine
+    try:
+        scene.render.engine = desired
+    except (TypeError, ValueError):
+        # Not a member of this build's enum: fall back to the candidates in
+        # preference order, and only then give up.
+        try:
+            available = {
+                item.identifier
+                for item in scene.render.bl_rna.properties["engine"].enum_items
+            }
+        except (AttributeError, KeyError, TypeError):
+            available = set()
+        for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
+            if candidate in available:
+                scene.render.engine = candidate
+                return scene.render.engine
+        raise RuntimeError(
+            f'No usable render engine for "{desired}"; this build offers: '
+            + (", ".join(sorted(available)) or "nothing enumerable")
+        )
+    return scene.render.engine
+
+resolved_engine = set_engine(scene, payload.get("renderEngine"))
 
 camera_name = payload.get("cameraName")
 if camera_name:
@@ -60,6 +87,8 @@ print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
     "outputPath": output_path,
     "cameraName": scene.camera.name if scene.camera else None,
+    "resolvedEngine": resolved_engine,
+    "requestedEngine": payload.get("renderEngine"),
     "resolution": {
         "x": int(scene.render.resolution_x),
         "y": int(scene.render.resolution_y),
@@ -111,14 +140,24 @@ function normalizeRenderConfig(options: RenderOptions): NormalizedRenderConfig {
 	return normalized;
 }
 
-function mapBackgroundRenderEngine(engine: BlenderRenderEngine | null): string | undefined {
+/**
+ * Map a tool-level engine name to this build's enum identifier.
+ *
+ * The mapping is a PREFERENCE ORDER, not a translation: the identifiers were
+ * renamed between Blender releases ("BLENDER_EEVEE" <-> "BLENDER_EEVEE_NEXT"),
+ * and a hardcoded single identifier is wrong on one side of every rename —
+ * which is why the generated script probes the real enum in `set_engine` and
+ * walks this list. Same pattern as the studio template in workspace.ts, which
+ * probes the enum for the same reason.
+ */
+function mapBackgroundRenderEngine(engine: BlenderRenderEngine | null): string[] | undefined {
 	switch (engine) {
 		case "eevee":
-			return "BLENDER_EEVEE_NEXT";
+			return ["BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"];
 		case "cycles":
-			return "CYCLES";
+			return ["CYCLES"];
 		case "workbench":
-			return "BLENDER_WORKBENCH";
+			return ["BLENDER_WORKBENCH"];
 		default:
 			return undefined;
 	}
@@ -167,6 +206,7 @@ export async function blenderRender(options: RenderOptions): Promise<RenderResul
 			: await runBlenderJson<{
 					outputPath: string;
 					cameraName: string | null;
+					resolvedEngine?: string;
 					resolution: { x: number; y: number; percentage: number };
 				}>({
 					cwd: options.cwd,
@@ -206,6 +246,10 @@ export async function blenderRender(options: RenderOptions): Promise<RenderResul
 		outputName,
 		view,
 		cameraName: renderPayload.cameraName,
+		// What the build actually used, which can differ from the request when
+		// the requested identifier is not in this Blender's enum. Reporting the
+		// fallback is the difference between "eevee" and "cycles ran instead".
+		resolvedEngine: renderPayload.resolvedEngine ?? null,
 		resolution: renderPayload.resolution,
 		samples: options.samples ?? null,
 		renderMethod: normalizedConfig.renderMethod,
