@@ -16,7 +16,7 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
   live-bridge.py      file-based bridge polled inside a running Blender UI
   blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch (per-instance path)
   skills/             /skill:blender-create, blender-edit, blender-analyze, blender-with-reference, blender-paint, blender-modules, blender-live-state
-  agents/             blender-manager + blender-worker + blender-critic
+  agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
                       + blender-finalizer + blender-script-runner
                       + blender-merger subagent definitions (nine distinct
@@ -130,7 +130,7 @@ npm run setup
 ok     extension symlink — ~/.pi/agent/extensions/vibe-blender -> <clone>
 ok     typebox resolvable — node_modules/typebox (pi 0.87.1)
 ok     agent definitions — 9 in sync in ~/.pi/agent/agents
-ok     todo provider for blender-manager — @juicesharp/rpiv-todo
+ok     todo provider for the manager prompt — @juicesharp/rpiv-todo
 ok     Blender resolvable — flatpak org.blender.Blender (autodetected)
 ```
 
@@ -147,7 +147,7 @@ outside the repository — which is why a clone alone is not enough:
   (`src/agents/agents.js:1802-1813`) — so `install-agents.mjs` substitutes
   machine-specific absolute paths at install time and no such path is ever
   committed
-- **`@juicesharp/rpiv-todo`** must be present, because `blender-manager` lists
+- **`@juicesharp/rpiv-todo`** must be present, because the manager prompt lists
   a `todo` tool and a foreground child does not inherit ambient extensions;
   without the provider listed the child is handed a `todo` it can never call.
   Setup reports this rather than installing it, since it is a separate package
@@ -182,29 +182,30 @@ Start pi in any project dir. The extension:
   collection under a `Studio` prefix, so they are easy to exclude from
   measurements.
 - registers the `/blender` slash command — everything after `/blender`
-  becomes the Blender task and engages the extension. The session it engages is
-  a thin **router**, not the manager: it launches the `blender-manager`
-  subagent, which is the top level of the hierarchy and owns the whole build,
-  and the router relays what it returns
+  becomes the Blender task and engages the extension. The session it engages
+  IS the manager: there is no manager subagent and no router hop, so the
+  build's task list and progress are visible in the session the user typed the
+  command into, rather than inside a child they would have to open to watch
 - registers `/blender-exit`, which lifts the manager gate without ending the
   session or touching `model.blend`. Manager mode otherwise lasts until
   `/new`, which breaks a session that interleaves Blender with other work (a
   Unity bridge writing C#). The `blender_*` tools, `/blender` and the skills
-  stay available afterwards; only the parent's `write`/`edit`/image restriction
-  ends. The `blender-manager` subagent is gated by *name*, not by this flag, so
-  it is unaffected either way. The command is **suggested only in manager
-  mode**: the instruction to mention it lives in the guidance section, which is
+  stay available afterwards; only this session's `write`/`edit`/image
+  restriction ends. Spawned subagents are unaffected either way, because the
+  gate exempts every child. The command is **suggested only in manager
+  mode**: the instruction to mention it lives in the manager prompt, which is
   injected only while `/blender` is active, so a non-Blender session is never
-  told about it. The guidance also caps it at one mention per session and
+  told about it. The prompt also caps it at one mention per session and
   forbids offering it to unblock a Blender task, since delegation — not
   writing — is how a manager does Blender work
 - loads the 7 bundled `/skill:blender-*` skills (including `blender-paint`
   for texture paint, UV, vertex/weight paint, and bone/rig work, and
   `blender-modules` for Manager > worker/critic multi-module orchestration)
-- injects Blender workflow guidance + a live session-state block
+- injects the manager prompt (read from `blender/agents/blender-manager.md`) +
+  a live session-state block
   (selection, viewport, mode, 1.5 s timeout) in **manager mode only**, which
   `/blender` enters and nothing else does. A `blender_*` tool called on its
-  own gets no manager guidance and is not gated, because a direct tool call is
+  own gets no manager prompt and is not gated, because a direct tool call is
   worker-level work. If the bridge does not answer in time, the block is
   replaced by an explicit `Live Blender state is UNAVAILABLE` notice instead of
   silently disappearing, so the agent refreshes with `blender_session_context`
@@ -256,9 +257,7 @@ Start pi in any project dir. The extension:
   because the repair is usually a revert that discards work. Parts that
   genuinely depend on each other are spawned in sequence instead of fanned
   out
-- the bundled subagent definitions are `blender-manager` (the **top level** of
-  a Blender build, entered from `/blender`, which plans and delegates the whole
-  thing), `blender-worker` (authors one
+- the bundled subagent definitions are `blender-worker` (authors one
   module), `blender-critic` (read-only render judge, one image budget per
   run), `blender-diagnostician` (read-only geometry measurement),
   `blender-camera-aligner` (blind camera placement that nests its own
@@ -269,18 +268,22 @@ Start pi in any project dir. The extension:
   cross-module contamination) and `blender-merger` (one-shot join of the
   finished parts, which reports "no merge needed" and runs nothing when the
   parts are already coherent). They are
-  **templates** installed by `npm run install:agents`. The hierarchy is FLAT at
-  the top: `/blender` (the router) → `blender-manager` (depth 1) → its
-  subagents (depth 2) → the aligner's own critics (depth 3). Both the router
-  (matched by the manager-mode flag) and `blender-manager` (matched by name)
-  are gated so they delegate instead of authoring code, and the manager is
-  limited by name to the eight agents it may nest: `blender-worker`,
+  **templates** installed by `npm run install:agents`. `blender-manager.md` is
+  deliberately NOT one of them: it is a PROMPT, read at runtime by
+  `getManagerPrompt()` in `config.ts` and injected as a system-prompt section,
+  because the `/blender` command session IS the manager. Installing it would
+  leave a spawnable `blender-manager` whose prompt drifts from the one the user
+  is watching; the installer deletes any already-installed copy.
+  The hierarchy is therefore FLAT at the top: the `/blender` session (depth 0,
+  the manager) → its subagents (depth 1) → the aligner's own critics (depth 2).
+  The manager session is gated so it delegates instead of authoring code, and
+  it is limited by name to the eight agents it may nest: `blender-worker`,
   `blender-script-runner`, `blender-merger`, `blender-critic`,
   `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner` and
   `blender-reference-describer`. `blender-camera-aligner` is reachable only
-  because of that flat top: the router costs no depth, so the aligner at depth
-  2 still has room for the depth-3 critics it nests itself.
-  `blender-manager` needs `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own
+  because of that flat top: no router sits between the command and the manager,
+  so the aligner at depth 1 still has room for the depth-2 critics it nests
+  itself. The manager needs `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own
   children; set
   `{"maxSubagentDepth": 3}` in `~/.pi/agent/extensions/subagent/config.json`
   (config, not the env var: child sessions carry a `runtime.maxDepth` that the

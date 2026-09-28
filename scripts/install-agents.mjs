@@ -10,6 +10,14 @@
  * relative path cannot reach them either — a placeholder plus this script is the
  * only way to keep a real absolute path out of version control.
  *
+ * One file in the source directory is NOT installed: blender-manager.md is a
+ * PROMPT read at runtime by getManagerPrompt() in config.ts, because the
+ * /blender command session IS the manager. Installing it would leave a spawnable
+ * `blender-manager` in ~/.pi/agent/agents whose prompt drifts from the one the
+ * user is actually watching. `retired` below deletes an already-installed copy
+ * of it, because an add-only installer would leave that stale shadow in place
+ * forever.
+ *
  * Usage:
  *   npm run install:agents                  # infer both paths
  *   npm run install:agents -- --todo=DIR    # pin the todo package directory
@@ -19,7 +27,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +87,15 @@ function substitute(source, replacements) {
 	return output;
 }
 
+/**
+ * Files that used to be installed here and must NOT be any more.
+ *
+ * The first is a prompt, not a template: /blender no longer spawns a manager,
+ * the session that ran the command is the manager. Delete the installed copy so
+ * nothing can spawn the stale one.
+ */
+const retired = ["blender-manager.md"];
+
 const options = parseArgs(process.argv.slice(2));
 const extensionDir = resolveExtensionDir(options);
 const todoEntry = resolveTodoEntry(options);
@@ -88,7 +105,7 @@ const replacements = [
 ];
 
 const sources = readdirSync(SOURCE_DIR)
-	.filter((name) => name.endsWith(".md"))
+	.filter((name) => name.endsWith(".md") && !retired.includes(name))
 	.sort();
 
 if (sources.length === 0) {
@@ -124,6 +141,18 @@ for (const name of sources) {
 	mkdirSync(dirname(target), { recursive: true });
 	writeFileSync(target, expected);
 	console.log(`wrote    ${target}`);
+}
+
+for (const file of retired) {
+	const destination = join(options.out, file);
+	if (!existsSync(destination)) continue;
+	if (options.check) {
+		console.error(`RETIRED  ${destination}`);
+		drifted += 1;
+		continue;
+	}
+	unlinkSync(destination);
+	console.log(`retired  ${destination}`);
 }
 
 if (options.check) {

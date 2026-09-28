@@ -3,19 +3,25 @@
  * repo veoery/BlenderAgent, MIT license).
  *
  * Registers 13 blender_* tools + bundled skills, the /blender and
- * /blender-exit slash commands, and injects Blender workflow guidance + live
- * session context before turns of a MANAGER session.
+ * /blender-exit slash commands, and injects the manager prompt + live session
+ * context before turns of a MANAGER session.
+ *
+ * The /blender command session IS the manager: there is no manager subagent, so
+ * the user watches the build's todos and progress in the session they typed the
+ * command into. The manager prompt lives in blender/agents/blender-manager.md and
+ * is read at runtime (config.ts getManagerPrompt) rather than installed as a
+ * spawnable agent, so a second, drifting copy cannot exist.
  *
  * Manager mode is entered ONLY by the /blender command — never by a blender_*
- * tool call. It governs the guidance section, the per-turn live-state snapshot,
+ * tool call. It governs the manager prompt, the per-turn live-state snapshot,
  * and the write/edit/image gate. A direct tool call is worker-level work, so it
- * neither injects manager guidance nor gets gated; the tools stay usable on
- * their own. Mode ends at /blender-exit (which lifts only the parent's gate,
+ * neither injects the prompt nor gets gated; the tools stay usable on
+ * their own. Mode ends at /blender-exit (which lifts only this session's gate,
  * not the tools) or on the next session_start, because a session that
  * interleaves Blender with other work would otherwise stay restricted until a
  * /new.
  *
- * The constant guidance goes into a `blender` system-prompt section, so it
+ * The constant manager prompt goes into a `blender` system-prompt section, so it
  * never lands after the user prompt; only the volatile live-state snapshot is
  * appended per turn.
  * The Blender UI is NOT launched at pi/session start. It is launched lazily
@@ -56,17 +62,7 @@ import {
 import { isLiveBridgeAlive } from "./launch.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch } from "./launch.js";
-
-const BLENDER_ROUTER_GUIDANCE = [
-	"You are operating inside vibe-blender with Blender-native tools available.",
-	"If the prompt arrived via the /blender command, treat the entire message as a Blender task.",
-	"You are the /blender ROUTER, not the manager: the top level of this hierarchy is the `blender-manager` subagent, and it is what owns a whole build. Your job is to launch it with the user's task, let it run, and relay what it returns. Do NOT plan modules, write briefs, or drive blender_* tools one at a time yourself — an enforced gate blocks your `write`/`edit` and image reads, so a direct approach is a dead end.",
-	"`blender-manager` is the top level of this hierarchy, and you reach it exactly one way: spawn it. Give it a self-contained task — the goal, the workspace path if the user named one, the acceptance criteria, and anything the user said about the current scene — and it plans the modules, spawns its own workers, critics, diagnosticians and camera aligner, and returns a finished result, which is why the build does not consume your context.",
-	"Call subagents_enable (no arguments) once before that spawn: a fresh session does not have the subagent tool active until you do. Then read only the report the manager returns; never read the module sources it ran.",
-	"You need none of the rest of this guidance. The roster and what each agent is for, the workspace and tool conventions, the render and reference rules, the image budget, the routing rules and the loop all live in the manager's OWN prompt, which is longer and more precise than anything reconstructed here — and a spawned manager does not inherit this session's prompt, so that is where those facts have to be. Do not re-derive them here, and do not paraphrase them into a brief: the manager already holds them.",
-	"Do not restate tool schemas in prose. Use the tool definitions directly.",
-	"You entered by /blender, so this session is the ROUTER: the gate on your own `write`/`edit` and image reads stays up until the user runs `/blender-exit` or the session restarts. The blender_* tools themselves remain usable either way. So if the user starts asking for something that is plainly NOT Blender work and needs you to write or edit files — a C# script, a Unity scene, project files of any kind — do not pretend you can do it and do not silently do nothing. Say once, in one sentence, that you are still the /blender router and that `/blender-exit` will lift it, then continue with whatever Blender task is still open. Mention it at most once per session: if they have heard it and are still asking, they have decided, and repeating yourself is nagging rather than helping. Never suggest it to unblock a Blender task — a Blender task never needs it, since the manager is how a build happens.",
-].join(" ");
+import { getManagerPrompt } from "./config.js";
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 1_500;
 
@@ -78,18 +74,6 @@ const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 1_500;
  */
 const CHILD_AGENT_PROMPT_PATTERN = /<active_agent\s+name="([^"]*)"/;
 
-/**
- * The agent `/blender` spawns to run a whole Blender build.
- *
- * It is the TOP LEVEL of the Blender hierarchy: the command spawns it directly
- * and it spawns everything below it. Because the session that ran the command
- * is only a router, a non-Blender session (a Unity bridge, say) can hand over
- * one self-contained Blender task and get a finished result back, instead of
- * driving blender_* tools one at a time and holding the whole build in its own
- * context.
- */
-const BLENDER_MANAGER_AGENT_NAME = "blender-manager";
-
 /** The name pi-subagents stamped into this session's prompt, or null if none. */
 function readActiveAgentName(systemPrompt: string): string | null {
 	const match = CHILD_AGENT_PROMPT_PATTERN.exec(systemPrompt);
@@ -97,25 +81,22 @@ function readActiveAgentName(systemPrompt: string): string | null {
 }
 
 /**
- * Whether this session is acting as a Blender manager, and so is subject to
- * the manager gate.
+ * Whether this session is acting as THE manager, and so is subject to the gate.
  *
- * Two ways to get here, deliberately:
- *   - the /blender router session itself (managerMode), which must delegate
- *     rather than author, or
- *   - a spawned `blender-manager` subagent, recognised by name, which owns the
- *     whole build and delegates it further.
+ * /blender does not spawn a manager -- this session IS the manager, so the user
+ * can watch its todos and progress in the session they are typing in. That
+ * makes the test a single one: the root session in manager mode is the
+ * manager, and ANY child is not.
  *
- * Identity rather than "is this the parent" is the key detail: every other
- * child (worker, critic, finalizer, …) is exempt from the gate because it MUST
- * author code and look at renders. A spawned manager is a child too, so the
- * blanket child exemption would silently switch its own role off and it would
- * start writing module scripts itself — exactly the failure the gate exists to
- * prevent.
+ * Every child (worker, critic, finalizer, …) is exempt because it MUST author
+ * code and look at renders, which is exactly what the gate forbids, and it
+ * carries an `<active_agent name="...">` tag in its prompt. Gating those would
+ * make the delegation this mode exists to cause impossible. The exemption is by
+ * STRUCTURE -- being a child at all -- rather than by a named exception: there
+ * is no manager subagent left to name, which is the whole point of the change.
  */
 function isManagerSession(systemPrompt: string): boolean {
-	return readActiveAgentName(systemPrompt) === BLENDER_MANAGER_AGENT_NAME ||
-		(managerMode && readActiveAgentName(systemPrompt) === null);
+	return managerMode && readActiveAgentName(systemPrompt) === null;
 }
 
 /**
@@ -135,11 +116,11 @@ function isManagerSession(systemPrompt: string): boolean {
  * agents than the Blender roster does.
  *
  * `blender-camera-aligner` is in the list because the hierarchy is FLAT at the
- * top: /blender is a thin router, `blender-manager` is spawned straight from
- * it, and the aligner is spawned from the manager, so the aligner's own nested
- * critics land at depth 3 — exactly the configured `maxSubagentDepth: 3`. It
- * used to be refused here, on the grounds that a manager at the old depth could
- * not afford it; flattening is what made it affordable.
+ * top: the /blender command session is the manager and spawns straight down, so
+ * the aligner's own nested critics land at depth 3 — exactly the configured
+ * `maxSubagentDepth: 3`. It used to be refused here, on the grounds that a
+ * manager at the old depth could not afford it; flattening is what made it
+ * affordable.
  *
  * `blender-reference-describer` is in the list because it nests nothing: it
  * reads one reference and returns text. It is also load-bearing rather than
@@ -1018,9 +999,8 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 			//
 			// Detected the same way the manager gate detects a child turn: the
 			// pi-subagents prompt runtime stamps <active_agent name="..."/> into
-			// every child system prompt. This applies to a spawned
-			// blender-manager child too — it is a child, and the session that
-			// spawned it is still alive and still wants the UI.
+			// every child system prompt. Every child is exempt from owning the
+			// UI's lifetime, whatever it is.
 			if (CHILD_AGENT_PROMPT_PATTERN.test(ctx.getSystemPrompt())) return;
 			// A pi that never launched a UI has nothing to release, and asking
 			// would cold-launch one purely to shut it down.
@@ -1061,7 +1041,7 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 				// guard so a Blender closed just before this is still relaunched.
 				resetBridgeLaunch();
 				ensureLiveBridgeLaunchedForce();
-				ctx.ui.notify("Blender engaged — routing task to the agent.", "info");
+				ctx.ui.notify("Blender engaged — this session is the manager.", "info");
 				pi.sendUserMessage(task, { deliverAs: ctx.isIdle() ? undefined : "steer" });
 			},
 		});
@@ -1084,17 +1064,17 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		// Manager-role enforcement: the parent session plans and delegates, the
+		// Manager-role enforcement: this session plans and delegates, the
 		// `blender-worker` subagents author and run module code, and the
 		// `blender-critic` subagents judge renders. This gate makes that
-		// structural instead of advisory — without it the parent drifts into
+		// structural instead of advisory — without it the manager drifts into
 		// doing everything itself and burns its context on module source.
 		//
-		// Blocked in the router: every `write`/`edit`, and `read` of an image
+		// Blocked in the manager: every `write`/`edit`, and `read` of an image
 		// (judging renders is the critic's job, and images are the most
-		// context-expensive thing in the loop). Allowed in the router: text
+		// context-expensive thing in the loop). Allowed in the manager: text
 		// reads including `*.md` (skill and agent definitions are needed to
-		// write the manager's brief), `bash`, and the pi-memory tools.
+		// write a worker's brief), `bash`, and the pi-memory tools.
 		//
 		// Gated on managerMode, not on any blender_* tool having run: the manager
 		// role exists only after /blender. A session that calls a blender_* tool
@@ -1103,15 +1083,15 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		pi.on("tool_call", (event, ctx) => {
 			if (MANAGER_ALLOWED_TOOL_NAMES.has(event.toolName)) return;
 			// Workers are the ones that must be able to write code and look at
-			// renders, so the gate applies to the router and the manager and to
-			// no one else — see isManagerSession.
+			// renders, so the gate applies to the manager session and to no one
+			// else — see isManagerSession.
 			if (!isManagerSession(ctx.getSystemPrompt())) return;
 
 			if (event.toolName === "write" || event.toolName === "edit") {
 				return {
 					block: true,
 					reason:
-						"Manager role: do not author files. In this session the first move is to spawn `blender-manager` — the top level of the hierarchy — with a self-contained task (goal, workspace, acceptance criteria); it plans the modules and spawns the workers. Authoring Blender code — module scripts or the root script.py — is `blender-worker`'s job, and it is reached through the manager. Read only the manager's returned report. If the user has not asked you to delegate yet, do it anyway: this session is manager-only, so a direct approach is a dead end.",
+						"Manager role: do not author files. This session IS the manager — you were not handed a job to relay — and the subagents you spawn are the ones that do the work. Authoring Blender code, whether a module script or the root script.py, is `blender-worker`'s job: plan the modules, then spawn one per module with a compact brief (goal, module name, object names, acceptance criteria) and read only the reports that come back. A direct approach is a dead end: your `write`/`edit` is blocked for the rest of this manager mode.",
 				};
 			}
 
@@ -1119,11 +1099,7 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 				// `agent` is absent for management/control actions (status, list,
 				// stop, …), so only a one-child spawn is constrained here.
 				const target = typeof event.input.agent === "string" ? event.input.agent.trim() : "";
-				if (
-					target.length > 0 &&
-					readActiveAgentName(ctx.getSystemPrompt()) === BLENDER_MANAGER_AGENT_NAME &&
-					!BLENDER_MANAGER_ROSTER.has(target)
-				) {
+				if (target.length > 0 && !BLENDER_MANAGER_ROSTER.has(target)) {
 					return {
 						block: true,
 						reason: `Manager role: you may only spawn ${[...BLENDER_MANAGER_ROSTER].join(", ")}. "${target}" is not one of them, and each of those already owns a distinct job in this build, so spawning something else means reassigning work that has an owner. If none of them covers a capability you need, say so in your report rather than reaching for an unrelated agent.`,
@@ -1147,20 +1123,24 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 
 		pi.on("before_agent_start", async (event, ctx) => {
 		// Manager mode is entered only by the /blender command, never by a
-		// blender_* tool call: the workflow guidance and its write/edit/image
-		// gate describe a task the user explicitly handed to Blender. Guidance
-		// injection alone never spawns Blender eagerly; the bridge request
-		// it makes can still trigger a lazy (re)launch of the UI.
+		// blender_* tool call: the manager prompt and its write/edit/image gate
+		// describe a task the user explicitly handed to Blender. Injecting the
+		// prompt alone never spawns Blender eagerly; the bridge request it makes
+		// can still trigger a lazy (re)launch of the UI.
 		if (!managerMode) return undefined;
 
-		// The workflow guidance is constant, so it belongs in the system prompt
-		// as its own section rather than in a message appended after the user
-		// prompt. Pi diffs system sections per run and emits an update only when a
-		// section actually changes, so this costs nothing on steady-state turns
-		// and never lands after the user's message.
-		event.systemPromptOptions.sections.blender = BLENDER_ROUTER_GUIDANCE;
+		// The manager's own prompt is the WHOLE of its instructions now. There
+		// is no separate router blob, because there is no router: this session
+		// is the manager, and everything it needs to know belongs in one place.
+		//
+		// It is constant, so it belongs in the system prompt as its own section
+		// rather than in a message appended after the user prompt. Pi diffs
+		// system sections per run and emits an update only when a section
+		// actually changes, so this costs nothing on steady-state turns and
+		// never lands after the user's message.
+		event.systemPromptOptions.sections.blender = getManagerPrompt();
 
-		// Subagents get the constant guidance but not the live snapshot. A worker
+		// Subagents get the constant prompt but not the live snapshot. A worker
 		// running modules/<name>/script.py has an explicit brief with object names
 		// already, and the snapshot's deictic framing ("treat as the only source of
 		// truth for the current selection") would point it at its own selection

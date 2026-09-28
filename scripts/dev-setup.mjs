@@ -219,7 +219,11 @@ function runInstallAgents() {
 function checkTodoProvider() {
 	const entry = join(AGENT_DIR, "npm", "node_modules", TODO_PACKAGE, "index.ts");
 	if (existsSync(entry)) {
-		report("todo provider for blender-manager", true, TODO_PACKAGE);
+		// Named for the manager PROMPT, not for an installed template:
+		// blender-manager.md is no longer installed (the /blender command session
+		// is the manager), but the prompt it injects still names `todo`, so the
+		// provider this checks is exactly the one that prompt will be missing.
+		report("todo provider for the manager prompt", true, TODO_PACKAGE);
 		return;
 	}
 	report(
