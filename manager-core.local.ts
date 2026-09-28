@@ -199,9 +199,14 @@ export function createManagerMode(options: ManagerModeOptions = {}): ManagerMode
 		systemPrompt: string | null | undefined,
 	): ToolCallRefusal | null {
 		if (!isManagerSession(systemPrompt)) return null;
-		if (allowed.has(event.toolName)) return null;
+		// Refusals are consulted BEFORE the allowlist: the allowlist is coarse (a
+		// manager may `read` files) while a refusal is specific (a manager may not
+		// `read` an image, though `read` is allowed). Checking the allowlist first
+		// lets it short-circuit the refusals, which is a silent loss of policy —
+		// nothing reports the refusal unreachable, it just stops firing.
 		const extra = options.onGateMessage?.(event) ?? null;
 		if (extra) return extra;
+		if (allowed.has(event.toolName)) return null;
 		return {
 			block: true,
 			reason:

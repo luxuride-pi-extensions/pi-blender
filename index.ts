@@ -141,14 +141,42 @@ const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-camera-aligner",
 ]);
 
+/**
+ * The manager's own toolkit. The gate is deny-by-default, so a tool missing
+ * here is REFUSED, and the refusals below are the only way back in.
+ *
+ * Kept in lockstep with the `tools:` line in blender/agents/blender-manager.md
+ * (line 30) — that line is what pi actually hands the manager, so a tool added
+ * there and forgotten here blocks the manager from using its own kit. The
+ * installed copy of the prompt keeps the frontmatter even though the injected
+ * section strips it, so test/allowlists.mjs compares the two and fails loudly
+ * rather than letting them drift.
+ *
+ * The previous list was `memory_*` and `scratchpad`, neither of which any
+ * installed package provides, so the gate refused every tool the manager
+ * actually has.
+ */
 const MANAGER_ALLOWED_TOOL_NAMES = new Set([
-	"memory_write",
-	"memory_read",
-	"memory_search",
-	"memory_forget",
-	"memory_restore",
-	"memory_status",
-	"scratchpad",
+	// Delegation and supervision: without these the manager cannot do the one
+	// thing its prompt tells it to do.
+	"subagent",
+	"subagents_enable",
+	"contact_supervisor",
+	// Planning and reading agent definitions to write a brief with.
+	"todo",
+	"read",
+	"grep",
+	"find",
+	"ls",
+	"ask_user_question",
+	// Blender inspection. Read-only: the manager may look, not author.
+	"blender_workspace_init",
+	"blender_scene_info",
+	"blender_add_reference",
+	"blender_module_revert",
+	"blender_session_context",
+	"blender_bridge_status",
+	"blender_log_critique",
 ]);
 
 /** Image types `read` would attach to the request, mirroring pi's own sniffing. */
