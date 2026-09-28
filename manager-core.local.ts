@@ -245,8 +245,21 @@ export interface ContextInjectionOptions {
 	timeoutMs?: number;
 	shouldInject?: () => boolean;
 	getPrompt: () => string;
-	fetchState: (ctx: unknown) => Promise<unknown>;
-	formatState: (state: unknown, options: { timeoutMs: number; extraGuidance: () => string[] }) => string;
+	/** Fixed text injected verbatim as the per-turn message, with no fetch. */
+	staticContent?: string | null;
+	/**
+	 * Whether a CHILD session also receives the system-prompt section.
+	 *
+	 * Default true: the constant prompt is what tells a subagent which side of
+	 * the bridge it is on. The two-application manager sets this false, because
+	 * its workers already state their own side and its prompt is the connector's
+	 * instructions rather than a side's procedure.
+	 */
+	sectionReachesChildren?: boolean;
+	/** Fetch the live state. Required unless `staticContent` is set. */
+	fetchState?: (ctx: unknown) => Promise<unknown>;
+	/** Render the live state. Required unless `staticContent` is set. */
+	formatState?: (state: unknown, options: { timeoutMs: number; extraGuidance: () => string[] }) => string;
 	extraGuidance?: () => string[];
 	/** The recovery sentence for a failed fetch; each side names its own tool. */
 	failureGuidance?: (error: unknown) => string;
@@ -271,10 +284,30 @@ export type ContextInjectionHandler = (
  */
 export function createContextInjection(options: ContextInjectionOptions): ContextInjectionHandler {
 	const timeoutMs = options.timeoutMs ?? 30_000;
+	// Static content is injected verbatim, so passing a fetch as well would pay
+	// for a round trip and discard it. Throwing beats honouring one quietly.
+	if (options.staticContent != null && options.fetchState) {
+		throw new Error(
+			`createContextInjection("${options.section}"): pass staticContent or fetchState, not both. ` +
+				"Static content is injected verbatim, so a fetch would be paid for and discarded.",
+		);
+	}
 	return async function injectContext(event, ctx) {
 		if (options.shouldInject && !options.shouldInject()) return undefined;
 
-		if (event.systemPromptOptions?.sections) event.systemPromptOptions.sections[options.section] = options.getPrompt();
+		// The constant prompt first, unconditionally, including for children —
+		// it is what teaches a subagent which side of the bridge it is on. The
+		// two-application manager opts out: its workers already know their side,
+		// and its prompt is the connector's instructions rather than a side's
+		// procedure, so the argument does not apply there.
+		if ((options.sectionReachesChildren ?? true) || readActiveAgentName(event.systemPrompt) === null) {
+			if (event.systemPromptOptions?.sections) event.systemPromptOptions.sections[options.section] = options.getPrompt();
+		}
+
+		// Static path: no snapshot rule, no failure rule, nothing to fetch.
+		if (options.staticContent != null) {
+			return { message: { customType: options.customType, content: options.staticContent, display: true } };
+		}
 
 		// The snapshot is the parent's: a subagent's brief already names the
 		// objects it owns, and the snapshot's deictic framing would point it at
@@ -283,7 +316,7 @@ export function createContextInjection(options: ContextInjectionOptions): Contex
 
 		let content: string;
 		try {
-			content = options.formatState(await options.fetchState(ctx), {
+			content = options.formatState!(await options.fetchState!(ctx), {
 				timeoutMs,
 				extraGuidance: options.extraGuidance ?? (() => []),
 			});
