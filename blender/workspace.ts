@@ -2,6 +2,7 @@ import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "no
 import { dirname, join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderOpenBlend } from "./bridge.js";
+import { assertWorkspaceOwnership, buildWorkspaceOwner, classifyWorkspaceOwner, describeLiveOwner } from "./ownership.js";
 import type { BlenderWorkspaceManifest, WorkspaceInitOptions, WorkspaceInitResult } from "./types.js";
 import {
 	CRITIQUE_LOG_FILE,
@@ -350,6 +351,17 @@ export async function ensureWorkspaceInitialized(options: WorkspaceInitOptions):
 
 	const existingManifest = await readManifest(workspacePath);
 	if (existingManifest) {
+		// Same guard as loadWorkspaceManifest, and for the same reason: this is
+		// a workspace-opening path, so it is exactly where a second instance
+		// would otherwise put a second UI on one model.blend.
+		const liveness = await classifyWorkspaceOwner(existingManifest);
+		if (liveness === "live") {
+			assertWorkspaceOwnership(existingManifest, await describeLiveOwner(existingManifest));
+		}
+		if (liveness === "dead" || liveness === "unknown") {
+			await claimWorkspace(manifestPath, existingManifest.blendPath);
+			existingManifest.owner = buildWorkspaceOwner(existingManifest.blendPath);
+		}
 		await ensureWorkspaceScriptExists(workspacePath);
 		await ensureWorkspaceCritiqueLogExists(workspacePath);
 		return {
@@ -387,6 +399,7 @@ export async function ensureWorkspaceInitialized(options: WorkspaceInitOptions):
 		updatedAt: nowIso(),
 		latestIteration: 0,
 		template,
+		owner: buildWorkspaceOwner(blendPath),
 		sourceBlendPath: options.sourceBlend ? normalizeUserPath(options.cwd, options.sourceBlend) : undefined,
 		savedViews: {},
 		renderOutputs: [],
@@ -418,13 +431,51 @@ export function getIterationPaths(
 	};
 }
 
+/**
+ * Load a workspace manifest, refusing one another live pi instance is driving.
+ *
+ * This is the single chokepoint every workspace tool goes through -- render,
+ * module run, execute, probe, save-view, critique, reference -- so the guard
+ * lives here rather than in a helper each caller has to remember. A guard some
+ * callers invoke is not a guard.
+ *
+ * A dead or unreadable claim is taken over rather than refused, so a crashed
+ * session never locks the user out of their own workspace. When the claim is
+ * taken over it is rewritten, because leaving a dead instance's id in the
+ * manifest would make every later reader re-derive the same takeover.
+ */
 export async function loadWorkspaceManifest(cwd: string, workspace: string): Promise<BlenderWorkspaceManifest> {
 	const workspacePath = normalizeWorkspacePath(cwd, workspace);
 	const manifest = await readManifest(workspacePath);
 	if (!manifest) {
 		throw new Error(`Workspace manifest not found: ${getManifestPath(workspacePath)}`);
 	}
+
+	const liveness = await classifyWorkspaceOwner(manifest);
+	if (liveness === "live") {
+		assertWorkspaceOwnership(manifest, await describeLiveOwner(manifest));
+	}
+	if (liveness === "dead" || liveness === "unknown") {
+		await claimWorkspace(manifestPath(manifest), manifest.blendPath);
+	}
 	return manifest;
+}
+
+function manifestPath(manifest: BlenderWorkspaceManifest): string {
+	return getManifestPath(manifest.workspacePath);
+}
+
+/**
+ * Record this process as the workspace's owner.
+ *
+ * Deliberately does not assert: claiming is the action that makes a workspace
+ * MINE, so a caller that has already been refused has no business claiming it.
+ * A refused workspace keeps its real owner's record intact.
+ */
+export async function claimWorkspace(manifestPath: string, blendPath: string): Promise<void> {
+	await updateManifest(manifestPath, (current) => {
+		current.owner = buildWorkspaceOwner(blendPath);
+	});
 }
 
 export async function blenderWorkspaceInit(options: WorkspaceInitOptions): Promise<WorkspaceInitResult> {

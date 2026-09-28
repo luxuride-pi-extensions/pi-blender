@@ -12,7 +12,12 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { getBlankBlendPath, getBlenderBridgeDir, getBundledBlankBootstrapPath, getBundledBlenderBridgePath } from "./config.js";
+// Import cycle: blender/utils.ts imports resolveBlenderArgv from this module,
+// so this module must not import anything from blender/utils.ts. It may still
+// import from blender/reap.ts and blender/liveness.ts, which depend only on
+// config.js.
+import { getBlankBlendPath, getBlenderBridgeDir, getBundledBlankBootstrapPath, getBundledBlenderBridgePath, writeInstanceFile } from "./config.js";
+import { formatReapResult, reapOrphanedBridgeDirs } from "./blender/reap.js";
 // isHeartbeatFresh is aliased on import because launch.ts has a local
 // no-argument wrapper of the same name below; the module version takes a dir.
 import { isBridgeAlive, isHeartbeatFresh as isHeartbeatFreshIn } from "./blender/liveness.js";
@@ -104,6 +109,50 @@ let bridgeWatchdog: ReturnType<typeof setTimeout> | undefined;
 // Re-checks the bridge while a session runs, so a Blender that dies
 // mid-session is restarted instead of silently timing out the next request.
 let bridgeSupervisor: ReturnType<typeof setInterval> | undefined;
+// Set once this process has claimed its instance dir and swept its siblings.
+let instanceClaimed = false;
+
+/**
+ * Claim this process's instance dir and sweep its siblings, once.
+ *
+ * Deliberately tied to the FIRST LAUNCH rather than to session_start. A pi
+ * session that never engages Blender has no business creating a directory under
+ * the bridge root or enumerating the others: session_start fires for every pi
+ * user in the world, and doing bridge bookkeeping there means a workspace-free
+ * session leaves a directory behind and pays a sweep for it. The claim only
+ * means anything once a UI exists to be claimed by, and the sweep only has work
+ * to do once there are instance dirs to compare against.
+ *
+ * Sweep first, then claim, so this process never appears in its own sweep
+ * output. The instance id is fresh per process, so there is no stale dir of
+ * ours to protect — a previous process's dir is a sibling by definition, and
+ * that is exactly the dir this sweep is for.
+ */
+async function ensureInstanceClaimed(): Promise<void> {
+	if (instanceClaimed) return;
+	instanceClaimed = true;
+	try {
+		const result = await reapOrphanedBridgeDirs();
+		const summary = formatReapResult(result);
+		if (summary) console.error(summary);
+	} catch (error) {
+		// Housekeeping over other processes' leftovers. A failure here costs a
+		// stale dir, which the next launch also skips past, so it must never
+		// stop this process from launching its own UI.
+		console.error(
+			`[pi-vibe-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	try {
+		writeInstanceFile();
+	} catch (error) {
+		console.error(
+			`[pi-vibe-blender] could not record this Blender instance (${getBlenderBridgeDir()}): ${
+				error instanceof Error ? error.message : String(error)
+			}. Other pi instances will not be able to tell it apart from an orphan.`,
+		);
+	}
+}
 
 function clearBridgeWatchdog(): void {
 	if (bridgeWatchdog) {
@@ -262,6 +311,12 @@ export function ensureLiveBridgeLaunchedForce(): void {
 function launchBridge(): void {
 	bridgeLaunchStarted = true;
 	bridgeSpawnInFlight = true;
+	// Claim + sweep belong to the launch, not to session_start: see
+	// ensureInstanceClaimed. Fire-and-forget, and deliberately not awaited —
+	// the spawn below must not wait on a sweep of other processes' dirs, and
+	// the claim only has to land before a PEER looks, which is many seconds
+	// away.
+	void ensureInstanceClaimed();
 	if (process.env.VIBE_BLENDER_NO_BLENDER?.trim() === "1") {
 		bridgeSpawnInFlight = false;
 		return;

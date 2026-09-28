@@ -1176,7 +1176,15 @@ def touch_heartbeat():
     # not proof: the mtime is still the freshness signal, and the process
     # check can only ever turn "alive" into "dead", never the reverse.
     path = os.path.join(BRIDGE_DIR, "heartbeat")
-    payload = json.dumps({"pid": os.getpid(), "at": time.time()})
+    # blendPath is what makes the heartbeat usable as a claim: a pi process can
+    # die and leave its Blender running and beating, and that live UI still owns
+    # the blend it has open. Without this, a dead owner's claim would be taken
+    # over and the newcomer would open a second UI on a file the first is still
+    # writing. bpy.data.filepath is None on an unsaved scene, which is exactly
+    # the "own nothing yet" answer.
+    payload = json.dumps(
+        {"pid": os.getpid(), "at": time.time(), "blendPath": bpy.data.filepath or None}
+    )
     try:
         # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
         with open(path, "w", encoding="utf-8") as handle:

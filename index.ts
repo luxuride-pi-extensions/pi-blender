@@ -44,11 +44,8 @@ import {
 	blenderSetMode,
 	blenderWorkspaceInit,
 	formatCompactSessionContextPrompt,
-	formatReapResult,
 	getBundledBlenderSkillsDir,
-	reapOrphanedBridgeDirs,
 } from "./blender/runtime.js";
-import { writeInstanceFile } from "./config.js";
 import { isLiveBridgeAlive } from "./launch.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch } from "./launch.js";
@@ -960,26 +957,15 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		// fork) must not inherit the guidance-injection flag from a previous
 		// one, so it is reset on every session start.
 		//
-		// This is also where this pi PROCESS claims its private bridge dir. The
-		// claim is per-process, not per-session, because the Blender it owns is
-		// per-process: writing it again on /new would be a no-op at best, and
-		// sweeping here again would re-adopt the dir this process is using.
+		// Nothing else happens here on purpose. The bridge dir claim and the
+		// sibling sweep used to run at session_start, which meant every pi
+		// session in the world — including ones that never touch Blender —
+		// created a directory under the bridge root and enumerated the others.
+		// Both now hang off the first actual launch (see launch.ts
+		// ensureInstanceClaimed), because a claim only means something once a
+		// UI exists and a sweep only has work to do once instance dirs do.
 		pi.on("session_start", () => {
 			managerMode = false;
-			writeInstanceFile();
-			// Fire-and-forget, but never unhandled: the sweep is housekeeping
-			// over other processes' leftovers, so a failure here (an
-			// unreadable dir, a race with a peer exiting) must not surface as
-			// an unhandled rejection during startup. The cost of skipping the
-			// sweep is a stale dir, which the next session also skips past.
-			void reapOrphanedBridgeDirs()
-				.then((result) => {
-					const summary = formatReapResult(result);
-					if (summary) console.error(summary);
-				})
-				.catch((error: unknown) => {
-					console.error(`[pi-vibe-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`);
-				});
 		});
 
 		// Release this instance's Blender when the PROCESS is ending. Only for

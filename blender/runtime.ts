@@ -1,6 +1,14 @@
 export { blenderAddReference, getReferencesDir } from "./reference.js";
 export { blenderLogCritique } from "./critique.js";
 export { formatReapResult, reapOrphanedBridgeDirs } from "./reap.js";
+export {
+	assertWorkspaceOwnership,
+	buildWorkspaceOwner,
+	classifyWorkspaceOwner,
+	describeLiveOwner,
+	findLiveOwnersOfBlend,
+} from "./ownership.js";
+export type { LiveOwnerInfo, OwnerLiveness } from "./ownership.js";
 export { blenderExecutePython } from "./execute.js";
 export { blenderBridgeStatus } from "./status.js";
 export { blenderGeometryProbe } from "./geometry-probe.js";
@@ -25,6 +33,7 @@ export type {
 	BlenderSessionSceneContext,
 	BlenderSessionSelectionContext,
 	BlenderSessionViewportContext,
+	BlenderSharedWithPeer,
 	BlenderViewportMode,
 	BlenderWorkspaceManifest,
 	BridgeStatusOptions,
@@ -60,6 +69,8 @@ export type {
 	SetModeResult,
 	WorkspaceInitOptions,
 	WorkspaceInitResult,
+	WorkspaceOwner,
 } from "./types.js";
+export { claimWorkspace } from "./workspace.js";
 export { getBundledBlenderAgentsDir, getBundledBlenderSkillsDir } from "./utils.js";
 export { blenderWorkspaceInit } from "./workspace.js";

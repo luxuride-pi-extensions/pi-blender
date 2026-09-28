@@ -46,8 +46,17 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `flatpak info org.blender.Blender` autodetect → `blender` on PATH.
 3. **Bridge dir** — default moved from `~/.pi/agent/blender-bridge` to
    `~/.cache/vibe-blender/bridge` (XDG cache), override with
-   `PI_BLENDER_BRIDGE_DIR`.
-4. **Launch** — Blender is NOT launched at pi/session start. It launches
+   `PI_BLENDER_BRIDGE_DIR`. The bridge dir is **per pi process**:
+   `…/bridge/<instance-id>`, so concurrent instances never contend for one
+   mutable scene. The override disables that scheme entirely — one flat dir,
+   no sweep — so a pinned dir's contents are treated as yours, not as instances.
+4. **Nothing is written until Blender is launched** — the instance dir claim
+   and the sweep of other instances' dirs hang off the *first launch*
+   (`launch.ts` `ensureInstanceClaimed`), not off `session_start`. A pi
+   session that never engages Blender therefore creates no directory under the
+   bridge root and enumerates no neighbours. Both steps are also idempotent:
+   the claim happens once per process, so `/new` never rewrites `startedAt`.
+5. **Launch** — Blender is NOT launched at pi/session start. It launches
    when the user engages Blender: the `/blender` command calls
    `ensureLiveBridgeLaunchedForce()`, and any `blender_*` tool call
    triggers the lazy `ensureLiveBridgeLaunched()` path in
@@ -58,18 +67,34 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `live-bridge.py` claims each request with an atomic rename before
    executing it, so even two pollers can never run one request twice.
    `VIBE_BLENDER_NO_BLENDER=1` still opts out entirely.
-5. **Blank scene on launch** — the UI launch runs `blank-bootstrap.py`
+6. **Blank scene on launch** — the UI launch runs `blank-bootstrap.py`
    first: it strips the default startup Cube/Camera/Light and saves the
    result to `blank.blend` (flatpak-visible under the XDG cache home), so
    the live session starts from a clean, saved, non-dirty scene. No manual
    "save/discard startup scene" step is needed before editing. Note this also
    means a `template: "blank"` workspace has **no camera and no lights** at
    all — use the default `studio` template unless you have a reason not to.
-6. **Engagement gating** — the workflow-guidance + live-session-context
+7. **Engagement gating** — the workflow-guidance + live-session-context
    block is injected when the user runs the `/blender` slash command or
    after a `blender_*` tool has already run in the session; no keyword
    detection of the prompt. Non-Blender pi sessions pay no prompt or
    bridge-poll cost.
+8. **One workspace, one instance** — a workspace records which pi instance
+   claimed it, and a second instance opening it is **refused** rather than
+   shared: two Blender windows on one `model.blend` overwrite each other on
+   save, and neither can tell the other exists. The check lives in
+   `loadWorkspaceManifest`, the one chokepoint every workspace tool goes
+   through, so no tool can bypass it. A claim from a **dead** instance is
+   taken over silently — nothing is answering, and a claim that can never
+   block anyone is worse than no claim. The claim is advisory, never a lock: a
+   crashed session never locks you out of your own workspace.
+9. **Peers are visible, not hidden** — a live peer UI holding the same blend
+   is reported in the per-turn session snapshot (`sharedWith`, plus a warning
+   line), because the read-only context tool cannot refuse anything but can
+   tell a session that a second window is watching the file it is about to
+   mutate. Peer discovery reads heartbeats, which now carry the open
+   `blendPath`, so it reports what a UI actually has open rather than what a
+   claim file once said.
 
 ## Env vars
 

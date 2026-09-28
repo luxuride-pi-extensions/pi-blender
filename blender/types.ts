@@ -121,6 +121,24 @@ export interface BlenderModuleRunRecord {
 	status: "ok" | "failed";
 }
 
+/**
+ * Which pi instance claimed a workspace.
+ *
+ * Written by blender_workspace_init so a second instance knows the blend is
+ * already being driven elsewhere. Advisory rather than authoritative: the
+ * liveness check in blender/ownership.ts decides whether the claim still means
+ * anything, because a claim left by a process that has since exited must never
+ * lock anyone out of their own workspace.
+ */
+export interface WorkspaceOwner {
+	/** Per-process random id, matching the bridge dir name. See config.ts. */
+	instanceId: string;
+	pid: number;
+	/** The blend this instance opened, so a mismatch is visible. */
+	blendPath: string;
+	claimedAt: string;
+}
+
 export interface BlenderWorkspaceManifest {
 	version: 1 | 2;
 	workspaceId: string;
@@ -132,6 +150,11 @@ export interface BlenderWorkspaceManifest {
 	latestIteration: number;
 	template: string;
 	sourceBlendPath?: string;
+	/**
+	 * Absent on manifests written before ownership existed, which is what makes
+	 * an old workspace adoptable rather than permanently unclaimable.
+	 */
+	owner?: WorkspaceOwner;
 	savedViews: Record<string, BlenderSavedView>;
 	/** Appended by blender_add_reference; absent until the first reference. */
 	references?: BlenderReference[];
@@ -282,11 +305,28 @@ export interface SessionContextOptions {
 	signal?: AbortSignal;
 }
 
+/** Another live instance holding the same blend open. */
+export interface BlenderSharedWithPeer {
+	instanceId: string;
+	/** 0 when the peer has no instance.json, i.e. an unclaimed beating UI. */
+	pid: number;
+	bridgeDir: string;
+	blendPath: string;
+}
+
 export interface SessionContextResult {
 	requestedWorkspacePath: string | null;
 	requestedBlendPath: string | null;
 	workspacePath: string | null;
 	matchesWorkspace: boolean | null;
+	/**
+	 * Other live pi instances whose Blender currently has this blend open.
+	 *
+	 * Reported, not enforced: this tool is read-only, so it can only say that a
+	 * second window is watching the same file. The refusal lives in
+	 * loadWorkspaceManifest, on the path that would actually open it.
+	 */
+	sharedWith: BlenderSharedWithPeer[];
 	warnings: string[];
 	file: BlenderSessionFileContext | null;
 	scene: BlenderSessionSceneContext | null;

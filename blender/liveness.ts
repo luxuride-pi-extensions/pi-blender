@@ -82,6 +82,26 @@ export function isHeartbeatPidAlive(bridgeDir: string = getBlenderBridgeDir()): 
 }
 
 /**
+ * Which blend a bridge dir's UI currently has open, or undefined when the
+ * heartbeat predates the field.
+ *
+ * The claim in the workspace manifest is not enough on its own: a pi process
+ * can die and leave its Blender running and beating, and that live UI still owns
+ * the blend it has open. Reading it here makes the ownership check a question
+ * about the actual UI rather than about a file the dead process left behind.
+ */
+export function readHeartbeatBlendPath(bridgeDir: string = getBlenderBridgeDir()): string | undefined {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(join(bridgeDir, "heartbeat"), "utf-8"));
+		if (typeof parsed !== "object" || parsed === null) return undefined;
+		const value = (parsed as { blendPath?: unknown }).blendPath;
+		return typeof value === "string" && value.length > 0 ? value : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Full liveness answer for a bridge dir: fresh AND backed by a live pid.
  *
  * When `onFresh` is supplied it runs on the fresh-but-unconfirmed path, which

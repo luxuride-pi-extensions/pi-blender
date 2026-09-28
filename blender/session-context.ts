@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import { requestLiveBlenderSessionContext } from "./bridge.js";
+import { findLiveOwnersOfBlend } from "./ownership.js";
 import type { BlenderSessionContextCategory, SessionContextOptions, SessionContextResult } from "./types.js";
 import { fileExists, LIVE_BRIDGE_TIMEOUT_MS, normalizeWorkspacePath } from "./utils.js";
 import { getManifestPath, loadWorkspaceManifest } from "./workspace.js";
@@ -48,6 +49,25 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 	if (!bridgeResult.isSaved) {
 		warnings.push("Live Blender is on an unsaved scene.");
 	}
+
+	// A peer holding the same blend. Reported rather than enforced here, because
+	// this tool is read-only: it can only tell the session that a second window
+	// is watching the file it is about to mutate. The refusal lives in
+	// loadWorkspaceManifest, which is the path that would actually open it.
+	// The catch is deliberate: peer discovery is a read of other processes'
+	// dirs, so any failure there must not cost this session its own snapshot.
+	let sharedWith: SessionContextResult["sharedWith"] = [];
+	if (bridgeResult.blendPath) {
+		const peers = await findLiveOwnersOfBlend(bridgeResult.blendPath).catch(() => []);
+		if (peers.length > 0) {
+			sharedWith = peers;
+			warnings.push(
+				`Another live pi instance also has this blend open (${peers
+					.map((peer) => `instance ${peer.instanceId}${peer.pid ? ` pid ${peer.pid}` : ""}`)
+					.join(", ")}). Anything saved here overwrites what that instance has.`,
+			);
+		}
+	}
 	if (bridgeResult.isDirty) {
 		warnings.push("Live Blender has unsaved changes.");
 	}
@@ -65,6 +85,7 @@ export async function blenderSessionContext(options: SessionContextOptions): Pro
 		requestedBlendPath,
 		workspacePath,
 		matchesWorkspace,
+		sharedWith,
 		warnings,
 		file: shouldInclude(options.include, "file")
 			? {
@@ -146,6 +167,7 @@ export function formatCompactSessionContextPrompt(result: SessionContextResult):
 	const compactWarnings = result.warnings.filter(
 		(warning) =>
 			warning.includes("unsaved") ||
+			warning.includes("Another live pi instance") ||
 			warning.includes('ambiguous references like "it"') ||
 			warning.includes("not the requested workspace"),
 	);
