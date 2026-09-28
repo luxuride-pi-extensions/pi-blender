@@ -1,5 +1,6 @@
 export { blenderAddReference, getReferencesDir } from "./reference.js";
 export { blenderLogCritique } from "./critique.js";
+export { formatReapResult, reapOrphanedBridgeDirs } from "./reap.js";
 export { blenderExecutePython } from "./execute.js";
 export { blenderBridgeStatus } from "./status.js";
 export { blenderGeometryProbe } from "./geometry-probe.js";

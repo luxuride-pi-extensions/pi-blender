@@ -44,8 +44,13 @@ import {
 	blenderSetMode,
 	blenderWorkspaceInit,
 	formatCompactSessionContextPrompt,
+	formatReapResult,
 	getBundledBlenderSkillsDir,
+	reapOrphanedBridgeDirs,
 } from "./blender/runtime.js";
+import { writeInstanceFile } from "./config.js";
+import { isLiveBridgeAlive } from "./launch.js";
+import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch } from "./launch.js";
 
 const BLENDER_WORKFLOW_GUIDANCE = [
@@ -954,9 +959,56 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 		// Blender engagement is per-session: a fresh session (/new, resume, or
 		// fork) must not inherit the guidance-injection flag from a previous
 		// one, so it is reset on every session start.
-
+		//
+		// This is also where this pi PROCESS claims its private bridge dir. The
+		// claim is per-process, not per-session, because the Blender it owns is
+		// per-process: writing it again on /new would be a no-op at best, and
+		// sweeping here again would re-adopt the dir this process is using.
 		pi.on("session_start", () => {
 			managerMode = false;
+			writeInstanceFile();
+			// Fire-and-forget, but never unhandled: the sweep is housekeeping
+			// over other processes' leftovers, so a failure here (an
+			// unreadable dir, a race with a peer exiting) must not surface as
+			// an unhandled rejection during startup. The cost of skipping the
+			// sweep is a stale dir, which the next session also skips past.
+			void reapOrphanedBridgeDirs()
+				.then((result) => {
+					const summary = formatReapResult(result);
+					if (summary) console.error(summary);
+				})
+				.catch((error: unknown) => {
+					console.error(`[pi-vibe-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`);
+				});
+		});
+
+		// Release this instance's Blender when the PROCESS is ending. Only for
+		// reason "quit": "reload", "new", "fork" and "resume" all keep the same
+		// process alive with its Blender still wanted, and shutting the UI down
+		// there would destroy a session the user is about to continue in.
+		//
+		// Idempotent and fail-silent by design. This runs during teardown, where
+		// a thrown error has nowhere useful to go, and the worst case of every
+		// failure here is a Blender window the user closes by hand — which is
+		// exactly the situation the next process's reaper also cleans up.
+		pi.on("session_shutdown", async (event) => {
+			if (event.reason !== "quit") return;
+			// A pi that never launched a UI has nothing to release, and asking
+			// would cold-launch one purely to shut it down.
+			if (!isLiveBridgeAlive()) return;
+			try {
+				const result = await requestLiveBlenderShutdown({ save: true, timeoutMs: 5_000 });
+				if (result.saveError) {
+					console.error(
+						`[pi-vibe-blender] warning: could not save "${result.blendPath ?? "the open blend"}" before quitting Blender: ${result.saveError}`,
+					);
+				}
+			} catch (error) {
+				// Never block process exit on a bridge that is already gone.
+				console.error(
+					`[pi-vibe-blender] warning: could not cleanly shut down the live Blender UI: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
 		});
 
 		// Blender UI is NOT launched at pi/session start. It is launched when

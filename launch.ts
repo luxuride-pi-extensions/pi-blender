@@ -9,25 +9,19 @@
  *   4. "blender" on PATH
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { getBlankBlendPath, getBlenderBridgeDir, getBundledBlankBootstrapPath, getBundledBlenderBridgePath } from "./config.js";
+// isHeartbeatFresh is aliased on import because launch.ts has a local
+// no-argument wrapper of the same name below; the module version takes a dir.
+import { isBridgeAlive, isHeartbeatFresh as isHeartbeatFreshIn } from "./blender/liveness.js";
 
 const DEFAULT_BLENDER_PATH = "/Applications/Blender.app/Contents/MacOS/Blender";
 const FLATPAK_BLENDER_REF = "org.blender.Blender";
-// The live bridge writes this file every poll cycle (0.5 s). A stale or
-// missing heartbeat means the UI is gone, so the launch guard can re-spawn
-// (memory alone cannot know — the module state survives /new within one
-// pi process). 10 s of silence counts as gone: short enough to detect a
-// UI closed at session start even when it was closed moments ago, long
-// enough to survive brief main-thread blocks (modal dialogs) without
-// false positives.
-const LIVE_BRIDGE_HEARTBEAT_FILE = "heartbeat";
-// 10 s: short enough to detect a closed Blender at session start even
-// when it was closed moments ago, long enough to survive brief main-
-// thread blocks (modal dialogs, quick renders) without false positives.
-const LIVE_BRIDGE_HEARTBEAT_STALE_MS = 10_000;
+// The heartbeat file name and its 10 s staleness window now live in
+// blender/liveness.ts, which the instance reaper reads with the same
+// constants. See HEARTBEAT_STALE_MS there for why 10 s.
 /**
  * How long a just-spawned Blender gets to write its first heartbeat before the
  * launch is considered failed. A successful spawn is not proof of a UI: the
@@ -135,68 +129,20 @@ function armBridgeWatchdog(): void {
 }
 
 /**
- * True when the heartbeat file (touched by live-bridge.py every poll cycle)
- * was refreshed within LIVE_BRIDGE_HEARTBEAT_STALE_MS. A freshly started
- * UI that has not reached its first poll yet reports not-alive — that is
- * intentional, so the pending launch is not interrupted and the request
- * keeps its cold-start timeout budget.
- */
-/**
- * Whether the pid recorded in the heartbeat file is still a live process.
+ * True when this instance's bridge is alive: a heartbeat refreshed within
+ * HEARTBEAT_STALE_MS AND a pid that is still running.
  *
- * This is a second signal layered on the heartbeat's mtime, not a replacement
- * for it. mtime proves "something touched this recently"; it cannot prove that
- * something is still there. A heartbeat written just before a crash satisfies
- * the freshness check for a further 10 s, and a file copied or restored with
- * its timestamps can look fresh indefinitely. The pid answers the question
- * mtime cannot.
+ * A freshly started UI that has not reached its first poll yet reports
+ * not-alive — that is intentional, so the pending launch is not interrupted and
+ * the request keeps its cold-start timeout budget.
  *
- * The direction is deliberately one-way. A live process with no readable
- * heartbeat is reported alive, because a bridge that has not reached its first
- * poll yet is a starting Blender and must not be relaunched over. Only a
- * confidently dead pid turns a fresh heartbeat into "dead".
+ * The read side of this lives in blender/liveness.ts because the instance
+ * reaper needs the identical two-signal answer for OTHER dirs; duplicating it
+ * here would let the two drift, and a reaper using a different staleness
+ * window than the launcher would classify the same dead dir as alive.
  */
-function heartbeatPidIsAlive(): boolean {
-	let pid: number;
-	try {
-		const raw = readFileSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE), "utf-8");
-		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) return true;
-		const candidate = (parsed as { pid?: unknown }).pid;
-		// A heartbeat with no usable pid is the pre-pid format (an older
-		// live-bridge.py, or the utime fallback). Fall back to mtime alone
-		// rather than declaring a possibly-running UI dead.
-		if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate <= 0) return true;
-		pid = candidate;
-	} catch {
-		// Unreadable or unparseable: the mtime check decides, alone.
-		return true;
-	}
-
-	try {
-		// signal 0 performs the permission and existence checks without
-		// delivering anything, so this cannot disturb a running Blender.
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		// EPERM means the process exists but belongs to another user, which
-		// still counts as alive. Only ESRCH is a real death.
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
-
 export function isLiveBridgeAlive(): boolean {
-	try {
-		const mtimeMs = statSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE)).mtimeMs;
-		if (Date.now() - mtimeMs < LIVE_BRIDGE_HEARTBEAT_STALE_MS) {
-			if (!heartbeatPidIsAlive()) return false;
-			clearBridgeWatchdog();
-			return true;
-		}
-		return false;
-	} catch {
-		return false;
-	}
+	return isBridgeAlive(getBlenderBridgeDir(), clearBridgeWatchdog);
 }
 
 /**
@@ -247,6 +193,8 @@ function startBridgeSupervisor(): void {
 		if (isBridgeLocked()) return;
 		// A heartbeat this fresh means the UI is starting, not dead: the
 		// watchdog owns that window and releasing the flag here would race it.
+		// Deliberately mtime-only, ignoring the pid: a fresh heartbeat with a
+		// dead pid is a crash, and the tick above already returned for that.
 		if (isHeartbeatFresh()) return;
 		resetBridgeLaunch();
 		ensureLiveBridgeLaunchedForce();
@@ -279,12 +227,7 @@ function isBridgeLocked(): boolean {
 
 /** Whether the heartbeat was touched recently, ignoring the pid check. */
 function isHeartbeatFresh(): boolean {
-	try {
-		const mtimeMs = statSync(join(getBlenderBridgeDir(), LIVE_BRIDGE_HEARTBEAT_FILE)).mtimeMs;
-		return Date.now() - mtimeMs < LIVE_BRIDGE_HEARTBEAT_STALE_MS;
-	} catch {
-		return false;
-	}
+	return isHeartbeatFreshIn(getBlenderBridgeDir());
 }
 
 /**
@@ -307,7 +250,7 @@ function isHeartbeatFresh(): boolean {
  *
  * The stale-but-recent heartbeat case the old comment worried about is
  * already covered: isLiveBridgeAlive() only trusts a heartbeat refreshed
- * within LIVE_BRIDGE_HEARTBEAT_STALE_MS, and the launch watchdog re-arms the
+ * within the heartbeat staleness window, and the launch watchdog re-arms the
  * flag if the spawned Blender never writes one.
  */
 export function ensureLiveBridgeLaunchedForce(): void {

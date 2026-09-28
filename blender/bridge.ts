@@ -286,6 +286,32 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	});
 }
 
+export async function requestLiveBlenderShutdown(options: {
+	save?: boolean;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<{
+	saved: boolean;
+	savedPath: string | null;
+	quitting: boolean;
+	blendPath: string | null;
+	wasDirty: boolean;
+	saveError?: string;
+	note?: string;
+}> {
+	// No `await` before the return: this wrapper adds nothing to the promise
+	// it hands back, and awaiting it here would only widen the microtask gap
+	// inside a shutdown path.
+	return requestLiveBlenderBridge({
+		payload: {
+			type: "shutdown",
+			save: options.save ?? true,
+		},
+		signal: options.signal,
+		timeoutMs: options.timeoutMs,
+	});
+}
+
 export async function requestLiveBlenderSessionContext(options?: {
 	signal?: AbortSignal;
 	timeoutMs?: number;

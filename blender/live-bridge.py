@@ -27,6 +27,25 @@ RESPONSES_DIR = os.path.join(BRIDGE_DIR, "responses")
 # second Blender polling the same bridge dir can never execute it too.
 CLAIMS_DIR = os.path.join(BRIDGE_DIR, "claims")
 POLL_INTERVAL_SECONDS = 0.5
+# Set by handle_shutdown. Read by process_request_file only AFTER the response
+# has been written, so the caller always gets its answer before the UI dies.
+PENDING_QUIT = False
+
+
+def request_quit_after_response():
+    """Quit this Blender once the current response is safely on disk.
+
+    bpy.ops.wm.quit_blender is not instantaneous in effect: the poll loop that
+    called it is mid-tick, and the process is torn down from the main loop. The
+    timer defers it by a full poll interval so the response file is closed and
+    the poller has returned before the window disappears.
+    """
+    bpy.app.timers.register(_quit_now, first_interval=POLL_INTERVAL_SECONDS)
+
+
+def _quit_now():
+    bpy.ops.wm.quit_blender()
+    return None
 
 
 def ensure_bridge_dirs():
@@ -1039,6 +1058,51 @@ def handle_geometry_probe(request):
     }
 
 
+def handle_shutdown(request):
+    """Save the open blend (if asked) and quit this Blender.
+
+    Sent by the extension on session_shutdown when the reason is "quit", so a
+    pi process that ends releases its own private UI instead of leaving a
+    Blender window and its memory behind for the user to close by hand.
+
+    Two ordering constraints make this handler more than a two-liner:
+
+      * It must NOT quit inline. process_request_file writes the response only
+        AFTER handle_request returns, so quitting here would kill the process
+        before the response file exists and the caller would sit there until
+        its own timeout expired, reporting a failure for a request that
+        actually succeeded. So the quit is deferred (see request_quit_after_response).
+      * Saving is best-effort and never fatal. A blend that cannot be written
+        (read-only path, full disk) must still let the UI close, or the user is
+        left with exactly the stuck window this handler exists to prevent. The
+        reason string is returned so the failure is visible rather than silent.
+    """
+    result = {
+        "saved": False,
+        "savedPath": None,
+        "quitting": True,
+        "blendPath": bpy.data.filepath or None,
+        "wasDirty": bool(bpy.data.is_dirty),
+    }
+
+    if request.get("save") and bpy.data.filepath:
+        try:
+            bpy.ops.wm.save_mainfile()
+            result["saved"] = True
+            result["savedPath"] = bpy.data.filepath
+        except Exception as error:
+            # Report, do not raise: raising would skip the quit and strand the
+            # window. The caller surfaces this string in its exit log.
+            result["saveError"] = str(error)
+
+    if not request.get("save"):
+        result["note"] = "save=false: the open blend was left untouched on disk"
+
+    global PENDING_QUIT
+    PENDING_QUIT = True
+    return result
+
+
 def handle_request(request):
     request_type = request.get("type")
     if request_type == "get-session-context":
@@ -1057,6 +1121,8 @@ def handle_request(request):
         return handle_render(request)
     if request_type == "set-mode":
         return set_mode_request(request)
+    if request_type == "shutdown":
+        return handle_shutdown(request)
     raise RuntimeError(f"Unsupported Blender bridge request type: {request_type}")
 
 
@@ -1081,6 +1147,9 @@ def process_request_file(request_path):
             request = json.load(handle)
         result = handle_request(request)
         write_response(request_id, {"ok": True, "result": result})
+        if PENDING_QUIT:
+            # The response is on disk and closed; only now may the UI go.
+            request_quit_after_response()
     except Exception as error:
         write_response(
             request_id,
