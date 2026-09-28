@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build / tooling caches
+.ruff_cache/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+
+# Generated workspaces. These are per-machine Blender run state: manifests and
+# scene dumps embed absolute paths (workspacePath/blendPath/manifestPath), and
+# the .blend files are binary and large. A workspace is created by
+# `blender_workspace_init`, never authored by hand, so there is nothing here
+# worth versioning.
+workspaces/
+blender/workspace/
+
+# Agent copies. `npm run install:agents` generates these from blender/agents/
+# with machine-specific absolute paths substituted, so the machine-specific
+# version must never be committed.
+/agents/
