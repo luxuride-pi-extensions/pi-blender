@@ -169,7 +169,13 @@ async function classifyBridgeDir(dir: string): Promise<"adopt" | "remove" | stri
 export function formatReapResult(result: ReapResult): string | undefined {
 	const parts: string[] = [];
 	if (result.adopted.length > 0) {
-		parts.push(`reattached to ${result.adopted.length} running Blender instance(s)`);
+		// "Adopted" here means ONLY "declined to delete". Nothing in this
+		// process ever talks to those bridges -- each instance has its own
+		// bridge dir, so the sweep's whole job is to leave live neighbours
+		// alone. An earlier wording said "reattached", which claimed a
+		// capability that does not exist and would have been a lie in the
+		// one log a user reads when a second Blender is up.
+		parts.push(`left ${result.adopted.length} running Blender instance(s) alone`);
 	}
 	if (result.removed.length > 0) {
 		parts.push(`removed ${result.removed.length} stale instance dir(s) with no live Blender`);

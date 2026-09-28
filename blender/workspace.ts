@@ -456,13 +456,9 @@ export async function loadWorkspaceManifest(cwd: string, workspace: string): Pro
 		assertWorkspaceOwnership(manifest, await describeLiveOwner(manifest));
 	}
 	if (liveness === "dead" || liveness === "unknown") {
-		await claimWorkspace(manifestPath(manifest), manifest.blendPath);
+		await claimWorkspace(manifest.manifestPath, manifest.blendPath);
 	}
 	return manifest;
-}
-
-function manifestPath(manifest: BlenderWorkspaceManifest): string {
-	return getManifestPath(manifest.workspacePath);
 }
 
 /**
