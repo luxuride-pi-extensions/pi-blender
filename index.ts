@@ -2,15 +2,18 @@
  * pi extension: Vibe Blender integration (extracted from vibe-blender 0.1.2,
  * repo veoery/BlenderAgent, MIT license).
  *
- * Registers 13 blender_* tools + bundled skills, the /blender slash command,
- * and injects Blender workflow guidance + live session context before turns
- * of a MANAGER session.
+ * Registers 13 blender_* tools + bundled skills, the /blender and
+ * /blender-exit slash commands, and injects Blender workflow guidance + live
+ * session context before turns of a MANAGER session.
  *
  * Manager mode is entered ONLY by the /blender command — never by a blender_*
  * tool call. It governs the guidance section, the per-turn live-state snapshot,
  * and the write/edit/image gate. A direct tool call is worker-level work, so it
  * neither injects manager guidance nor gets gated; the tools stay usable on
- * their own.
+ * their own. Mode ends at /blender-exit (which lifts only the parent's gate,
+ * not the tools) or on the next session_start, because a session that
+ * interleaves Blender with other work would otherwise stay restricted until a
+ * /new.
  *
  * The constant guidance goes into a `blender` system-prompt section, so it
  * never lands after the user prompt; only the volatile live-state snapshot is
@@ -72,6 +75,7 @@ const BLENDER_WORKFLOW_GUIDANCE = [
 	"Run modules with `blender_module_run` (it checkpoints model.blend to modules/<name>/runs/NN/pre-NN.blend first, executes modules/<name>/script.py, and optionally renders to modules/<name>/render.png) and undo with `blender_module_revert` when a module's changes must be reworked. You set the brief and read the verdict; the worker and the subagent you spawn run the modules for you.",
 	"Before the first worker spawn, call subagents_enable (no arguments) once: fresh sessions do not have the subagent tool active until you enable it. Spawn one worker subagent per module and one fresh-context critic subagent per module iteration, each with a compact brief in its task text. One module at a time, since they share model.blend — await each before launching the next.",
 	"For create and edit work, run a short loop of worker then critic: the worker executes and renders, the critic judges the look and logs the verdict, and you decide whether to stop or issue a follow-up brief. Do at most 5 iterations for each new user instruction.",
+	"You are in Blender manager mode, entered by /blender, and the gate on your own `write`/`edit` and image reads stays up until the user runs `/blender-exit` or the session restarts. The blender_* tools themselves remain usable either way. So if the user starts asking for something that is plainly NOT Blender work and needs you to write or edit files — a C# script, a Unity scene, project files of any kind — do not pretend you can do it and do not silently do nothing. Say once, in one sentence, that you are still in Blender manager mode and that `/blender-exit` will lift it, then continue with whatever Blender task is still open. Mention it at most once per session: if they have heard it and are still asking, they have decided, and repeating yourself is nagging rather than helping. Never suggest it to unblock a Blender task — a Blender task never needs it, since delegating to a worker is how you author code.",
 	"Image budget: base64 image payloads stay in the transcript and are resent on every request, so enough of them make the provider reject the entire conversation, not just one turn. Per critic: one render + one reference, and never a third image; a fresh critic per module iteration, never reuse one that has already read that render. When a module has several reference images, spawn one critic per (render, reference) pair and reconcile the verdicts yourself — that is how you cover multiple references without any critic exceeding its budget. Reference-comparison work ('make this outfit based on this picture') is the reason the reference slot exists: the worker builds from the reference, the critic compares the render against it and separates content mismatches (the worker's script is wrong) from view mismatches (its own problem to fix) from pairing mismatches (the wrong camera was chosen), and tells you in `Subject match` when the two images are not even of the same thing. Render at `resolution: { x: 1200, y: 900 }`; the critic judges silhouette and proportion, not pixels. Text tools like `blender_scene_info` and `blender_bridge_status` are free against that budget, so prefer them over a second look.",
 	"For work driven by a reference image (modeling from a picture, matching a style, dressing a base character), first register each one with `blender_add_reference`: it copies the file into `<workspace>/references/` and records it in the manifest, so the reference cannot go missing mid-build and you can list what the build is being judged against. It requires a `caption` describing what the image depicts, because you cannot read it yourself. Then pass the registered id, its path, AND a chosen view in every affected subagent's brief, plus what the reference depicts: the worker to build from it, the critic to render from that view and compare against it. The manager itself never reads images — the `read` gate blocks it — so view selection is done from the brief's description of the subject, not by looking, and the critic verifies the pairing. A reference with no stated subject is a wasted pairing; if you cannot tell what a reference shows, ask the user rather than guessing.",
 	"Routing rule: a render shows the critic THAT something looks wrong, and only measurement shows the diagnostician HOW it is wrong. So a complaint that a part is misplaced, floating, buried, rotated, or intersecting is a measurement request — spawn the `blender-diagnostician` with the symptom and the object names, and put its reported numbers into the worker's next brief. Do not guess at a fix yourself, and do not ask the critic to estimate offsets from a picture. On-demand only: a clean worker/critic cycle needs no diagnostician. And if the symptom is that the render shows the WRONG SIDE of the subject, that is not a geometry complaint at all — spawn the `blender-camera-aligner` to find the view before you conclude anything about the model.",
@@ -190,6 +194,21 @@ const IMAGE_READ_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp",
 let managerMode = false;
 function markManagerMode(): void {
 	managerMode = true;
+}
+
+/**
+ * Leave manager mode, undoing /blender's gate.
+ *
+ * `managerMode` otherwise only clears on `session_start`, so a session that
+ * ran /blender kept write/edit blocked for the rest of its life — including
+ * for unrelated work, which is the failure this exists to fix. Exiting is
+ * deliberately NOT a /new: the model.blend work survives, only the
+ * restriction on the parent session ends.
+ */
+function clearManagerMode(): boolean {
+	if (!managerMode) return false;
+	managerMode = false;
+	return true;
 }
 
 function formatJsonResult(value: unknown): string {
@@ -963,6 +982,24 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 				ensureLiveBridgeLaunchedForce();
 				ctx.ui.notify("Blender engaged — routing task to the agent.", "info");
 				pi.sendUserMessage(task, { deliverAs: ctx.isIdle() ? undefined : "steer" });
+			},
+		});
+
+		// /blender-exit lifts the manager gate without ending the session or
+		// touching model.blend. It exists because manager mode otherwise lasts
+		// until /new, which breaks a session that interleaves Blender with
+		// other work (a Unity bridge, say) needing write/edit.
+		pi.registerCommand("blender-exit", {
+			description: "Leave Blender manager mode — lift the write/edit/image gate (keeps the session and model.blend)",
+			handler: async (_args, ctx) => {
+				if (!clearManagerMode()) {
+					ctx.ui.notify("Not in Blender manager mode — nothing to exit.", "info");
+					return;
+				}
+				ctx.ui.notify(
+					"Left Blender manager mode. The blender_* tools, /blender and the skills are still available; run /blender to re-enter.",
+					"info",
+				);
 			},
 		});
 

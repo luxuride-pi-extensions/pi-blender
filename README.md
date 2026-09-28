@@ -149,6 +149,18 @@ Start pi in any project dir. The extension:
   measurements.
 - registers the `/blender` slash command — everything after `/blender`
   becomes the Blender task and engages the extension
+- registers `/blender-exit`, which lifts the manager gate without ending the
+  session or touching `model.blend`. Manager mode otherwise lasts until
+  `/new`, which breaks a session that interleaves Blender with other work (a
+  Unity bridge writing C#). The `blender_*` tools, `/blender` and the skills
+  stay available afterwards; only the parent's `write`/`edit`/image restriction
+  ends. A spawned `blender-manager` is gated by *name*, not by this flag, so
+  it is unaffected either way. The command is **suggested only in manager
+  mode**: the instruction to mention it lives in the guidance section, which is
+  injected only while `/blender` is active, so a non-Blender session is never
+  told about it. The guidance also caps it at one mention per session and
+  forbids offering it to unblock a Blender task, since delegation — not
+  writing — is how a manager does Blender work
 - loads the 7 bundled `/skill:blender-*` skills (including `blender-paint`
   for texture paint, UV, vertex/weight paint, and bone/rig work, and
   `blender-modules` for Manager > worker/critic multi-module orchestration)
@@ -163,7 +175,7 @@ Start pi in any project dir. The extension:
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
   `textures`, and `paintSettings` for paint/UV/rig planning
 - **delegation is enforced, not advised.** In manager mode — entered by
-  `/blender` and reset on every new session — a `tool_call` hook blocks the
+  `/blender` and cleared by `/blender-exit` or a new session — a `tool_call` hook blocks the
   MANAGER from `write`, `edit`, and from `read`
   of image files (`.png .jpg .jpeg .gif .webp .bmp`) — a render tells the
   critic that something looks wrong, but only measurement says how, and the
