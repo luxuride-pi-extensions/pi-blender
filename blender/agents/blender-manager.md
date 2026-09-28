@@ -28,14 +28,18 @@ tools: subagent, subagents_enable, read, todo, grep, find, ls, contact_superviso
 #
 # Note that nothing rewrites the line now: this file is not installed at all (see
 # above), so the substitution machinery only still exists for the other
-# templates in this directory.
+# templates in this directory. The placeholders are STALE BY DESIGN: they are
+# kept rather than replaced with a host path because a committed literal path
+# is indistinguishable from a machine-specific mistake to the next reader, and
+# because the pair records which extensions this role depends on. pi-vibe-unity's
+# manager prompt keeps them too.
 #
 # The todo package is listed because this role names `todo`. A foreground child
 # does not load ambient parent extensions, so a tool named here that no listed
 # extension registers is requested and NEVER PROVIDED. `todo` is what keeps a
 # long build's plan from drifting, and it is the reason this arrangement exists
 # at all -- see `## Track the plan in todo` below.
-extensions: /path/to/pi-vibe-blender, /path/to/rpiv-todo/index.ts
+extensions: __PI_AGENT_EXTENSION_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
 allowedAgents: blender-worker, blender-script-runner, blender-merger, blender-critic, blender-diagnostician, blender-finalizer, blender-camera-aligner, blender-reference-describer
 acceptanceRole: read-only
