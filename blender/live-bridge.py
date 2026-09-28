@@ -45,6 +45,11 @@ def request_quit_after_response():
 
 def _quit_now():
     bpy.ops.wm.quit_blender()
+    # `return None` is load-bearing, not decoration. bpy.app.timers treats a
+    # None return as "do not run this timer again" and any truthy return as
+    # "reschedule in that many seconds". A truthy return here would re-register
+    # the quit every frame, so ruff's RET501/PLR1711 ("useless return") is a
+    # false positive on this line -- the return IS the result the timer reads.
     return None
 
 
