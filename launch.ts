@@ -255,6 +255,28 @@ function clearBridgeWatchdog(): void {
 	}
 }
 
+/**
+ * Cleanup for the one liveness path that has work to do: a UI is confirmed
+ * alive.
+ *
+ * The launch claim is released HERE, not only in the watchdog. The watchdog was
+ * the only other thing that released it, and isLiveBridgeAlive() used to pass
+ * clearBridgeWatchdog as its onFresh callback — so the very first tick after a
+ * successful launch cancelled the timer whose firing would have released the
+ * claim, and the claim then sat in the bridge dir for the rest of the session.
+ * That is the one window it exists to close, already closed, so holding it only
+ * keeps a peer out of a legitimate relaunch should this UI later die — up to
+ * LAUNCH_CLAIM_STALE_MS of "someone else is starting a Blender here" for a
+ * Blender that is not coming. Releasing it is safe from every caller: it only
+ * ever removes THIS process's claim, and it only runs on a heartbeat that is
+ * both fresh and pid-confirmed, so it cannot fire during the pre-heartbeat
+ * window the claim was taken out for.
+ */
+function confirmBridgeLaunched(): void {
+	clearBridgeWatchdog();
+	releaseLaunchClaim();
+}
+
 function armBridgeWatchdog(): void {
 	if (bridgeWatchdog) return;
 	bridgeWatchdog = setTimeout(() => {
@@ -263,6 +285,8 @@ function armBridgeWatchdog(): void {
 			// The UI is up. The claim has done its job — it only ever covered the
 			// pre-heartbeat window — and holding it for the rest of the session
 			// would keep peers out of a legitimate relaunch should Blender die.
+			// confirmBridgeLaunched() has already released it by this point;
+			// repeating it here keeps the watchdog correct on its own terms.
 			releaseLaunchClaim();
 			return;
 		}
@@ -292,7 +316,7 @@ function armBridgeWatchdog(): void {
  * window than the launcher would classify the same dead dir as alive.
  */
 export function isLiveBridgeAlive(): boolean {
-	return isBridgeAlive(getBlenderBridgeDir(), clearBridgeWatchdog);
+	return isBridgeAlive(getBlenderBridgeDir(), confirmBridgeLaunched);
 }
 
 /**
