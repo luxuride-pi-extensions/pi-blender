@@ -16,6 +16,41 @@ if (!staged) {
 	process.exit(2);
 }
 
+// "tick <n>" drives the supervisor's decision directly instead of waiting for
+// the interval, which exists so the gates below are testable in milliseconds
+// rather than in fifteen-second steps. launch-harness.mjs documents why the
+// whole thing runs in a child process.
+if (process.argv[3] === "tick" || process.argv[3] === "cycle") {
+	// "tick"  — supervisor decisions only, with the cold-start budget left to
+	//            run out in real time. Correct for the cold-start gate, and the
+	//            reason that gate is testable at all: without it a 120s budget
+	//            cannot be observed inside a suite.
+	// "cycle" — each tick followed by the watchdog expiring, which is what a
+	//            real cold-start budget elapsing looks like. The retry ceiling is
+	//            only reachable through this: with the budget genuinely pending,
+	//            no number of ticks can get past the first launch, because that
+	//            is precisely what the gate is for.
+	//
+	// Both call the real functions. The point of the split is to choose which
+	// part of the clock is under the test's control, not to reimplement either.
+	const mode = process.argv[3];
+	const launch = await loadTs(`${staged.replace(/\/$/, "")}/launch.ts`);
+	const ticks = Number(process.argv[4] ?? 1);
+	// The spawn is async (argv resolution, then the detached child), so each
+	// tick has to let the previous one finish or they all collapse into one
+	// and the count is a lie.
+	for (let i = 0; i < ticks; i++) {
+		launch.runBridgeSupervisorTick();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		if (mode === "cycle") {
+			launch.onBridgeWatchdogExpired();
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+	}
+	process.stdout.write(JSON.stringify({ mode, ticks }) + "\n");
+	process.exit(0);
+}
+
 // Long enough for a successful spawn to be observable, short enough that a test
 // suite stays fast. Nothing waits for a heartbeat: the question is whether a
 // process was started, not whether Blender answered.

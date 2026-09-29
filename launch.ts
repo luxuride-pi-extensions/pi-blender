@@ -363,30 +363,60 @@ function assertLaunchAssetsAvailable(): boolean {
 	return false;
 }
 
+/**
+ * What happens when a launch produced no heartbeat within the cold-start budget.
+ *
+ * Named rather than left as an inline arrow for two reasons, both about the
+ * tests rather than the code: the timeout body is the only thing that can
+ * advance the failure counter, and a counter that is only advanced by a
+ * 120-second timer makes the retry ceiling untestable in a suite that should
+ * run in seconds. A named function the driver can call is the difference
+ * between "the ceiling is three" being an assertion and being a comment.
+ *
+ * It is also the single definition of what a failed launch means. The counter
+ * is reset in confirmBridgeLaunched() and nowhere else, deliberately: the
+ * supervisor calls resetBridgeLaunch() immediately before every retry, so a
+ * reset there would clear the very run the ceiling is counting.
+ */
+export function onBridgeWatchdogExpired(): void {
+	bridgeWatchdog = undefined;
+	if (isLiveBridgeAlive()) {
+		// The UI is up. The claim has done its job — it only ever covered the
+		// pre-heartbeat window — and holding it for the rest of the session
+		// would keep peers out of a legitimate relaunch should Blender die.
+		// confirmBridgeLaunched() has already released it by this point;
+		// repeating it here keeps the watchdog correct on its own terms.
+		releaseLaunchClaim();
+		return;
+	}
+	// Spawned, but never alive. Release the launch flag so a later call can
+	// retry instead of trusting a Blender that is not there.
+	releaseLaunchClaim();
+	bridgeLaunchStarted = false;
+	consecutiveFailedLaunches += 1;
+	console.error(
+		`[pi-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
+	);
+}
+
 function armBridgeWatchdog(): void {
 	if (bridgeWatchdog) return;
-	bridgeWatchdog = setTimeout(() => {
-		bridgeWatchdog = undefined;
-		if (isLiveBridgeAlive()) {
-			// The UI is up. The claim has done its job — it only ever covered the
-			// pre-heartbeat window — and holding it for the rest of the session
-			// would keep peers out of a legitimate relaunch should Blender die.
-			// confirmBridgeLaunched() has already released it by this point;
-			// repeating it here keeps the watchdog correct on its own terms.
-			releaseLaunchClaim();
-			return;
-		}
-		// Spawned, but never alive. Release the launch flag so a later call can
-		// retry instead of trusting a Blender that is not there.
-		releaseLaunchClaim();
-		bridgeLaunchStarted = false;
-		consecutiveFailedLaunches += 1;
-		console.error(
-			`[pi-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
-		);
-	}, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS);
+	bridgeWatchdog = setTimeout(onBridgeWatchdogExpired, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS);
 	// Never hold the pi process open just to watch a Blender we already unref'd.
 	bridgeWatchdog.unref?.();
+}
+
+/**
+ * Whether a launch is still inside its cold-start budget.
+ *
+ * Exported because the supervisor now gates on it, and a gate that nothing can
+ * read is a gate nothing can test. The handler it is a proxy for is the
+ * supervisor's: it used to relaunch every fifteen seconds for the two minutes a
+ * slow Blender needs, and the only way to prove that is fixed is to drive the
+ * ticks and watch the count.
+ */
+export function isBridgeWatchdogArmed(): boolean {
+	return bridgeWatchdog !== undefined;
 }
 
 /**
@@ -463,46 +493,74 @@ export function ensureLiveBridgeLaunched(): void {
  * subsequent close. The reaper cannot clean it up either: the owner pid is
  * genuinely still running, which is the only thing the reaper trusts.
  *
- * The consequence is deliberate and bounded: if a child launched the FIRST UI
- * of a session and the user then closes it, nothing relaunches it, because the
- * root process never launched one and has no supervisor of its own to run. The
- * next blender_* call reports a dead bridge instead of quietly opening a fresh
- * empty window over a model.blend the user was looking at, which is the better
- * of the two failures.
+ * The consequence of the child exemption is deliberate and bounded: if a child
+ * launched the FIRST UI of a session and the user then closes it, nothing
+ * relaunches it, because the root process never launched one and has no
+ * supervisor of its own to run. The next blender_* call reports a dead bridge
+ * instead of quietly opening a fresh empty window over a model.blend the user
+ * was looking at, which is the better of the two failures.
+ */
+export function runBridgeSupervisorTick(): void {
+	if (isLiveBridgeAlive()) return;
+	// Never resurrect a UI into a request someone is still waiting on.
+	if (isBridgeLocked()) return;
+	// A heartbeat this fresh means the UI is starting, not dead: the
+	// watchdog owns that window and releasing the flag here would race it.
+	// Deliberately mtime-only, ignoring the pid: a fresh heartbeat with a
+	// dead pid is a crash, and the tick above already returned for that.
+	if (isHeartbeatFresh()) return;
+	// Still inside the cold-start budget of a launch this process already made.
+	//
+	// isHeartbeatFresh() only covers HEARTBEAT_STALE_MS (10s) while the budget
+	// is LIVE_BRIDGE_LAUNCH_WATCHDOG_MS (120s), so without this the tick went
+	// on relaunching for the two minutes a slow-but-working Blender needs, and
+	// opened a fresh window every fifteen seconds throughout. That is the
+	// relaunch-loop report this supervisor was added to fix, still reachable
+	// through the tick rather than through a launch that could not work.
+	//
+	// The watchdog is the right thing to ask, not a timestamp: it is armed
+	// exactly for that window and cleared by both outcomes — the heartbeat
+	// (confirmBridgeLaunched) and the timeout (its own body) — so it is the
+	// one piece of state that already knows whether a launch is still owed
+	// patience. Checking a second clock here instead would be a second answer
+	// to the same question, and the two would drift.
+	if (bridgeWatchdog) return;
+	// No script to launch with. Checking here as well as at the spawn means
+	// a supervisor that is already running goes quiet the moment the
+	// condition appears, instead of on its next launch attempt.
+	if (!assertLaunchAssetsAvailable()) return;
+	// A run of launches that each produced nothing is not a Blender that is
+	// slow to start, and it will not become one. Stop rather than reopen a
+	// window every fifteen seconds for the rest of the session: a Blender
+	// that is genuinely slow to start still gets the full cold-start budget
+	// on the first attempt, and every retry after a real death resets the
+	// count when the heartbeat confirms the launch.
+	if (consecutiveFailedLaunches >= MAX_CONSECUTIVE_FAILED_LAUNCHES) {
+		stopBridgeSupervisor();
+		console.error(
+			`[pi-blender] warning: ${consecutiveFailedLaunches} Blender launches in a row produced no bridge heartbeat, so automatic relaunching has stopped for this session. ` +
+				"Launch Blender manually, or restart the pi session; a blender_* call will still try once.",
+		);
+		return;
+	}
+	resetBridgeLaunch();
+	ensureLiveBridgeLaunchedForce();
+}
+
+/**
+ * Arm the interval that calls runBridgeSupervisorTick.
+ *
+ * Split from the tick so a test can exercise the retry ceiling without waiting
+ * on it: three launches at fifteen seconds each is over a minute of wall clock
+ * to assert something that is otherwise a constant. The tick is factored out
+ * rather than duplicated, because two copies of a retry policy means one of
+ * them is wrong within a month, and a test that passes against the copy is a
+ * test of nothing.
  */
 function startBridgeSupervisor(): void {
 	if (bridgeSupervisor) return;
 	if (isSubagentChildProcess()) return;
-	bridgeSupervisor = setInterval(() => {
-		if (isLiveBridgeAlive()) return;
-		// Never resurrect a UI into a request someone is still waiting on.
-		if (isBridgeLocked()) return;
-		// A heartbeat this fresh means the UI is starting, not dead: the
-		// watchdog owns that window and releasing the flag here would race it.
-		// Deliberately mtime-only, ignoring the pid: a fresh heartbeat with a
-		// dead pid is a crash, and the tick above already returned for that.
-		if (isHeartbeatFresh()) return;
-		// No script to launch with. Checking here as well as at the spawn means
-		// a supervisor that is already running goes quiet the moment the
-		// condition appears, instead of on its next launch attempt.
-		if (!assertLaunchAssetsAvailable()) return;
-		// A run of launches that each produced nothing is not a Blender that is
-		// slow to start, and it will not become one. Stop rather than reopen a
-		// window every fifteen seconds for the rest of the session: a Blender
-		// that is genuinely slow to start still gets the full cold-start budget
-		// on the first attempt, and every retry after a real death resets the
-		// count when the heartbeat confirms the launch.
-		if (consecutiveFailedLaunches >= MAX_CONSECUTIVE_FAILED_LAUNCHES) {
-			stopBridgeSupervisor();
-			console.error(
-				`[pi-blender] warning: ${consecutiveFailedLaunches} Blender launches in a row produced no bridge heartbeat, so automatic relaunching has stopped for this session. ` +
-					"Launch Blender manually, or restart the pi session; a blender_* call will still try once.",
-			);
-			return;
-		}
-		resetBridgeLaunch();
-		ensureLiveBridgeLaunchedForce();
-	}, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
+	bridgeSupervisor = setInterval(runBridgeSupervisorTick, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
 	// Never hold the pi process open for a supervisor.
 	bridgeSupervisor.unref?.();
 }

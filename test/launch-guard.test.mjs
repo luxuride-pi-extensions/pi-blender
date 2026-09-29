@@ -12,77 +12,34 @@
  * user got a window every fifteen seconds for the rest of the session, with no
  * message naming a cause.
  *
- * How it is tested: the launcher's own import graph is COPIED into a temp
- * directory whose `blender/` holds the TypeScript it imports but not the two
- * `.py` files it feeds to Blender. The launcher resolves those paths relative
- * to the module's own location, so a copy is enough to make them missing
- * without touching the real checkout — which matters, because the real one has
- * to stay intact for the second half of this test.
- *
- * Nothing here starts Blender. BLENDER_PATH points at a shell script that
- * records its argv and exits, so "it launched" means the command line, and a
- * regression cannot open a real window.
- *
- * The driver runs in a CHILD process, for the reason probe.mjs documents: the
- * launcher holds module state (the launch claim, the supervisor handle, the
- * cached "assets are missing" flag) and jiti caches modules per instance, so an
- * in-process harness would test state no real session has.
+ * How it is tested, and why it is shaped the way it is, is launch-harness.mjs's
+ * job: a COPY of the launcher's import graph, driven in a CHILD process, with
+ * BLENDER_PATH pointed at a shell script. Nothing here starts a real Blender.
  */
 
-import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import {
+	cleanupSandboxes,
+	countLaunches,
+	readDriverJson,
+	runDriver,
+	stageBridgeDir,
+	stageExtension,
+	stageFakeBlender,
+} from "./launch-harness.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DRIVER = join(dirname(fileURLToPath(import.meta.url)), "launch-guard-driver.mjs");
-
-/** The launch module's own import graph. The two .py files are NOT in it. */
-const LAUNCH_SOURCES = [
-	"launch.ts",
-	"config.ts",
-	"manager-core.ts",
-	join("blender", "reap.ts"),
-	join("blender", "liveness.ts"),
-];
+const DRIVER = join(REPO, "test", "launch-guard-driver.mjs");
 
 const sandboxes = [];
 after(() => {
 	for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true });
+	cleanupSandboxes();
 });
-
-/** A copy of the launcher in a directory of its own, scripts present or not. */
-function stageExtension({ withScripts }) {
-	const dir = mkdtempSync(join(tmpdir(), "pi-blender-launch-"));
-	sandboxes.push(dir);
-	for (const rel of LAUNCH_SOURCES) {
-		const dest = join(dir, rel);
-		mkdirSync(dirname(dest), { recursive: true });
-		copyFileSync(join(REPO, rel), dest);
-	}
-	// config.ts resolves the assets dir from its OWN location, so this is the
-	// only way the two bundled scripts can be made to not exist.
-	if (withScripts) {
-		for (const name of ["blank-bootstrap.py", "live-bridge.py"]) {
-			writeFileSync(join(dir, "blender", name), "# staged\n");
-		}
-	}
-	return dir;
-}
-
-/** A fake Blender that records how it was called instead of starting a UI. */
-function stageFakeBlender() {
-	const dir = mkdtempSync(join(tmpdir(), "pi-blender-bin-"));
-	sandboxes.push(dir);
-	const record = join(dir, "argv.txt");
-	const path = join(dir, "blender");
-	writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$*" > ${JSON.stringify(record)}\n`);
-	chmodSync(path, 0o755);
-	return { path, record };
-}
 
 /**
  * A peer's claim in the few microseconds between its create and its write.
@@ -98,9 +55,7 @@ const PEER_HALF_WRITTEN_CLAIM = "";
 function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seedHeartbeat = false }) {
 	const staged = stageExtension({ withScripts });
 	const { path: blender, record } = stageFakeBlender();
-	const bridge = join(mkdtempSync(join(tmpdir(), "pi-blender-box-")), "bridge");
-	sandboxes.push(join(bridge, ".."));
-	mkdirSync(bridge, { recursive: true });
+	const bridge = stageBridgeDir();
 	if (seedClaim !== null) writeFileSync(join(bridge, "launch.claim"), seedClaim);
 	// A live UI in this dir, so the driver takes the ALIVE path: isLiveBridgeAlive()
 	// fires the onFresh hook, which is where the launch claim is released. The
@@ -113,25 +68,8 @@ function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seed
 		writeFileSync(join(bridge, "heartbeat"), JSON.stringify({ pid: process.pid, at: Date.now() }));
 	}
 
-	const result = spawnSync(process.execPath, [DRIVER, staged], {
-		env: {
-			...process.env,
-			PI_BLENDER_BRIDGE_DIR: bridge,
-			PI_BLENDER_NO_UI: "",
-			PI_SUBAGENT_CHILD: subagentChild ? "1" : "",
-			BLENDER_PATH: blender,
-		},
-		encoding: "utf-8",
-		timeout: 60_000,
-	});
-	let supervision = null;
-	try {
-		supervision = JSON.parse(result.stdout.trim().split("\n").pop() ?? "null");
-	} catch {
-		// Left null: the assertion below then reports it rather than throwing
-		// somewhere less informative than the driver's own stderr.
-	}
-	return { result, record, bridge, supervision };
+	const result = runDriver(DRIVER, staged, [], { bridge, blender, subagentChild });
+	return { result, record, bridge, supervision: readDriverJson(result) };
 }
 
 describe("launch guard", () => {
@@ -208,5 +146,81 @@ describe("launch guard", () => {
 				`the claim must survive a release triggered by ${what}`,
 			);
 		}
+	});
+});
+
+/**
+ * The supervisor's two numeric policies — the cold-start budget and the retry
+ * ceiling — are the two constants in this file nobody could assert before, and
+ * both are reachable only through timers measured in minutes. The driver calls
+ * the tick and the expiry directly, so what is under test is the real policy
+ * and not a copy of it.
+ */
+describe("bridge supervisor policy", () => {
+	/** Drive the supervisor against a staged bridge dir, counting launches. */
+	function tick({ times, mode = "tick", withScripts = true }) {
+		const staged = stageExtension({ withScripts });
+		// recordEach, so "one launch" and "a loop of them" are different
+		// numbers. An overwrite recorder cannot tell a ceiling of three from
+		// three hundred, which is the whole question.
+		const { path: blender, record } = stageFakeBlender({ recordEach: true });
+		const bridge = stageBridgeDir();
+		const result = runDriver(DRIVER, staged, [mode, String(times)], { bridge, blender });
+		return { result, record, launches: countLaunches(record), bridge };
+	}
+
+	it("does not relaunch while a launch is still inside its cold-start budget", () => {
+		// A tick finds no heartbeat, which is true for the whole of the 120s
+		// budget a slow Blender needs. The tick used to relaunch anyway every
+		// 15s throughout, so a machine where Blender takes 40s to boot got three
+		// windows instead of one -- the relaunch-loop report, still reachable
+		// through the tick after the missing-script guard closed the other route.
+		const { result, launches } = tick({ times: 5 });
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(
+			launches,
+			1,
+			"a launch that has not yet had its budget must not be joined by another",
+		);
+	});
+
+	it("stops after the retry ceiling instead of relaunching forever", () => {
+		// The bug the ceiling exists for: a launch that produces no heartbeat
+		// is indistinguishable from a dead bridge to the tick, so without a
+		// ceiling the user gets a window every 15s for the rest of the session.
+		// "cycle" mode is the only way in: each tick is followed by the cold-start
+		// budget elapsing, which is the state a launch that never came up leaves
+		// behind — and the state the supervisor is entitled to retry.
+		const { result, launches } = tick({ times: 40, mode: "cycle" });
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(
+			launches,
+			3,
+			"the ceiling is three launches, and a fourth means the loop is back",
+		);
+		assert.match(
+			result.stderr,
+			/produced no bridge heartbeat/,
+			"giving up silently would look identical to a healthy session",
+		);
+		assert.match(result.stderr, /3 Blender launches in a row/, "and the message must name the count");
+	});
+
+	it("counts nothing when the bundled scripts are missing", () => {
+		// Ordering between two guards, not between two of them and a timer: the
+		// missing-asset check runs before the ceiling, so a checkout that cannot
+		// launch reports that ONCE and never reaches the retry policy at all.
+		const { result, launches } = tick({ times: 10, mode: "cycle", withScripts: false });
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(launches, 0);
+		assert.match(result.stderr, /not launching Blender/);
+		assert.doesNotMatch(
+			result.stderr,
+			/produced no bridge heartbeat/,
+			"the ceiling's message would be a second, misleading explanation",
+		);
 	});
 });
