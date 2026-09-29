@@ -73,16 +73,13 @@ const core = loadManagerCore();
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 1_500;
 
-/** The name pi-subagents stamped into this session's prompt, or null if none. */
-function readActiveAgentName(systemPrompt: string): string | null {
-	return core.readActiveAgentName(systemPrompt);
-}
-
-/** Whether this session is acting as THE manager, and so is subject to the gate. */
-function isManagerSession(systemPrompt: string): boolean {
-	return managerMode.isManagerSession(systemPrompt);
-}
-
+/**
+ * The name pi-subagents stamped into this session's prompt, or null if none.
+ *
+ * A call to the core rather than a local regex: the child-session stamp is the
+ * one signal the whole gate turns on, and a copy of the pattern is a copy of
+ * the one thing that must not disagree between the three extensions.
+ */
 /**
  * Extensions the manager may keep using while file authoring is blocked. These
  * are custom tools (not the built-in `write`/`edit`), so they pass the gate
@@ -1073,7 +1070,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			// UI's lifetime, whatever it is. Deliberately a TEST and not an
 			// isManagerSession() call: manager mode is irrelevant here, and a
 			// child of an engaged session must still be exempt.
-			if (readActiveAgentName(ctx.getSystemPrompt()) !== null) return;
+			if (core.readActiveAgentName(ctx.getSystemPrompt()) !== null) return;
 			// A pi that never launched a UI has nothing to release, and asking
 			// would cold-launch one purely to shut it down.
 			if (!isLiveBridgeAlive()) return;
