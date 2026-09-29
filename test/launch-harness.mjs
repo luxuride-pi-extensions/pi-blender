@@ -109,15 +109,24 @@ export function countLaunches(record) {
  *
  * `PI_SUBAGENT_CHILD` is always passed explicitly, empty rather than absent,
  * because a driver that means to be a root session must not inherit the child
- * marker from whatever test runner launched it.
+ * marker from whatever test runner launched it. Same reasoning for `LAUNCH`:
+ * whether the session has already launched a Blender is a fact the driver
+ * would otherwise have to guess, and the two cases it separates are exactly the
+ * ones that must not be conflated.
  */
-export function runDriver(driver, staged, args, { bridge, blender, subagentChild = false, timeout = 60_000 }) {
+export function runDriver(
+	driver,
+	staged,
+	args,
+	{ bridge, blender, subagentChild = false, launched = true, timeout = 60_000 },
+) {
 	return spawnSync(process.execPath, [driver, staged, ...args], {
 		env: {
 			...process.env,
 			PI_BLENDER_BRIDGE_DIR: bridge,
 			PI_BLENDER_NO_UI: "",
 			PI_SUBAGENT_CHILD: subagentChild ? "1" : "",
+			LAUNCH: launched ? "1" : "0",
 			BLENDER_PATH: blender,
 		},
 		encoding: "utf-8",

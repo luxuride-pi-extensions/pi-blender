@@ -52,7 +52,7 @@ after(() => {
 const PEER_HALF_WRITTEN_CLAIM = "";
 
 /** Drive the staged launcher once, in a child process. */
-function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seedHeartbeat = false }) {
+function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seedHeartbeat = false, launched = true }) {
 	const staged = stageExtension({ withScripts });
 	const { path: blender, record } = stageFakeBlender();
 	const bridge = stageBridgeDir();
@@ -68,7 +68,7 @@ function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seed
 		writeFileSync(join(bridge, "heartbeat"), JSON.stringify({ pid: process.pid, at: Date.now() }));
 	}
 
-	const result = runDriver(DRIVER, staged, [], { bridge, blender, subagentChild });
+	const result = runDriver(DRIVER, staged, [], { bridge, blender, subagentChild, launched });
 	return { result, record, bridge, supervision: readDriverJson(result) };
 }
 
@@ -158,16 +158,70 @@ describe("launch guard", () => {
  */
 describe("bridge supervisor policy", () => {
 	/** Drive the supervisor against a staged bridge dir, counting launches. */
-	function tick({ times, mode = "tick", withScripts = true }) {
+	function tick({ times, mode = "tick", withScripts = true, launched = true }) {
 		const staged = stageExtension({ withScripts });
 		// recordEach, so "one launch" and "a loop of them" are different
 		// numbers. An overwrite recorder cannot tell a ceiling of three from
 		// three hundred, which is the whole question.
 		const { path: blender, record } = stageFakeBlender({ recordEach: true });
 		const bridge = stageBridgeDir();
-		const result = runDriver(DRIVER, staged, [mode, String(times)], { bridge, blender });
+		const result = runDriver(DRIVER, staged, [mode, String(times)], { bridge, blender, launched });
 		return { result, record, launches: countLaunches(record), bridge };
 	}
+
+	it("a session that has never launched a Blender launches nothing, however long it runs", () => {
+		// The regression, exactly as the user met it: a fresh pi session — no
+		// blender_* call, no /blender, nothing — opened a Blender window. The
+		// supervisor was armed from session_start, and its tick LAUNCHES when
+		// there is no heartbeat; a session that never engaged Blender has no
+		// heartbeat file at all, which is indistinguishable from a dead bridge.
+		//
+		// "cycle" is the harshest form of this, because it also lets the
+		// cold-start budget elapse on every tick: the only thing standing
+		// between this and three real windows is the arming gate, so if the
+		// gate were removed this would launch three times rather than zero.
+		const { result, launches } = tick({ times: 40, mode: "cycle", launched: false });
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(launches, 0, "nothing asked for a Blender, so nothing may start one");
+		assert.doesNotMatch(
+			result.stderr,
+			/produced no bridge heartbeat/,
+			"a launch count of zero must mean no launch was ever attempted",
+		);
+	});
+
+	it("a fresh session arms no supervisor at all", () => {
+		// The same gate seen from the other end. Not "it launched and then
+		// relaunched" but "it never started a clock": without this, the test
+		// above could still pass in an implementation that arms a supervisor
+		// which then declines to act, and that is the shape a fix takes when
+		// the author has only tested the one tick that matters.
+		const { supervision, record } = launchOnce({ withScripts: true, launched: false });
+
+		assert.deepEqual(
+			supervision,
+			{ armedAfterFirst: false, armedAfterSecond: false },
+			"a session with no Blender has no UI lifetime to protect",
+		);
+		assert.equal(
+			existsSync(record),
+			false,
+			"and the launch it never asked for must not have happened either",
+		);
+	});
+
+	it("arms supervision after a launch, and again after a /reload", () => {
+		// The regression fix had to satisfy the opposite case too, and the naive
+		// way to stop the fresh-session launch is to go back to arming only when
+		// this process happens to have a supervisor — which is module state, so
+		// a /reload's new instance arms nothing and a Blender closed mid-session
+		// stays closed. That was the original bug. The marker is written by the
+		// launch and outlives the module instance, so both halves hold.
+		const { supervision } = launchOnce({ withScripts: true });
+
+		assert.deepEqual(supervision, { armedAfterFirst: true, armedAfterSecond: true });
+	});
 
 	it("does not relaunch while a launch is still inside its cold-start budget", () => {
 		// A tick finds no heartbeat, which is true for the whole of the 120s

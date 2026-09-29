@@ -728,23 +728,85 @@ export function isBridgeSupervisorRunning(): boolean {
  * cannot be relied on, since pi's extension cache is keyed on a generation
  * counter and the reload path does not visibly advance it.
  *
- * Unconditional, and that is a correction rather than a style choice. This used
- * to return early when no supervisor was running, on the reasoning that a
- * session which had not launched a UI had nothing to supervise. But the launch
- * path deliberately does not start one either: a subagent child that launches
- * the first UI of a session has no root process to supervise it, and starting it
- * from the launch would mean the two processes behaved differently. Together
- * those two decisions left nothing arming supervision at all — a Blender closed
- * during a session stayed closed, which is the original bug this supervisor
- * exists to prevent.
+ * GATED ON A DURABLE MARKER, and the gate is the whole point of this function.
+ * Arming unconditionally was a fix for a real leak (nothing was arming
+ * supervision at all, so a Blender closed mid-session stayed closed) and it
+ * immediately broke the other invariant: the tick LAUNCHES Blender when there is
+ * no heartbeat, and a session that has never engaged Blender has no heartbeat
+ * file at all, which is indistinguishable from a dead bridge. So every fresh pi
+ * user opened a Blender window they never asked for — the exact thing the
+ * lazy-launch contract exists to prevent, and the reason this file's own
+ * ensureLiveBridgeLaunched comment says supervision must not be tied to
+ * session_start.
+ *
+ * Neither "did this process launch?" nor "is a supervisor already armed?"
+ * answers it, and both were tried:
+ *   - module state cannot survive a /reload, which is the case the re-arm
+ *     exists for: a new instance would arm nothing, and the leak the re-arm
+ *     fixes would come straight back.
+ *   - the owner marker is per-instance by design, so a fresh instance sees no
+ *     owner and learns nothing.
+ * A file in the bridge dir outlives the module instance, is written only by a
+ * launch that actually produced a Blender process, and is left behind by a
+ * child that launched the first UI of a session — which is exactly the case
+ * where a root process has to take over supervision it never started.
+ *
+ * Note what is deliberately NOT consulted: the heartbeat. It cannot be, because
+ * "no heartbeat" is the very state the tick acts on.
  *
  * startBridgeSupervisor is still the place that refuses to run in a child, so
  * calling this from a child's session_start is harmless: it does not start.
  */
 export function restartBridgeSupervisor(): void {
 	stopBridgeSupervisor();
+	if (!isSupervisionWanted()) return;
 	startBridgeSupervisor();
 }
+
+/**
+ * The on-disk record that this bridge dir belongs to a session that launched a
+ * Blender, and so wants one kept alive.
+ *
+ * Written where the launch is known to have produced a process — after the
+ * spawn resolves, next to armBridgeWatchdog — rather than at the top of
+ * launchBridge, because a launch that was suppressed (PI_BLENDER_NO_UI) or that
+ * never reached a spawn must not arm a supervisor. Under PI_BLENDER_NO_UI that
+ * would be a silent fifteen-second loop: the tick resets the launch, the launch
+ * does nothing, and nothing ever advances the failure counter that would stop
+ * it, because that counter only moves on a watchdog timeout.
+ *
+ * Never removed. Supervision stays wanted for the life of the bridge dir, so a
+ * /reload after the retry ceiling re-arms and re-learns the ceiling with its own
+ * fresh counter — the same behaviour a reloaded instance has for every other
+ * piece of launch state, and the reason the ceiling is per session rather than
+ * per bridge dir.
+ */
+function isSupervisionWanted(): boolean {
+	return existsSync(join(getBlenderBridgeDir(), SUPERVISION_WANTED_FILE));
+}
+
+function markSupervisionWanted(): void {
+	try {
+		mkdirSync(getBlenderBridgeDir(), { recursive: true });
+		writeFileSync(
+			join(getBlenderBridgeDir(), SUPERVISION_WANTED_FILE),
+			JSON.stringify({ pid: process.pid, at: Date.now() }),
+			"utf-8",
+		);
+	} catch (error) {
+		// Degrades to "a session that has launched Blender is not supervised",
+		// which is the older behaviour and not a wrong answer — a closed window
+		// stays closed until the next blender_* call, and that call relaunches.
+		console.error(
+			`[pi-blender] could not record that this session wants a supervised Blender (${getBlenderBridgeDir()}): ${
+				error instanceof Error ? error.message : String(error)
+			}. Blender will not be reopened automatically if it is closed; the next blender_* call will still start it.`,
+		);
+	}
+}
+
+/** See isSupervisionWanted. */
+const SUPERVISION_WANTED_FILE = "supervise.want";
 
 /**
  * Whether this process hosts subagent child sessions rather than a user session.
@@ -845,7 +907,10 @@ function launchBridge(): void {
 	// supervision the root already owns is the one that matters.
 	// resetBridgeSupervisorHold is not needed either: a child simply never set
 	// the hold, so the first root session_start re-arms normally.
-	void (async () => {
+	//
+	// Assigned, not left floating, so a caller can wait on the spawn rather than
+	// guess how long it takes. See whenLaunchSettled.
+	pendingLaunch = (async () => {
 		// Declared outside the try: the failure reporter below needs to name
 		// the command it tried, and referencing a try-scoped binding there was
 		// a ReferenceError waiting to happen.
@@ -882,6 +947,13 @@ function launchBridge(): void {
 				);
 			});
 			child.unref();
+			// A Blender process now exists, so this session wants one kept
+			// alive: record it durably, which is what a later session_start
+			// (including a /reload's fresh module instance) reads to decide
+			// whether supervision belongs here. Written here and not at the top
+			// of launchBridge so a suppressed or failed launch does not arm a
+			// supervisor for a UI that is not coming. See isSupervisionWanted.
+			markSupervisionWanted();
 			// The spawn succeeded, which is not proof of a UI: it may die before
 			// its first poll. Watch for the first heartbeat.
 			armBridgeWatchdog();
@@ -898,3 +970,23 @@ function launchBridge(): void {
 		}
 	})();
 }
+
+/**
+ * Resolves once the spawn this module has in flight has settled, or immediately
+ * when there is none.
+ *
+ * Exported for the tests rather than for production callers, and deliberately
+ * not a timeout: the point is to stop guessing how long a spawn takes, not to
+ * give up on one. The harness used to sleep a fixed 300ms between supervisor
+ * ticks and 1500ms after a launch, which spends most of a suite waiting and
+ * still races: on a machine slower than the sleep the tick's launch has not
+ * been counted yet, so a ceiling of three reads as five and the test fails for
+ * a reason that has nothing to do with the code under test. Waiting on the real
+ * event makes a slow machine slower rather than wrong.
+ */
+export function whenLaunchSettled(): Promise<void> {
+	return pendingLaunch ?? Promise.resolve();
+}
+
+/** The in-flight spawn, or undefined when nothing is launching. */
+let pendingLaunch: Promise<void> | undefined;
