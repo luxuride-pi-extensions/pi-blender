@@ -516,17 +516,40 @@ export function stopBridgeSupervisor(): void {
 }
 
 /**
- * Re-arm supervision across a session_start, which `/reload` also fires.
+ * Whether supervision is currently armed.
  *
- * A reload is not a reason to stop supervising, and it is not a reason to
- * start a second supervisor either. Stopping first and restarting only if one
- * was already running makes the outcome the same whether the reload reused this
- * module instance or created a new one — which is exactly the thing that cannot
- * be relied on, since pi's extension cache is keyed on a generation counter and
- * the reload path does not visibly advance it.
+ * Exported for the same reason createManagerMode exposes isEngaged: the
+ * supervisor's existence is the whole behaviour, a module-private flag is the
+ * only honest place it lives, and a test that cannot read it can only assert
+ * that the source contains a particular line -- which is a comment with a
+ * syntax error in it.
+ */
+export function isBridgeSupervisorRunning(): boolean {
+	return bridgeSupervisor !== undefined;
+}
+
+/**
+ * Arm supervision at a session_start, which `/reload` also fires.
+ *
+ * Stop first, then start, so the outcome is the same whether the reload reused
+ * this module instance or built a new one — which is exactly the thing that
+ * cannot be relied on, since pi's extension cache is keyed on a generation
+ * counter and the reload path does not visibly advance it.
+ *
+ * Unconditional, and that is a correction rather than a style choice. This used
+ * to return early when no supervisor was running, on the reasoning that a
+ * session which had not launched a UI had nothing to supervise. But the launch
+ * path deliberately does not start one either: a subagent child that launches
+ * the first UI of a session has no root process to supervise it, and starting it
+ * from the launch would mean the two processes behaved differently. Together
+ * those two decisions left nothing arming supervision at all — a Blender closed
+ * during a session stayed closed, which is the original bug this supervisor
+ * exists to prevent.
+ *
+ * startBridgeSupervisor is still the place that refuses to run in a child, so
+ * calling this from a child's session_start is harmless: it does not start.
  */
 export function restartBridgeSupervisor(): void {
-	if (!bridgeSupervisor) return;
 	stopBridgeSupervisor();
 	startBridgeSupervisor();
 }
@@ -622,8 +645,14 @@ function launchBridge(): void {
 		bridgeSpawnInFlight = false;
 		return;
 	}
-	startBridgeSupervisor();
-
+	// Deliberately NOT here. Supervising a launch is the root session's job:
+	// startBridgeSupervisor refuses to run in a subagent child, and a child that
+	// launched the first UI of a session has no root process to supervise it.
+	// Calling it anyway would be silently different in the two processes -- a
+	// root would reopen a closed window, a child would not -- and the
+	// supervision the root already owns is the one that matters.
+	// resetBridgeSupervisorHold is not needed either: a child simply never set
+	// the hold, so the first root session_start re-arms normally.
 	void (async () => {
 		// Declared outside the try: the failure reporter below needs to name
 		// the command it tried, and referencing a try-scoped binding there was

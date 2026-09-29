@@ -85,7 +85,7 @@ function stageFakeBlender() {
 }
 
 /** Drive the staged launcher once, in a child process. */
-function launchOnce({ withScripts }) {
+function launchOnce({ withScripts, subagentChild = false }) {
 	const staged = stageExtension({ withScripts });
 	const { path: blender, record } = stageFakeBlender();
 	const bridge = join(mkdtempSync(join(tmpdir(), "pi-blender-box-")), "bridge");
@@ -97,12 +97,20 @@ function launchOnce({ withScripts }) {
 			...process.env,
 			PI_BLENDER_BRIDGE_DIR: bridge,
 			PI_BLENDER_NO_UI: "",
+			PI_SUBAGENT_CHILD: subagentChild ? "1" : "",
 			BLENDER_PATH: blender,
 		},
 		encoding: "utf-8",
 		timeout: 60_000,
 	});
-	return { result, record };
+	let supervision = null;
+	try {
+		supervision = JSON.parse(result.stdout.trim().split("\n").pop() ?? "null");
+	} catch {
+		// Left null: the assertion below then reports it rather than throwing
+		// somewhere less informative than the driver's own stderr.
+	}
+	return { result, record, supervision };
 }
 
 describe("launch guard", () => {
@@ -124,5 +132,30 @@ describe("launch guard", () => {
 		assert.match(argv, /--python \S*blank-bootstrap\.py/);
 		assert.match(argv, /--python \S*live-bridge\.py/);
 		assert.doesNotMatch(result.stderr, /not launching Blender/);
+	});
+
+	it("arms supervision once from a root session_start, however many times it fires", () => {
+		// /reload re-fires session_start on the same session, so "arms once" is
+		// the whole assertion: a second interval would relaunch in parallel with
+		// the first, which is the multi-window report this supervisor exists to
+		// prevent. The accessor is what makes it observable at all.
+		const { supervision } = launchOnce({ withScripts: true });
+
+		assert.deepEqual(supervision, { armedAfterFirst: true, armedAfterSecond: true });
+	});
+
+	it("a subagent child never arms supervision", () => {
+		const { supervision, record } = launchOnce({ withScripts: true, subagentChild: true });
+
+		assert.deepEqual(
+			supervision,
+			{ armedAfterFirst: false, armedAfterSecond: false },
+			"a child has no UI lifetime to protect, so it must not watch for a dead bridge",
+		);
+		assert.equal(
+			existsSync(record),
+			false,
+			"and it must not launch either, since the driver's child path skips the launch",
+		);
 	});
 });
