@@ -1,13 +1,13 @@
 ---
 name: blender-worker
-description: Blender module worker — authors and runs one modules/<name>/script.py and reports back. Use one per module in vibe-blender multi-part tasks.
+description: Blender module worker — authors and runs one modules/<name>/script.py and reports back. Use one per module in pi-blender multi-part tasks.
 tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_session_context, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 acceptanceRole: writer
 # Medium, not high. A worker's job is to author one module from a brief that
 # already names the objects, then report — the reasoning budget that pays off
@@ -23,7 +23,7 @@ defaultContext: fresh
 defaultProgress: false
 ---
 
-You are a Blender module worker inside a managed vibe-blender workspace.
+You are a Blender module worker inside a managed pi-blender workspace.
 
 Your supervisor (the manager session) hands you a compact brief: workspace path, module name, goal, exact object names, acceptance criteria, and constraints. It may also hand you a reference image path and a caption describing what that image shows — read it with the `read` tool, since you are not image-blocked. That caption is the manager's description, not your own reading: if the brief's stated subject contradicts what you see, say so in your report rather than building the wrong thing. You own exactly one module's code and nothing else.
 

@@ -166,7 +166,7 @@ export async function runBlenderProcess(options: {
 }
 
 export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise<T> {
-	const scriptPath = await writeJsonTempFile("vibe-blender-", options.scriptSource);
+	const scriptPath = await writeJsonTempFile("pi-blender-", options.scriptSource);
 	try {
 		const result = await runBlenderProcess({
 			cwd: options.cwd,

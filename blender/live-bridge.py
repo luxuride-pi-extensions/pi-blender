@@ -21,11 +21,11 @@ BRIDGE_DIR = os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get
     # with neither bridge var set, because launch.ts always passes
     # PI_BLENDER_BRIDGE_DIR explicitly. That case is a footgun worth naming:
     # the pi side would keep reading
-    # $XDG_CACHE_HOME/vibe-blender/bridge/<instance-id>, so a UI beating here
+    # $XDG_CACHE_HOME/pi-blender/bridge/<instance-id>, so a UI beating here
     # is invisible to it and every tool call reports a plain 30s timeout rather
     # than "no UI is running". Hence the warning below.
     os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
-    "vibe-blender",
+    "pi-blender",
     "bridge",
 )
 # The per-instance scratch blank that blank-bootstrap.py opens this session on.
@@ -321,7 +321,7 @@ def ensure_requested_blend_open(request):
     if bpy.data.is_dirty and not is_discardable_scratch_blend(current_blend_path):
         current_label = current_blend_path or "the current unsaved Blender scene"
         raise RuntimeError(
-            f'Blender has unsaved changes in {current_label}. Save or discard them before vibe-blender can switch to "{requested_blend_path}".'
+            f'Blender has unsaved changes in {current_label}. Save or discard them before pi-blender can switch to "{requested_blend_path}".'
         )
 
     if bpy.data.is_dirty:
@@ -334,7 +334,7 @@ def ensure_requested_blend_open(request):
         # extension "opening Blender again", so switching away from the scratch
         # blank is allowed and the leftover state is simply dropped.
         print(
-            f'[vibe-blender] discarding unsaved changes in scratch blank "{current_blend_path or "unsaved scene"}"'
+            f'[pi-blender] discarding unsaved changes in scratch blank "{current_blend_path or "unsaved scene"}"'
         )
 
     bpy.ops.wm.open_mainfile(filepath=requested_blend_path)
@@ -382,12 +382,12 @@ def handle_reload_blend(request):
     if discarded_unsaved and not same_blend and not is_discardable_scratch_blend(current_blend_path):
         current_label = current_blend_path or "the current unsaved Blender scene"
         raise RuntimeError(
-            f'Blender has unsaved changes in {current_label}. Save or discard them before vibe-blender can switch to "{requested_blend_path}".'
+            f'Blender has unsaved changes in {current_label}. Save or discard them before pi-blender can switch to "{requested_blend_path}".'
         )
 
     if discarded_unsaved:
         print(
-            f'[vibe-blender] reload-blend: discarding unsaved changes in "{current_blend_path or "unsaved scene"}"'
+            f'[pi-blender] reload-blend: discarding unsaved changes in "{current_blend_path or "unsaved scene"}"'
         )
 
     bpy.ops.wm.open_mainfile(filepath=requested_blend_path)
@@ -1333,7 +1333,7 @@ def poll_requests():
 ensure_bridge_dirs()
 if not (os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get("VIBE_BLENDER_BRIDGE_DIR")):
     print(
-        f'[vibe-blender] warning: no bridge dir in the environment; falling back to "{BRIDGE_DIR}". '
+        f'[pi-blender] warning: no bridge dir in the environment; falling back to "{BRIDGE_DIR}". '
         "The pi extension reads its own per-instance dir and will NOT see this UI, so every blender_* call "
         "will time out. Start Blender through the extension (or set PI_BLENDER_BRIDGE_DIR) instead."
     )

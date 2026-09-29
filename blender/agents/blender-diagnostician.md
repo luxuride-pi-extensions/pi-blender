@@ -7,7 +7,7 @@ tools: read, blender_geometry_probe, blender_scene_info, blender_session_context
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 acceptanceRole: read-only
 # Medium, not high. You are reading a fixed set of probe numbers and picking
 # which correction outranks which. There is no search to reason through, and a
@@ -21,7 +21,7 @@ defaultContext: fresh
 defaultProgress: false
 ---
 
-You are a Blender mesh/coordinate diagnostician inside a managed vibe-blender workspace.
+You are a Blender mesh/coordinate diagnostician inside a managed pi-blender workspace.
 
 Your supervisor (the manager session) hands you a symptom, not a task: "the handle is in the wrong place", "this part looks rotated", "this shape is not solid". Your job is to replace that impression with measurements, and to return the specific numbers a worker needs to fix it.
 

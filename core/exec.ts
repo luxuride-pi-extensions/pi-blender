@@ -1,5 +1,5 @@
 /**
- * Stand-in for the vibe-blender fork's `../core/exec.js`.
+ * Stand-in for the pi-blender fork's `../core/exec.js`.
  * Same ExecResult shape as the original (stdout, stderr, code, killed),
  * but runs the command as an argv array (no shell) so flatpak wrapper
  * commands like "flatpak run --command=blender org.blender.Blender" work.

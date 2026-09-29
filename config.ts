@@ -1,12 +1,12 @@
 /**
- * Minimal stand-in for the vibe-blender fork's `../config.js` so the extracted
+ * Minimal stand-in for the pi-blender fork's `../config.js` so the extracted
  * blender module can run unmodified under the stock pi extension loader.
  *
  * Paths:
  *  - assets dir: this extension's `blender/` directory (scripts + skills)
  *  - bridge dir: $PI_BLENDER_BRIDGE_DIR (supports `~/`, used EXACTLY as given)
- *    or $XDG_CACHE_HOME/vibe-blender/bridge/<instance-id>
- *  - temp dir:   $XDG_CACHE_HOME/vibe-blender/tmp  (flatpak-visible)
+ *    or $XDG_CACHE_HOME/pi-blender/bridge/<instance-id>
+ *  - temp dir:   $XDG_CACHE_HOME/pi-blender/tmp  (flatpak-visible)
  *
  * Every pi SESSION gets its own bridge dir and therefore its own private
  * Blender UI. The alternative — one shared dir — makes every request from every
@@ -20,7 +20,7 @@
  * runs/background/async-execution.js), and a foreground child does not load
  * ambient parent extensions — it is handed the extension list in its agent
  * template's `extensions:` frontmatter. So a spawned blender-worker loaded
- * pi-vibe-blender into a brand-new process. When the id was minted with
+ * pi-blender into a brand-new process. When the id was minted with
  * randomUUID() per process, that child resolved a bridge dir no Blender had
  * ever polled, isLiveBridgeAlive() said false, and it launched a SECOND Blender
  * to service its own requests. The manager and each of its workers then drove
@@ -59,7 +59,7 @@ function readPromptFile(path: string, role: string): string {
 
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
-export const APP_NAME = "vibe-blender";
+export const APP_NAME = "pi-blender";
 
 /**
  * Env var carrying the session's instance id to child processes.
@@ -137,7 +137,7 @@ export function getBlenderBridgeRootDir(): string {
 	}
 	// Under the XDG cache home, not /tmp: the flatpak Blender sandbox cannot
 	// see /tmp, and this dir has to be visible to the process we spawn.
-	return join(xdgCacheHome(), "vibe-blender", "bridge");
+	return join(xdgCacheHome(), "pi-blender", "bridge");
 }
 
 export function getBlenderAssetsDir(): string {
@@ -223,7 +223,7 @@ export function getBlankBlendPath(): string {
 		if (envPath.startsWith("~/")) return homedir() + envPath.slice(1);
 		return isAbsolute(envPath) ? envPath : resolve(process.cwd(), envPath);
 	}
-	return join(xdgCacheHome(), "vibe-blender", "blank", `${getBlenderInstanceId()}.blend`);
+	return join(xdgCacheHome(), "pi-blender", "blank", `${getBlenderInstanceId()}.blend`);
 }
 
 export const ENV_BLENDER_BRIDGE_DIR = "PI_BLENDER_BRIDGE_DIR";
@@ -313,7 +313,7 @@ const ensuredTempDirs = new Set<string>();
 export function getBlenderTempDir(): string {
 	const dir = process.env.PI_BLENDER_TMP_DIR?.trim()
 		? process.env.PI_BLENDER_TMP_DIR
-		: join(xdgCacheHome(), "vibe-blender", "tmp");
+		: join(xdgCacheHome(), "pi-blender", "tmp");
 	// mkdirSync is a blocking syscall on a path reached from async tool code,
 	// on every temp script. The directory only needs creating once per process;
 	// if something removes it later, the next write surfaces the error rather

@@ -60,7 +60,7 @@ export async function readManifest(workspacePath: string): Promise<BlenderWorksp
 			savedViews[name] = normalizeSavedView(savedView);
 		} catch (error) {
 			console.warn(
-				`[pi-vibe-blender] warning: ignoring saved view "${name}" in ${manifestPath}: ${
+				`[pi-blender] warning: ignoring saved view "${name}" in ${manifestPath}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);

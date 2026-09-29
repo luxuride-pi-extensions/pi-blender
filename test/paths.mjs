@@ -1,7 +1,7 @@
 /**
  * Host paths the test harness needs, resolved instead of hardcoded.
  *
- * pi-vibe-blender is TypeScript with NodeNext ".js" specifiers, which
+ * pi-blender is TypeScript with NodeNext ".js" specifiers, which
  * `node --experimental-strip-types` cannot resolve, so the tests load the
  * extension's own modules through jiti -- the same loader pi uses.
  *

@@ -23,7 +23,7 @@ Spawn workers and critics as the **bundled agent types**, not generic ones: `ble
 - **Merger** = one `blender-merger`, once, after every part exists, and only when the parts actually need joining.
 - **Critic** = a `blender-critic` subagent (fresh context) per module per iteration. It judges how the result **looks** against the brief — vision on `modules/<name>/render.png` plus the report — and returns a critique. It does not edit anything.
 
-If `blender-worker` / `blender-critic` are not offered by the subagent tool, the bundled agent directory is not being discovered: check `subagents.defaultExtensions` (or `subagents.defaultSubagentOnlyExtensions`) in settings — the children need the `vibe-blender` extension loaded to see these agent types and their blender tools.
+If `blender-worker` / `blender-critic` are not offered by the subagent tool, the bundled agent directory is not being discovered: check `subagents.defaultExtensions` (or `subagents.defaultSubagentOnlyExtensions`) in settings — the children need the `pi-blender` extension loaded to see these agent types and their blender tools.
 
 Rules:
 - Keep the brief **compact** (< ~20 lines): goal, exact object names in the scene, visual acceptance criteria, constraints (materials, colors, proportions), workspace path, module name, and which subagents (if any) it depends on.

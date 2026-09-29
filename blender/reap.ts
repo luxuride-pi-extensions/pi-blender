@@ -228,5 +228,5 @@ export function formatReapResult(result: ReapResult): string | undefined {
 	if (result.skipped.length > 0) {
 		parts.push(`left ${result.skipped.length} dir(s) alone: ${result.skipped[0]?.reason ?? "unclassified"}`);
 	}
-	return parts.length > 0 ? `[pi-vibe-blender] ${parts.join("; ")} (this instance: ${getBlenderInstanceId()}).` : undefined;
+	return parts.length > 0 ? `[pi-blender] ${parts.join("; ")} (this instance: ${getBlenderInstanceId()}).` : undefined;
 }

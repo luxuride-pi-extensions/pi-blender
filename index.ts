@@ -1,5 +1,5 @@
 /**
- * pi extension: Vibe Blender integration (extracted from vibe-blender 0.1.2,
+ * pi extension: Vibe Blender integration (extracted from pi-blender 0.1.2,
  * repo veoery/BlenderAgent, MIT license).
  *
  * Registers 13 blender_* tools + bundled skills, the /blender and
@@ -1088,13 +1088,13 @@ export default function piVibeBlenderExtension(pi: ExtensionAPI) {
 				const result = await requestLiveBlenderShutdown({ save: true, timeoutMs: 5_000 });
 				if (result.saveError) {
 					console.error(
-						`[pi-vibe-blender] warning: could not save "${result.blendPath ?? "the open blend"}" before quitting Blender: ${result.saveError}`,
+						`[pi-blender] warning: could not save "${result.blendPath ?? "the open blend"}" before quitting Blender: ${result.saveError}`,
 					);
 				}
 			} catch (error) {
 				// Never block process exit on a bridge that is already gone.
 				console.error(
-					`[pi-vibe-blender] warning: could not cleanly shut down the live Blender UI: ${error instanceof Error ? error.message : String(error)}`,
+					`[pi-blender] warning: could not cleanly shut down the live Blender UI: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 		});

@@ -256,9 +256,9 @@ export function unresolvedToolProviders(source, isResolvable) {
 
 /** The application prefixes a tool name can carry, and the extension that registers them. */
 const TOOL_PROVIDERS = [
-	["unity_", "vibe-unity"],
-	["blender_", "vibe-blender"],
-	["vrchat-", "vibe-unity"],
+	["unity_", "pi-unity"],
+	["blender_", "pi-blender"],
+	["vrchat-", "pi-unity"],
 ];
 
 /**

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-command setup for a fresh clone of pi-vibe-blender.
+ * One-command setup for a fresh clone of pi-blender.
  *
  * A clone is deliberately not self-sufficient. Three things must be true before
  * the extension works, and all three point outside the repository:
@@ -44,7 +44,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const EXTENSIONS_DIR = join(AGENT_DIR, "extensions");
 const INSTALLED_AGENTS_DIR = join(AGENT_DIR, "agents");
-const LINK_PATH = join(EXTENSIONS_DIR, "vibe-blender");
+const LINK_PATH = join(EXTENSIONS_DIR, "pi-blender");
 const TODO_PACKAGE = "@juicesharp/rpiv-todo";
 const INSTALL_DIR_RE = /^(\d+)\.(\d+)\.(\d+)/;
 
@@ -275,7 +275,7 @@ function checkBlender() {
 	);
 }
 
-console.log(CHECK_ONLY ? "pi-vibe-blender setup check (read-only)" : "pi-vibe-blender setup");
+console.log(CHECK_ONLY ? "pi-blender setup check (read-only)" : "pi-blender setup");
 console.log(`repo: ${REPO_ROOT}\n`);
 
 ensureExtensionLink();

@@ -7,7 +7,7 @@ tools: subagent, read, blender_scene_info, blender_geometry_probe, blender_save_
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 # Authorized to spawn blender-critic, and only blender-critic. See the depth note
 # in the body: this is the deepest link the depth budget allows.
 allowNestedSubagents: true

@@ -17,7 +17,7 @@
 # the record stays true.
 #
 # `tools:` records the toolset this role assumes. `extensions:` records the two
-# extensions that must be installed for that toolset to exist (the vibe-blender
+# extensions that must be installed for that toolset to exist (the pi-blender
 # extension, and the todo package this role depends on).
 #
 # `ask_user_question` is the one tool in that line with no entry below in
@@ -39,7 +39,7 @@ tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls
 # templates in this directory. The placeholders are STALE BY DESIGN: they are
 # kept rather than replaced with a host path because a committed literal path
 # is indistinguishable from a machine-specific mistake to the next reader, and
-# because the pair records which extensions this role depends on. pi-vibe-unity's
+# because the pair records which extensions this role depends on. pi-unity's
 # manager prompt keeps them too.
 #
 # The todo package is listed because this role names `todo`. A foreground child

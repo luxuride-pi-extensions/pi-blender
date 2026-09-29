@@ -7,7 +7,7 @@ tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scen
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 acceptanceRole: writer
 # Medium, not high. You run once at the end, applying a fixed cleanup checklist
 # to a scene that is already built. There is no search here to think through.

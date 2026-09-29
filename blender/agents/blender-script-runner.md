@@ -7,7 +7,7 @@ tools: read, blender_module_run, blender_scene_info, blender_geometry_probe, ble
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 acceptanceRole: writer
 # Medium, not high. Your loop is mechanical: run, diff object names against the
 # declared `owns` list, report. The only judgment is whether a diff is a

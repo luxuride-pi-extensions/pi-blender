@@ -26,7 +26,7 @@ const PROBE = fileURLToPath(new URL("./probe.mjs", import.meta.url));
 
 /** A scratch XDG cache root, so nothing here reads or writes the real one. */
 function scratchCache() {
-	return mkdtempSync(join(tmpdir(), "vibe-blender-test-"));
+	return mkdtempSync(join(tmpdir(), "pi-blender-test-"));
 }
 
 /**
@@ -83,8 +83,8 @@ test("a valid but unusual id survives intact", () => {
 test("the bridge dir nests the instance id under the XDG cache root by default", () => {
 	const cache = scratchCache();
 	const result = probe({ PI_BLENDER_INSTANCE_ID: "sess0000abcd", XDG_CACHE_HOME: cache });
-	assert.equal(result.bridgeRoot, join(cache, "vibe-blender", "bridge"));
-	assert.equal(result.bridgeDir, join(cache, "vibe-blender", "bridge", "sess0000abcd"));
+	assert.equal(result.bridgeRoot, join(cache, "pi-blender", "bridge"));
+	assert.equal(result.bridgeDir, join(cache, "pi-blender", "bridge", "sess0000abcd"));
 	assert.equal(result.hasBridgeDirOverride, false);
 	rmSync(cache, { recursive: true, force: true });
 });
@@ -93,7 +93,7 @@ test("a bridge dir override is used EXACTLY, with no instance subdirectory", () 
 	// Someone who sets this is naming one bridge on purpose, to share a UI with
 	// another process. Nesting a subdir under it gives a Blender that can never
 	// see the requests.
-	const pinned = join(tmpdir(), "vibe-blender-pinned-bridge");
+	const pinned = join(tmpdir(), "pi-blender-pinned-bridge");
 	const result = probe({ PI_BLENDER_BRIDGE_DIR: pinned });
 	assert.equal(result.bridgeDir, pinned);
 	assert.equal(result.hasBridgeDirOverride, true);

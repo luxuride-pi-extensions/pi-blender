@@ -23,7 +23,7 @@
  *   npm run install:agents -- --todo=DIR    # pin the todo package directory
  *   npm run install:agents -- --out=DIR     # write somewhere other than ~/.pi/agent/agents
  *   npm run install:agents -- --check       # verify installed copies are in sync, write nothing
- *   npm run install:agents -- --extension=DIR  # pin the vibe-blender extension directory
+ *   npm run install:agents -- --extension=DIR  # pin the pi-blender extension directory
  */
 
 import { createHash } from "node:crypto";
@@ -37,7 +37,7 @@ import { checkTemplate } from "./agent-template-checks.mjs";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE_DIR = join(REPO_ROOT, "blender", "agents");
 
-const EXTENSION_PLACEHOLDER = "/path/to/pi-vibe-blender";
+const EXTENSION_PLACEHOLDER = "/path/to/pi-blender";
 const TODO_PLACEHOLDER = "/path/to/rpiv-todo/index.ts";
 const TODO_PACKAGE = "@juicesharp/rpiv-todo";
 
@@ -60,14 +60,14 @@ function parseArgs(argv) {
 }
 
 /**
- * Locate the installed vibe-blender extension. It is normally a copy of this repo
+ * Locate the installed pi-blender extension. It is normally a copy of this repo
  * under ~/.pi/agent/extensions/, but a developer running from a checkout would
  * point that at the checkout instead, so prefer an explicit flag and then an
  * already-installed copy, and fall back to the repo itself.
  */
 function resolveExtensionDir(options) {
 	if (options.extensionDir) return options.extensionDir;
-	const installed = join(homedir(), ".pi", "agent", "extensions", "vibe-blender");
+	const installed = join(homedir(), ".pi", "agent", "extensions", "pi-blender");
 	if (existsSync(join(installed, "package.json"))) return installed;
 	return REPO_ROOT;
 }

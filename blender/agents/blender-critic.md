@@ -7,7 +7,7 @@ tools: read, blender_scene_info, blender_log_critique, contact_supervisor, blend
 # style relative paths), so an absolute path is required. The copy of this file
 # under ~/.pi/agent/agents/ ships with the value already set for the machine that
 # installed it; re-point it if you move the extension.
-extensions: /path/to/pi-vibe-blender
+extensions: /path/to/pi-blender
 acceptanceRole: read-only
 # Medium, not high. The critic reads exactly one render and one reference and
 # reports a verdict — there is no search to think through, and the image

@@ -1,6 +1,6 @@
-# pi-vibe-blender
+# pi-blender
 
-Pi extension extracted from [vibe-blender](https://github.com/veoery/BlenderAgent) 0.1.2
+Pi extension extracted from [pi-blender](https://github.com/veoery/BlenderAgent) 0.1.2
 (MIT) — the Vibe Blender fork of the pi monorepo. Brings the live-Blender 3D
 modeling workflow (scene state, vision-informed iteration, render loop) into
 stock pi, with fixes for a **flatpak** Blender install.
@@ -39,14 +39,14 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 
 1. **Temp scripts** — upstream writes bpy scripts to `os.tmpdir()` (`/tmp`),
    which the `org.blender.Blender` sandbox cannot read. Now:
-   `$XDG_CACHE_HOME/vibe-blender/tmp` (default `~/.cache/vibe-blender/tmp`),
+   `$XDG_CACHE_HOME/pi-blender/tmp` (default `~/.cache/pi-blender/tmp`),
    overridable with `PI_BLENDER_TMP_DIR`.
 2. **Command resolution** — `BLENDER_PATH` is whitespace-split into an argv
    array (no shell), so `BLENDER_PATH="flatpak run --command=blender
    org.blender.Blender"` works. Without it: macOS app path →
    `flatpak info org.blender.Blender` autodetect → `blender` on PATH.
 3. **Bridge dir** — default moved from `~/.pi/agent/blender-bridge` to
-   `~/.cache/vibe-blender/bridge` (XDG cache), override with
+   `~/.cache/pi-blender/bridge` (XDG cache), override with
    `PI_BLENDER_BRIDGE_DIR`. The bridge dir is **per pi process**:
    `…/bridge/<instance-id>`, so concurrent instances never contend for one
    mutable scene. The override disables that scheme entirely — one flat dir,
@@ -86,7 +86,7 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    silently respawned empty window.
 6. **Blank scene on launch** — the UI launch runs `blank-bootstrap.py`
    first: it strips the default startup Cube/Camera/Light and saves the
-   result to `$XDG_CACHE_HOME/vibe-blender/blank/<instance-id>.blend`
+   result to `$XDG_CACHE_HOME/pi-blender/blank/<instance-id>.blend`
    (flatpak-visible under the bind-mounted XDG cache home), so the
    live session starts from a clean, saved, non-dirty scene. The per-instance
    filename is why two pi processes can each hold a scratch blank without
@@ -121,16 +121,16 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | Var | Default |
 | --- | --- |
 | `BLENDER_PATH` | auto (flatpak autodetect, else `blender` on PATH) |
-| `PI_BLENDER_BRIDGE_DIR` | `~/.cache/vibe-blender/bridge` (each pi process uses `…/<instance-id>/`; setting this pins ONE shared dir and disables per-instance isolation — see §3) |
-| `PI_BLENDER_TMP_DIR` | `~/.cache/vibe-blender/tmp` |
-| `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/vibe-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
+| `PI_BLENDER_BRIDGE_DIR` | `~/.cache/pi-blender/bridge` (each pi process uses `…/<instance-id>/`; setting this pins ONE shared dir and disables per-instance isolation — see §3) |
+| `PI_BLENDER_TMP_DIR` | `~/.cache/pi-blender/tmp` |
+| `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
 | `VIBE_BLENDER_NO_BLENDER` | unset (set `1` to never auto-launch UI) |
 
 ## Install
 
 ```bash
 git clone <this repo's URL>
-cd pi-vibe-blender
+cd pi-blender
 npm install
 npm run setup
 ```
@@ -138,7 +138,7 @@ npm run setup
 `npm run setup` does everything a fresh clone needs and is safe to re-run:
 
 ```
-ok     extension symlink — ~/.pi/agent/extensions/vibe-blender -> <clone>
+ok     extension symlink — ~/.pi/agent/extensions/pi-blender -> <clone>
 ok     typebox resolvable — node_modules/typebox (pi 0.87.1)
 ok     agent definitions — 9 in sync in ~/.pi/agent/agents
 ok     todo provider for the manager prompt — @juicesharp/rpiv-todo

@@ -1,5 +1,5 @@
 """
-Blank-blend bootstrap for the pi-vibe-blender live bridge.
+Blank-blend bootstrap for the pi-blender live bridge.
 
 Runs as the first --python startup script of the UI launch, before
 live-bridge.py registers its poll timer. It:
@@ -11,7 +11,7 @@ live-bridge.py registers its poll timer. It:
 
 Env:
   PI_BLENDER_BLANK_BLEND_PATH — override the output path. launch.ts always
-  sets it, to $XDG_CACHE_HOME/vibe-blender/blank/<instance-id>.blend (flatpak-
+  sets it, to $XDG_CACHE_HOME/pi-blender/blank/<instance-id>.blend (flatpak-
   visible via the bind-mounted XDG cache home), so the default below only
   applies to a hand-started Blender. It deliberately lands on a different
   filename from the per-instance ones: a manual run must not clobber the
@@ -25,7 +25,7 @@ import bpy  # pyright: ignore[reportMissingImports]
 
 DEFAULT_BLANK_BLEND_PATH = os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
-    "vibe-blender",
+    "pi-blender",
     "blank",
     "manual.blend",
 )

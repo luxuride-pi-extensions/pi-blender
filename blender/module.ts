@@ -14,7 +14,7 @@ import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from 
 
 const MODULE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MODULE_SCRIPT_FILE = "script.py";
-const MODULE_PREAMBLE_MARKER = "# --- vibe-blender module preamble";
+const MODULE_PREAMBLE_MARKER = "# --- pi-blender module preamble";
 /** Read-only pre-run checkpoint from a workspace predating per-run checkpoints. */
 const LEGACY_CHECKPOINT_FILE = "pre.blend";
 const RENDER_FILE = "render.png";
@@ -50,7 +50,7 @@ function getModuleDir(workspacePath: string, moduleName: string): string {
  */
 export function buildModuleScriptPreamble(workspacePath: string, blendPath: string, moduleName: string): string {
 	return [
-		"# --- vibe-blender module preamble (do not edit) ---",
+		"# --- pi-blender module preamble (do not edit) ---",
 		`# workspace: ${workspacePath}`,
 		`# module: ${moduleName}`,
 		``,

@@ -234,14 +234,14 @@ async function ensureInstanceClaimed(): Promise<void> {
 		// stale dir, which the next launch also skips past, so it must never
 		// stop this process from launching its own UI.
 		console.error(
-			`[pi-vibe-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`,
+			`[pi-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 	try {
 		writeInstanceFile();
 	} catch (error) {
 		console.error(
-			`[pi-vibe-blender] could not record this Blender instance (${getBlenderBridgeDir()}): ${
+			`[pi-blender] could not record this Blender instance (${getBlenderBridgeDir()}): ${
 				error instanceof Error ? error.message : String(error)
 			}. Other pi instances will not be able to tell it apart from an orphan.`,
 		);
@@ -295,7 +295,7 @@ function armBridgeWatchdog(): void {
 		releaseLaunchClaim();
 		bridgeLaunchStarted = false;
 		console.error(
-			`[pi-vibe-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
+			`[pi-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
 		);
 	}, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS);
 	// Never hold the pi process open just to watch a Blender we already unref'd.
@@ -526,7 +526,7 @@ function launchBridge(): void {
 				releaseLaunchClaim();
 				bridgeLaunchStarted = false;
 				console.error(
-					`[pi-vibe-blender] warning: failed to start Blender (${command} ${args.join(" ")}): ${error.message}. Fix BLENDER_PATH or install Blender; the next blender_* call will retry.`,
+					`[pi-blender] warning: failed to start Blender (${command} ${args.join(" ")}): ${error.message}. Fix BLENDER_PATH or install Blender; the next blender_* call will retry.`,
 				);
 			});
 			child.unref();
@@ -538,7 +538,7 @@ function launchBridge(): void {
 			releaseLaunchClaim();
 			const message = error instanceof Error ? error.message : String(error);
 			const target = launched ? `${launched.command} ${launched.args.join(" ")}`.trim() : "Blender";
-			console.error(`[pi-vibe-blender] warning: failed to launch Blender (${target}): ${message}`);
+			console.error(`[pi-blender] warning: failed to launch Blender (${target}): ${message}`);
 			bridgeLaunchStarted = false;
 		}
 		finally {
