@@ -199,6 +199,11 @@ const managerMode = core.createManagerMode({
 	// and a Set is an iterable, not one. Spreading here keeps the single
 	// declaration below the one place the allowlist is edited.
 	allowedTools: [...MANAGER_ALLOWED_TOOL_NAMES],
+	// The roster's RULE is the core's; only the names are ours. The local copy
+	// of the check was deleted when it moved, because the rule sat behind the
+	// allowlist there — and `subagent` is allowlisted, since delegating is the
+	// manager's job.
+	agentRoster: [...BLENDER_MANAGER_ROSTER],
 	onGateMessage: (event) => {
 		// Workers are the ones that must be able to write code and look at
 		// renders, so the gate applies to the manager session and to no one
@@ -209,18 +214,6 @@ const managerMode = core.createManagerMode({
 				reason:
 					"Manager role: do not author files. This session IS the manager — you were not handed a job to relay — and the subagents you spawn are the ones that do the work. Authoring Blender code, whether a module script or the root script.py, is `blender-worker`'s job: plan the modules, then spawn one per module with a compact brief (goal, module name, object names, acceptance criteria) and read only the reports that come back. A direct approach is a dead end: your `write`/`edit` is blocked for the rest of this manager mode.",
 			};
-		}
-
-		if (event.toolName === "subagent") {
-			// `agent` is absent for management/control actions (status, list,
-			// stop, …), so only a one-child spawn is constrained here.
-			const target = typeof event.input.agent === "string" ? event.input.agent.trim() : "";
-			if (target.length > 0 && !BLENDER_MANAGER_ROSTER.has(target)) {
-				return {
-					block: true,
-					reason: `Manager role: you may only spawn ${[...BLENDER_MANAGER_ROSTER].join(", ")}. "${target}" is not one of them, and each of those already owns a distinct job in this build, so spawning something else means reassigning work that has an owner. If none of them covers a capability you need, say so in your report rather than reaching for an unrelated agent.`,
-				};
-			}
 		}
 
 		if (event.toolName === "read") {

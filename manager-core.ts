@@ -81,6 +81,12 @@ export interface ManagerMode {
 
 export interface ManagerModeOptions {
 	allowedTools?: readonly string[];
+	/**
+	 * Agent names this manager may spawn. The NAMES are the application's; the
+	 * rule is the core's, so it cannot drift from the mechanism. Empty or absent
+	 * means no constraint.
+	 */
+	agentRoster?: readonly string[];
 	onGateMessage?: (event: ToolCallEvent) => ToolCallRefusal | null;
 }
 
