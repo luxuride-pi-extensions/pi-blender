@@ -37,12 +37,24 @@ import { checkTemplate } from "./agent-template-checks.mjs";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE_DIR = join(REPO_ROOT, "blender", "agents");
 
+/**
+ * Where pi keeps its agent directory.
+ *
+ * Overridable for the same reason the other two installers honour it: a
+ * non-default pi home is a real configuration, and a hardcoded ~/.pi here means
+ * an install run against one writes into the OTHER one's real agent directory —
+ * which then loads the wrong extension entirely, with nothing reporting it.
+ * Kept in step with the shared core's getPiAgentDir() so all four agree.
+ */
+const PI_HOME = process.env.PI_HOME ?? join(homedir(), ".pi");
+const PI_AGENT_DIR = process.env.PI_AGENT_DIR ?? join(PI_HOME, "agent");
+
 const EXTENSION_PLACEHOLDER = "/path/to/pi-blender";
 const TODO_PLACEHOLDER = "/path/to/rpiv-todo/index.ts";
 const TODO_PACKAGE = "@juicesharp/rpiv-todo";
 
 function parseArgs(argv) {
-	const options = { out: join(homedir(), ".pi", "agent", "agents"), check: false };
+	const options = { out: join(PI_AGENT_DIR, "agents"), check: false };
 	for (const arg of argv) {
 		if (arg === "--check") {
 			options.check = true;
@@ -67,17 +79,19 @@ function parseArgs(argv) {
  */
 function resolveExtensionDir(options) {
 	if (options.extensionDir) return options.extensionDir;
-	const installed = join(homedir(), ".pi", "agent", "extensions", "pi-blender");
+	const installed = join(PI_AGENT_DIR, "extensions", "pi-blender");
 	if (existsSync(join(installed, "package.json"))) return installed;
 	return REPO_ROOT;
 }
 
 function resolveTodoEntry(options) {
 	if (options.todoDir) return join(options.todoDir, "index.ts");
-	const candidate = join(homedir(), ".pi", "agent", "npm", "node_modules", TODO_PACKAGE, "index.ts");
+	const candidate = join(PI_AGENT_DIR, "npm", "node_modules", TODO_PACKAGE, "index.ts");
 	if (existsSync(candidate)) return candidate;
 	throw new Error(
-		`Could not find ${TODO_PACKAGE}. Install it into the agent npm tree, or pass --todo=DIR pointing at the package directory.`,
+		`Could not find ${TODO_PACKAGE} at ${candidate}. Install it into that npm tree, or pass ` +
+			"--todo=DIR pointing at the package directory. The path is resolved under PI_AGENT_DIR, so a " +
+			"non-default pi home needs the package installed there too.",
 	);
 }
 
@@ -117,7 +131,7 @@ const notAgents = ["exchange.md"];
  * what the shared checks ask about when a template names a `blender_*` tool.
  */
 function extensionIsResolvable(extension) {
-	return existsSync(join(homedir(), ".pi", "agent", "extensions", extension));
+	return existsSync(join(PI_AGENT_DIR, "extensions", extension));
 }
 
 const options = parseArgs(process.argv.slice(2));

@@ -125,6 +125,8 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | `PI_BLENDER_TMP_DIR` | `~/.cache/pi-blender/tmp` |
 | `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
 | `PI_BLENDER_NO_UI` | unset (set `1` to never auto-launch UI) |
+| `PI_HOME` | `~/.pi` — root of the pi installation |
+| `PI_AGENT_DIR` | `$PI_HOME/agent` — where extensions and agents are installed, and the base for every other path this table resolves against |
 
 ## Install
 
