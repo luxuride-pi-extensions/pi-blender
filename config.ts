@@ -52,11 +52,6 @@ import { loadManagerCore } from "./manager-core.js";
  */
 const core = loadManagerCore();
 
-/** Read a prompt file, or a sentence naming what failed and where. */
-function readPromptFile(path: string, role: string): string {
-	return core.readPromptFile(path, role);
-}
-
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
 export const APP_NAME = "pi-blender";
@@ -175,7 +170,7 @@ export function getBundledBlankBootstrapPath(): string {
  * worse than one that reports the prompt is gone.
  */
 export function getManagerPrompt(): string {
-	const manager = readPromptFile(join(EXTENSION_DIR, "blender", "agents", "blender-manager.md"), "Blender manager");
+	const manager = core.readPromptFile(join(EXTENSION_DIR, "blender", "agents", "blender-manager.md"), "Blender manager");
 	return `${manager}\n\n${readExchangeContract()}`;
 }
 
@@ -241,7 +236,7 @@ export function hasBridgeDirOverride(): boolean {
 }
 
 function xdgCacheHome(): string {
-	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
+	return core.xdgCacheHome();
 }
 
 /**
