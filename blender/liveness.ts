@@ -36,6 +36,23 @@ import { getBlenderBridgeDir } from "../config.js";
  */
 export const HEARTBEAT_STALE_MS = 10_000;
 
+/**
+ * How long a just-spawned Blender gets to write its first heartbeat before the
+ * launch is considered failed. A successful spawn is not proof of a UI: the
+ * process can die during boot, or be killed by the OS, and the request will
+ * then sit in the queue until its own timeout. On expiry the launch flag is
+ * released so the next ensureLiveBridgeLaunched() retries instead of treating a
+ * dead UI as "already launched" for the rest of the pi process.
+ *
+ * Defined HERE rather than in launch.ts, and that placement is forced by an
+ * import cycle: blender/utils.ts imports resolveBlenderArgv from launch.ts, so
+ * launch.ts cannot import from utils.ts, and the instance reaper needs this same
+ * number to judge how long an unowned dir may sit before it is certainly
+ * abandoned. A reaper reaching back into launch.ts would close the cycle from
+ * the other side. One definition, two readers, no cycle.
+ */
+export const LIVE_BRIDGE_LAUNCH_WATCHDOG_MS = 120_000;
+
 /** Whether the heartbeat file was touched within the staleness window. */
 export function isHeartbeatFresh(bridgeDir: string = getBlenderBridgeDir()): boolean {
 	try {

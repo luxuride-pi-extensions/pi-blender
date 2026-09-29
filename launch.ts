@@ -21,7 +21,7 @@ import { getBlankBlendPath, getBlenderBridgeDir, getBlenderInstanceId, getBundle
 import { formatReapResult, reapOrphanedBridgeDirs } from "./blender/reap.js";
 // isHeartbeatFresh is aliased on import because launch.ts has a local
 // no-argument wrapper of the same name below; the module version takes a dir.
-import { isBridgeAlive, isHeartbeatFresh as isHeartbeatFreshIn } from "./blender/liveness.js";
+import { isBridgeAlive, isHeartbeatFresh as isHeartbeatFreshIn, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS } from "./blender/liveness.js";
 
 const DEFAULT_BLENDER_PATH = "/Applications/Blender.app/Contents/MacOS/Blender";
 const FLATPAK_BLENDER_REF = "org.blender.Blender";
@@ -30,15 +30,14 @@ const FLATPAK_BLENDER_REF = "org.blender.Blender";
 // constants. See HEARTBEAT_STALE_MS there for why 10 s.
 /**
  * How long a just-spawned Blender gets to write its first heartbeat before the
- * launch is considered failed. A successful spawn is not proof of a UI: the
- * process can die during boot, or be killed by the OS, and the request will
- * then sit in the queue until its own timeout. On expiry the launch flag is
- * released so the next ensureLiveBridgeLaunched() retries instead of treating a
- * dead UI as "already launched" for the rest of the pi process.
+ * launch is considered failed.
+ *
+ * The value lives in blender/liveness.ts and is imported above, because the
+ * instance reaper needs the same number to judge how long an unowned dir may sit
+ * before it is certainly abandoned, and an import cycle (utils.ts -> launch.ts)
+ * means one of the two has to reach sideways. See the constant's own comment.
  */
-const LIVE_BRIDGE_LAUNCH_WATCHDOG_MS = 120_000;
-/**
- * How often the supervisor re-checks the bridge while it is healthy.
+/** How often the supervisor re-checks the bridge while it is healthy.
  *
  * This is what makes a Blender that dies mid-session come back on its own.
  * Nothing in the tool path can notice: every tool call blocks on a bridge

@@ -33,7 +33,7 @@ import {
 	getBlenderInstanceId,
 	hasBridgeDirOverride,
 } from "../config.js";
-import { isHeartbeatFresh, isHeartbeatPidAlive } from "./liveness.js";
+import { isHeartbeatFresh, isHeartbeatPidAlive, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS } from "./liveness.js";
 
 interface InstanceFile {
 	pid?: unknown;
@@ -142,18 +142,46 @@ export async function reapOrphanedBridgeDirs(): Promise<ReapResult> {
  * a dir whose surviving owner is very much alive as an orphan the moment that
  * one worker exited, and the sweep would delete the requests directory out from
  * under the session's live Blender.
+ *
+ * Rule 4 is the one that needed adding, and its absence was a leak rather than
+ * a safety problem. A dir can exist with NO owner record at all: a process
+ * killed between creating it and publishing the record, or one from before
+ * per-process records existed. Every such dir read as unclassifiable and was
+ * therefore never removed, so the instance root grew a permanent entry per
+ * incident. A live user met exactly that — a dir whose heartbeat was eleven
+ * hours stale and whose launch claim named a pid long gone, still there, still
+ * looking like a second Blender to anyone who listed the root.
+ *
+ * The removal condition is therefore positive evidence in all three parts: a
+ * heartbeat file (so the dir is a bridge dir and not something a person made),
+ * that heartbeat stale past UNOWNED_DIR_STALE_MS rather than merely past
+ * HEARTBEAT_STALE_MS, and no live launch claim. A claim that cannot be read
+ * counts as LIVE, because a claim is created and written in two steps and the
+ * half-written state is a peer that is launching right now. The long window is
+ * the same budget a launch is owed, and for the same reason: no launch path
+ * takes longer than that to publish an owner record, so a dir this old with no
+ * record has not been published and never will be.
+ *
+ * Exported for the tests, which must reach the decision without a sweep: the
+ * sweep resolves the instance root from the environment at import time and
+ * refuses to run at all under PI_BLENDER_BRIDGE_DIR, so a test that wanted the
+ * verdict through reapOrphanedBridgeDirs() would be testing the override guard
+ * instead of this function.
  */
-async function classifyBridgeDir(dir: string): Promise<"adopt" | "remove" | string> {
+export async function classifyBridgeDir(dir: string): Promise<"adopt" | "remove" | string> {
 	if (isHeartbeatFresh(dir)) {
 		return isHeartbeatPidAlive(dir) ? "adopt" : "remove";
 	}
 
 	const owners = await readOwnerRecords(dir);
 	if (owners === null) {
-		// No instance file and no heartbeat: could be a hand-made bridge dir,
-		// or a shared dir someone pointed PI_BLENDER_BRIDGE_DIR at. Not ours to
-		// delete on a guess.
-		return "no instance file and no heartbeat; left alone";
+		// No owner record. Only a dir carrying a bridge heartbeat can be one of
+		// ours, and only an old one with no live claim is certainly abandoned —
+		// see rule 4 in the file header.
+		if (!(await looksLikeAbandonedBridgeDir(dir))) {
+			return "no instance file and no heartbeat; left alone";
+		}
+		return "remove";
 	}
 
 	// Any live owner keeps the dir. An owner that is starting, or that is simply
@@ -197,6 +225,68 @@ async function readOwnerRecords(dir: string): Promise<number[] | null> {
 	}
 	addPid(await readInstanceFile(join(dir, "instance.json")));
 	return pids.length > 0 ? pids : null;
+}
+
+/**
+ * How long an instance dir with no owner record must go unowned before the
+ * sweep may remove it.
+ *
+ * Longer than HEARTBEAT_STALE_MS (10s) on purpose, and by a wide margin. Ten
+ * seconds is the window a *live* UI is allowed to go without beating, so a rule
+ * using it would remove a dir belonging to a process that is merely slow. The
+ * same budget a launch is owed is the right comparison: a launch publishes its
+ * owner record at the same time it claims the launch, and a launch that cannot
+ * do that within the cold-start budget is not going to do it later.
+ */
+const UNOWNED_DIR_STALE_MS = LIVE_BRIDGE_LAUNCH_WATCHDOG_MS;
+
+/**
+ * Whether a dir with no owner record is certainly an abandoned bridge dir.
+ *
+ * Three pieces of positive evidence, all required, because the alternative is
+ * `rm -rf` on a directory nobody can prove is ours:
+ *
+ *   1. a heartbeat file, so the dir is a bridge dir rather than a hand-made
+ *      one or a scratch directory a person put there;
+ *   2. a heartbeat older than UNOWNED_DIR_STALE_MS, so a starting or
+ *      working UI is never a candidate;
+ *   3. no live launch claim. A claim is created and written in two steps, so an
+ *      unreadable one is a peer mid-launch and counts as live.
+ *
+ * Never throws: a failure to read is not evidence of abandonment.
+ */
+async function looksLikeAbandonedBridgeDir(dir: string): Promise<boolean> {
+	let heartbeat: Awaited<ReturnType<typeof stat>> | null;
+	try {
+		heartbeat = await stat(join(dir, "heartbeat"));
+	} catch {
+		return false;
+	}
+	if (!heartbeat.isFile()) return false;
+	if (Date.now() - heartbeat.mtimeMs < UNOWNED_DIR_STALE_MS) return false;
+
+	// A claim is checked by EXISTENCE first and by pid second, because the
+	// create-then-write window means a claim that exists but cannot be read is
+	// a peer mid-launch. Reading first would call that an absent claim and
+	// remove a dir somebody is about to publish an owner record into.
+	let claim: { pid?: unknown } | null = null;
+	try {
+		claim = JSON.parse(await readFile(join(dir, "launch.claim"), "utf-8")) as { pid?: unknown };
+	} catch {
+		claim = null;
+	}
+	if (claim === null) {
+		// Either there is no claim, or there is one this process cannot read.
+		// The second is the dangerous case, so it is what decides.
+		try {
+			await stat(join(dir, "launch.claim"));
+			return false;
+		} catch {
+			return true;
+		}
+	}
+	const pid = toPid(claim.pid);
+	return pid === null || !pidIsRunning(pid);
 }
 
 async function readInstanceFile(path: string): Promise<InstanceFile | null> {
