@@ -84,13 +84,34 @@ function stageFakeBlender() {
 	return { path, record };
 }
 
+/**
+ * A peer's claim in the few microseconds between its create and its write.
+ *
+ * Mirrors what is on disk inside tryClaimLaunch between openSync(path, "wx")
+ * and writeFileSync: a claim this process does not own, that is a zero-byte
+ * file. This is exactly what a release from another process used to see, and
+ * reading it as "unparseable, therefore mine" deleted a live peer's claim.
+ */
+const PEER_HALF_WRITTEN_CLAIM = "";
+
 /** Drive the staged launcher once, in a child process. */
-function launchOnce({ withScripts, subagentChild = false }) {
+function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seedHeartbeat = false }) {
 	const staged = stageExtension({ withScripts });
 	const { path: blender, record } = stageFakeBlender();
 	const bridge = join(mkdtempSync(join(tmpdir(), "pi-blender-box-")), "bridge");
 	sandboxes.push(join(bridge, ".."));
 	mkdirSync(bridge, { recursive: true });
+	if (seedClaim !== null) writeFileSync(join(bridge, "launch.claim"), seedClaim);
+	// A live UI in this dir, so the driver takes the ALIVE path: isLiveBridgeAlive()
+	// fires the onFresh hook, which is where the launch claim is released. The
+	// dead path returns before any release happens, and would pass whatever
+	// releaseLaunchClaim did.
+	//
+	// The pid is this test process, which is trivially alive, and the mtime is
+	// the write that just happened -- both signals isBridgeAlive requires.
+	if (seedHeartbeat) {
+		writeFileSync(join(bridge, "heartbeat"), JSON.stringify({ pid: process.pid, at: Date.now() }));
+	}
 
 	const result = spawnSync(process.execPath, [DRIVER, staged], {
 		env: {
@@ -110,7 +131,7 @@ function launchOnce({ withScripts, subagentChild = false }) {
 		// Left null: the assertion below then reports it rather than throwing
 		// somewhere less informative than the driver's own stderr.
 	}
-	return { result, record, supervision };
+	return { result, record, bridge, supervision };
 }
 
 describe("launch guard", () => {
@@ -157,5 +178,35 @@ describe("launch guard", () => {
 			false,
 			"and it must not launch either, since the driver's child path skips the launch",
 		);
+	});
+
+	it("leaves a peer's claim alone, including one it cannot parse", () => {
+		// The claim is the only thing stopping two processes in one session
+		// from each deciding nobody is launching a Blender. A release that
+		// removed a claim it did not own removed the only protection the peer
+		// had, and the user got a second window -- caused by the mechanism meant
+		// to prevent exactly that.
+		//
+		// Both seeds are unreadable as JSON, which is the state the old catch
+		// treated as "so it must be mine": a peer that created the file and has
+		// not written to it yet, and a file truncated by a full disk. Neither is
+		// evidence of ownership, so neither may be deleted on sight.
+		for (const [what, seed] of [
+			["a peer that has not written its claim yet", PEER_HALF_WRITTEN_CLAIM],
+			["a claim truncated by a full disk", '{"pid":123, "inst'],
+		]) {
+			const { result, bridge } = launchOnce({
+				withScripts: true,
+				seedClaim: seed,
+				seedHeartbeat: true,
+			});
+
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(
+				existsSync(join(bridge, "launch.claim")),
+				true,
+				`the claim must survive a release triggered by ${what}`,
+			);
+		}
 	});
 });

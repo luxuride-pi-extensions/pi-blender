@@ -146,10 +146,33 @@ function releaseLaunchClaim(): void {
 	try {
 		const holder = JSON.parse(readFileSync(path, "utf-8")) as { pid?: number };
 		if (holder?.pid !== process.pid) return;
-	} catch {
-		// Unreadable claim: the create-time content is this process's own, and
-		// an unparseable file is not evidence of someone else's claim. The
-		// staleness reclaim above is what recovers a genuinely abandoned one.
+	} catch (error) {
+		// A claim file that does not exist is the common case and the correct
+		// one to fall through on: rmSync below is a no-op.
+		//
+		// A claim that EXISTS but cannot be parsed is a different thing, and it
+		// used to be treated the same way -- which deleted a peer's live claim.
+		// tryClaimLaunch creates the file with openSync(path, "wx") and only
+		// then writes the JSON, so for the few microseconds in between a peer
+		// reading it sees an empty file, JSON.parse throws, and this process
+		// removed the claim of a process that was about to spawn. The peer then
+		// spawned, and so did we: two windows, which is the single thing the
+		// claim exists to prevent, caused by the mechanism meant to prevent it.
+		//
+		// So an unparseable claim is left alone. The cost of being conservative
+		// is that this process does not release a claim it is not sure of
+		// holding, and the staleness reclaim in tryClaimLaunch still clears an
+		// abandoned one after one cold-start budget. That is the right trade:
+		// a late launch costs nothing, a duplicate window costs the user their
+		// Blender session.
+		//
+		// ENOENT is the only error that means "there is nothing here". Checked
+		// against the code rather than the error's shape because a parse failure
+		// is a SyntaxError, which has no code at all -- testing for the absence
+		// of a code, as an earlier version of this did, treats every parse
+		// failure as ENOENT and deletes exactly the claim it was written to
+		// protect.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
 	}
 	rmSync(path, { force: true });
 }
