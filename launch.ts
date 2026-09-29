@@ -408,19 +408,6 @@ function armBridgeWatchdog(): void {
 }
 
 /**
- * Whether a launch is still inside its cold-start budget.
- *
- * Exported because the supervisor now gates on it, and a gate that nothing can
- * read is a gate nothing can test. The handler it is a proxy for is the
- * supervisor's: it used to relaunch every fifteen seconds for the two minutes a
- * slow Blender needs, and the only way to prove that is fixed is to drive the
- * ticks and watch the count.
- */
-export function isBridgeWatchdogArmed(): boolean {
-	return bridgeWatchdog !== undefined;
-}
-
-/**
  * True when this instance's bridge is alive: a heartbeat refreshed within
  * HEARTBEAT_STALE_MS AND a pid that is still running.
  *
