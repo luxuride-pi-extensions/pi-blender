@@ -223,4 +223,31 @@ describe("bridge supervisor policy", () => {
 			"the ceiling's message would be a second, misleading explanation",
 		);
 	});
+
+	it("a supervisor left over from a /reload stands itself down", () => {
+		// pi re-imports an extension with `moduleCache: false`, so /reload
+		// produces a NEW module instance: a new bridgeSupervisor variable, a new
+		// interval, a new failure counter. The old interval cannot be cleared by
+		// the new one — stopBridgeSupervisor() only reaches the handle its own
+		// instance holds — so every reload used to leak a supervisor. Each leaked
+		// one had its own budget of three launches, which is how a session that
+		// was reloaded a few times opened a dozen windows where it should have
+		// opened none.
+		//
+		// A pid cannot catch it: the leaked interval belongs to this very
+		// process. Ownership is a token on disk, and the leaked interval is the
+		// thing that checks it, because it is the only handle anyone still has.
+		const staged = stageExtension({ withScripts: true });
+		const { path: blender } = stageFakeBlender();
+		const bridge = stageBridgeDir();
+		const result = runDriver(DRIVER, staged, ["reload"], { bridge, blender });
+		const outcome = readDriverJson(result);
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(
+			outcome,
+			{ armedBefore: true, armedAfter: false },
+			"the interval must notice the marker changed hands and stop, not keep relaunching",
+		);
+	});
 });

@@ -12,6 +12,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 // Import cycle: blender/utils.ts imports resolveBlenderArgv from this module,
 // so this module must not import anything from blender/utils.ts. It may still
 // import from blender/reap.ts and blender/liveness.ts, which depend only on
@@ -556,13 +557,119 @@ export function runBridgeSupervisorTick(): void {
  * rather than duplicated, because two copies of a retry policy means one of
  * them is wrong within a month, and a test that passes against the copy is a
  * test of nothing.
+ *
+ * A previous version of this claimed that stop-then-start "makes the outcome
+ * the same whether the reload reused this module instance or created a new
+ * one". That was wrong, and the claim is why the ownership marker below
+ * exists. pi's extension loader re-imports with `moduleCache: false`
+ * (dist/core/extensions/loader.js, loadExtensionModule), so a `/reload` builds
+ * a NEW module instance: a new `bridgeSupervisor` variable holding undefined,
+ * and a new interval. stopBridgeSupervisor() can only reach the handle in the
+ * instance that owns it, so the old interval keeps running with nothing
+ * pointing at it. Every reload leaked one supervisor, each with its own copy of
+ * the failure counter — so the ceiling of three was three PER INSTANCE, and a
+ * session reloaded four times opened up to twelve windows where it should have
+ * opened none.
+ *
+ * A pid cannot detect this: a leaked interval belongs to a process that is
+ * very much still alive, and is in fact this one. So ownership is a token on
+ * disk instead, and the LEAKED interval is the thing that notices — it can
+ * clear its own handle from inside its own tick, which is the only handle
+ * anybody still has a reference to.
  */
 function startBridgeSupervisor(): void {
 	if (bridgeSupervisor) return;
 	if (isSubagentChildProcess()) return;
-	bridgeSupervisor = setInterval(runBridgeSupervisorTick, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
+	// A fresh token per arming. Taken BEFORE the marker is written so the
+	// interval below is the first thing that could ever observe it.
+	supervisorToken = randomUUID();
+	writeSupervisorOwner(supervisorToken);
+	bridgeSupervisor = setInterval(onSupervisorInterval, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
 	// Never hold the pi process open for a supervisor.
 	bridgeSupervisor.unref?.();
+}
+
+/**
+ * One turn of the interval: check ownership, then decide.
+ *
+ * Named and exported for the same reason the other two are — a leaked interval
+ * is the failure this whole mechanism exists to catch, and it can only be
+ * tested by invoking that interval's body directly. Waiting fifteen seconds per
+ * tick is not a test; calling this is. The ownership check is FIRST, before
+ * every other gate, because a leaked interval that still believed it owned the
+ * session would relaunch, and the only thing that can stop one is the interval
+ * itself.
+ */
+export function onSupervisorInterval(): void {
+	if (!stillOwnsSupervisor()) {
+		clearInterval(bridgeSupervisor);
+		bridgeSupervisor = undefined;
+		supervisorToken = undefined;
+		return;
+	}
+	runBridgeSupervisorTick();
+}
+
+/**
+ * This instance's supervisor token, or undefined when it is not supervising.
+ *
+ * Module state for the same reason the other launch flags are: it describes
+ * what THIS process is doing, and no other process's answer would be useful.
+ */
+let supervisorToken: string | undefined;
+
+/**
+ * The on-disk record of which module instance owns supervision in this bridge
+ * dir.
+ *
+ * Written by whoever arms, and readable by every process sharing the dir — but
+ * only a root process ever writes one, since startBridgeSupervisor refuses to
+ * arm in a subagent child. A child reading it therefore sees a live owner and
+ * does nothing, which is the same answer it would reach by not arming at all.
+ */
+const SUPERVISOR_OWNER_FILE = "supervisor.owner";
+
+function writeSupervisorOwner(token: string): void {
+	try {
+		mkdirSync(getBlenderBridgeDir(), { recursive: true });
+		writeFileSync(
+			join(getBlenderBridgeDir(), SUPERVISOR_OWNER_FILE),
+			JSON.stringify({ pid: process.pid, token, at: Date.now() }),
+		);
+	} catch (error) {
+		// Not fatal, and the consequence is stated rather than swallowed: this
+		// instance keeps supervising, and any instance leaked by a later reload
+		// cannot detect it. So a failed write degrades to the old behaviour —
+		// duplicate supervisors after a reload — instead of stopping supervision
+		// altogether, which would be a worse trade for a marker file.
+		console.error(
+			`[pi-blender] could not record supervisor ownership (${getBlenderBridgeDir()}): ${
+				error instanceof Error ? error.message : String(error)
+			}. A /reload may leave a second supervisor running; the launch claim still stops it opening a second window.`,
+		);
+	}
+}
+
+/**
+ * Whether this module instance is still the one that owns supervision.
+ *
+ * A missing or unreadable marker counts as NOT owning, which is the direction
+ * that fails toward one supervisor rather than several. The marker is written
+ * by arming and removed only by this module's own stopBridgeSupervisor(), which
+ * also clears the handle — so "handle armed but no marker" means something
+ * else removed it, and continuing to relaunch on that evidence is the one
+ * outcome this file exists to prevent.
+ */
+function stillOwnsSupervisor(): boolean {
+	if (!supervisorToken) return false;
+	try {
+		const parsed = JSON.parse(
+			readFileSync(join(getBlenderBridgeDir(), SUPERVISOR_OWNER_FILE), "utf-8"),
+		) as { pid?: number; token?: string };
+		return parsed?.pid === process.pid && parsed.token === supervisorToken;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -579,21 +686,38 @@ const MAX_CONSECUTIVE_FAILED_LAUNCHES = 3;
 /**
  * Stop supervising, leaving the rest of the launch state alone.
  *
- * Exists because a pi session can outlive the module instance that started the
- * interval: `/reload` re-runs the extension's setup, and if the reload produced
- * a second module instance then the first interval is still running with
- * nothing pointing at it, and the two together launch two UIs. Nothing in the
- * extension ever cleared it — `clearInterval` appeared nowhere in the
- * extension — so this is the first path that can.
+ * Both halves matter. `clearInterval` stops THIS instance's tick, and
+ * removing the owner marker stands every other instance down as well — so a
+ * stop that did only the first would leave a leaked interval from an earlier
+ * /reload running and, on its next tick, take the marker back for itself. The
+ * two are a single operation for that reason, and neither is done conditionally
+ * on the other: this instance may hold a marker without holding an interval
+ * (it was disowned) and the reverse.
  *
  * Safe to call when no supervisor is running, and idempotent. It does not touch
  * `bridgeLaunchStarted` or the launch claim: a stopped supervisor means "stop
  * checking", not "forget what was launched".
  */
 export function stopBridgeSupervisor(): void {
-	if (!bridgeSupervisor) return;
-	clearInterval(bridgeSupervisor);
-	bridgeSupervisor = undefined;
+	if (bridgeSupervisor) {
+		clearInterval(bridgeSupervisor);
+		bridgeSupervisor = undefined;
+	}
+	if (!supervisorToken) return;
+	// Only this instance's marker, checked by token, for the same reason
+	// releaseLaunchClaim checks by pid: a marker left by an instance that has
+	// already been disowned is not this one's to delete, and deleting it would
+	// hand supervision to whichever tick noticed next.
+	if (stillOwnsSupervisor()) {
+		try {
+			rmSync(join(getBlenderBridgeDir(), SUPERVISOR_OWNER_FILE), { force: true });
+		} catch {
+			// Nothing to do: the token is cleared below either way, so this
+			// instance will not re-take a marker it no longer owns, and a stale
+			// marker only means a leaked tick stands itself down.
+		}
+	}
+	supervisorToken = undefined;
 }
 
 /**

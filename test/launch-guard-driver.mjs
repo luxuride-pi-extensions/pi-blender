@@ -8,6 +8,8 @@
  * not something a status code can express.
  */
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadTs } from "./paths.mjs";
 
 const staged = process.argv[2];
@@ -20,6 +22,36 @@ if (!staged) {
 // the interval, which exists so the gates below are testable in milliseconds
 // rather than in fifteen-second steps. launch-harness.mjs documents why the
 // whole thing runs in a child process.
+// "reload" — arm supervision, then have someone ELSE take the marker, then
+// turn the interval. The only faithful model of what `/reload` does to this
+// module: pi re-imports with moduleCache:false, so the new instance arms its
+// own supervisor and writes its own token, and this instance's interval keeps
+// running with nothing pointing at it. In one process that is two module
+// instances' worth of state, which is why jiti's per-instance cache makes an
+// in-process harness useless for exactly this test.
+if (process.argv[3] === "reload") {
+	const launch = await loadTs(`${staged.replace(/\/$/, "")}/launch.ts`);
+	launch.restartBridgeSupervisor();
+	const armedBefore = launch.isBridgeSupervisorRunning();
+	// A newer instance's token, written the way startBridgeSupervisor writes
+	// its own: same pid (it is the same OS process), different token.
+	writeFileSync(
+		join(process.env.PI_BLENDER_BRIDGE_DIR, "supervisor.owner"),
+		JSON.stringify({ pid: process.pid, token: "a-newer-instance", at: Date.now() }),
+	);
+	const launchesBefore = Number(process.argv[5] ?? 2);
+	for (let i = 0; i < launchesBefore; i++) launch.onSupervisorInterval();
+	process.stdout.write(
+		JSON.stringify({
+			armedBefore,
+			// The whole point: an interval that has lost the marker must stand
+			// itself down rather than keep relaunching beside the new one.
+			armedAfter: launch.isBridgeSupervisorRunning(),
+		}) + "\n",
+	);
+	process.exit(0);
+}
+
 if (process.argv[3] === "tick" || process.argv[3] === "cycle") {
 	// "tick"  — supervisor decisions only, with the cold-start budget left to
 	//            run out in real time. Correct for the cold-start gate, and the
