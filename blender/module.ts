@@ -4,6 +4,7 @@ import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
 import type {
 	BlenderModuleRunRecord,
+	BlenderWorkspaceManifest,
 	ModuleRevertOptions,
 	ModuleRevertResult,
 	ModuleRunOptions,
@@ -229,28 +230,11 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 	// land in one manifest write, applied to the state on disk (not this
 	// snapshot) so a concurrent render or save-view is merged, not lost.
 	await updateManifest(manifest.manifestPath, (current) => {
-		current.latestIteration = iteration;
-		current.moduleRuns = [
-			...(current.moduleRuns ?? []),
-			{
-				name: moduleName,
-				iteration,
-				checkpointPath,
-				at: nowIso(),
-				sequence,
-				exitCode: result.exitCode,
-				status: "ok",
-			},
-		];
-		if (renderOutputPath) {
-			current.renderOutputs.push({
-				path: renderOutputPath,
-				view: viewLabel,
-				iteration,
-				createdAt: nowIso(),
-				module: moduleName,
-			});
-		}
+		applySuccessfulRun(
+			current,
+			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode },
+			renderOutputPath ? { path: renderOutputPath, view: viewLabel } : null,
+		);
 	});
 
 	return {
@@ -269,6 +253,67 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 	};
 }
 
+/**
+ * Fold a successful module run into the manifest state on disk.
+ *
+ * Extracted from the run itself so the one rule that matters here is a rule
+ * with a test, rather than a line buried in a function that cannot run without
+ * a Blender UI to talk to.
+ *
+ * THE RULE: the iteration counter only ever goes up. It is claimed under the
+ * manifest lock before the script runs, and the run can take minutes, so by the
+ * time it succeeds the number on disk may already be higher — a later module
+ * run, or an ad-hoc blender_execute_python, having claimed and finished in the
+ * meantime. Publishing this run's own (older) number unconditionally walks the
+ * counter back, and the damage is not a cosmetic one:
+ *
+ *   - the next run claims the same number again and writes into the SAME
+ *     runs/NN directory, overwriting a completed run's script, log and
+ *     checkpoint;
+ *   - moduleRuns then holds two records with the same sequence, and
+ *     blender_module_revert decides what "later" means by comparing sequences,
+ *     so the guard that refuses to discard another module's work silently
+ *     stops working.
+ *
+ * Reclaiming the number happened on the failure path, in
+ * releaseReservedIteration, which only lowers it when no later run has claimed
+ * a higher one.
+ */
+export function applySuccessfulRun(
+	current: BlenderWorkspaceManifest,
+	record: {
+		moduleName: string;
+		iteration: number;
+		sequence: number;
+		checkpointPath: string;
+		exitCode: number;
+	},
+	renderOutput?: { path: string; view: string } | null,
+): void {
+	current.latestIteration = Math.max(current.latestIteration, record.iteration);
+	current.moduleRuns = [
+		...(current.moduleRuns ?? []),
+		{
+			name: record.moduleName,
+			iteration: record.iteration,
+			checkpointPath: record.checkpointPath,
+			at: nowIso(),
+			sequence: record.sequence,
+			exitCode: record.exitCode,
+			status: "ok",
+		},
+	];
+	if (renderOutput) {
+		current.renderOutputs.push({
+			path: renderOutput.path,
+			view: renderOutput.view,
+			iteration: record.iteration,
+			createdAt: nowIso(),
+			module: record.moduleName,
+		});
+	}
+}
+
 export async function blenderModuleRevert(options: ModuleRevertOptions): Promise<ModuleRevertResult> {
 	const moduleName = options.moduleName.trim();
 	if (!MODULE_NAME_RE.test(moduleName)) {
@@ -285,18 +330,33 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	const checkpointPath = target?.checkpointPath ?? join(getModuleDir(manifest.workspacePath, moduleName), LEGACY_CHECKPOINT_FILE);
 
 	if (!(await fileExists(checkpointPath))) {
+		// Distinct from "there is no such recorded run", because a caller who
+		// asked for iteration N and gets this has been given no way to tell
+		// that N was never run from N having been recorded and then lost. The
+		// history is the only place that distinction is recorded at all.
+		if (target) {
+			throw new Error(
+				`Recorded checkpoint for module "${moduleName}" iteration ${target.iteration} is missing at ${checkpointPath}. Nothing to revert.`,
+			);
+		}
+		if (options.iteration !== undefined) {
+			const known = moduleRuns.filter((run) => run.name === moduleName).map((run) => run.iteration);
+			throw new Error(
+				`No recorded run of module "${moduleName}" at iteration ${options.iteration}${
+					known.length > 0
+						? `. Recorded iterations: ${known.join(", ")}.`
+						: ". That module has no recorded runs at all — its history is in moduleRuns, so an iteration was probably never claimed, or the manifest was restored from an older copy."
+				} Nothing to revert.`,
+			);
+		}
 		throw new Error(
-			target
-				? `Recorded checkpoint for module "${moduleName}" iteration ${target.iteration} is missing at ${checkpointPath}. Nothing to revert.`
-				: `No checkpoint for module "${moduleName}" at ${checkpointPath}. Nothing to revert.`,
+			`No checkpoint for module "${moduleName}" at ${checkpointPath}. Nothing to revert.`,
 		);
 	}
 
 	// Guard against the destructive case: reverting module A after module B ran
 	// throws away B's work too, because they share one model.blend.
-	const laterRuns = target
-		? moduleRuns.filter((run) => run.sequence > target.sequence)
-		: [];
+	const laterRuns = moduleRuns.filter((run) => run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER));
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");
@@ -311,6 +371,16 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	// past this point is no longer an accurate description of model.blend.
 	// Merge under the manifest lock, and derive the surviving set from the runs
 	// on disk so a run that landed since this snapshot is not silently dropped.
+	// This runs whether or not a record was found, and the filter depends on
+	// which. With a target, its own record and everything after it no longer
+	// describe model.blend, so they are dropped. WITHOUT one, the only reason
+	// we got here is the legacy pre.blend path — there is no sequence to
+	// compare against, so keeping everything is the only non-destructive
+	// option: dropping the whole history would remove a later run's ability to
+	// revert itself, and the only durable record of it.
+	//
+	// The merge is against the state on disk, so a run that landed since this
+	// snapshot is filtered by the same rule rather than being clobbered.
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
