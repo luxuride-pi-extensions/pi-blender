@@ -10,9 +10,12 @@
  * make. An installer that writes such a file and reports success is worse than
  * one that refuses, because the breakage surfaces much later, inside a run.
  *
- * Copied into each consumer rather than imported, for the same reason as
- * manager-core.local.ts: an installer has to work in a checkout that has only
- * one extension. test/resolver-copies.mjs diffs the copies so they cannot drift.
+ * Copied into each consumer rather than imported, for the same reason as the
+ * manager-core resolver shim: an installer has to work in a checkout that has
+ * only one extension. test/resolver-copies.mjs diffs the copies so they cannot
+ * drift. (The fallback core that used to be the other reason is gone -- a
+ * missing core is a hard error now, so there is no second copy that could
+ * drift, and a check that must be copied is kept down to one file.)
  */
 
 /**
