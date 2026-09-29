@@ -41,8 +41,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as localCore from "./manager-core.local.js";
-import { loadManagerCoreOrLocal } from "./manager-core.js";
+import { loadManagerCore } from "./manager-core.js";
 
 /**
  * The shared manager core, or this extension's own copy of it.
@@ -51,7 +50,7 @@ import { loadManagerCoreOrLocal } from "./manager-core.js";
  * in index.ts agree on one definition of "where pi keeps things". See
  * manager-core.ts for the resolution order.
  */
-const core = loadManagerCoreOrLocal(localCore);
+const core = loadManagerCore();
 
 /** Read a prompt file, or a sentence naming what failed and where. */
 function readPromptFile(path: string, role: string): string {

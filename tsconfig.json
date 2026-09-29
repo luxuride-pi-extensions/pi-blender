@@ -17,5 +17,5 @@
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true
 	},
-	"include": ["index.ts", "manager-core.ts", "manager-core.local.ts", "config.ts", "launch.ts", "core/**/*.ts", "blender/**/*.ts"]
+	"include": ["index.ts", "manager-core.ts", "config.ts", "launch.ts", "core/**/*.ts", "blender/**/*.ts"]
 }

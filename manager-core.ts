@@ -1,7 +1,6 @@
 /**
  * The canonical resolver shim. Copy this file — byte for byte — into each
- * consuming extension as `manager-core.ts`, next to its own copy of
- * `manager-core.local.ts`.
+ * consuming extension as `manager-core.ts`.
  *
  * The reason a shim exists at all: a consumer needs the core's exported
  * functions, and it must get them by a plain ESM `import` of a path it
@@ -11,11 +10,23 @@
  * loading it needs no transform — that is why this is `createRequire` and not
  * a second jiti.
  *
- * Everything below is typed against `./manager-core.local.js`, the fallback in
- * the same directory. That is deliberate: the shim's contract is "give me
- * something shaped like the local core", so the local core IS the type, and a
- * shared core that grew an export the local copy lacks fails to typecheck here
- * rather than at a call site in some consumer weeks later.
+ * A MISSING CORE IS A HARD ERROR, deliberately. There used to be a fallback
+ * copy in every consumer, so an extension installed on its own still ran. That
+ * bought a friendly solo install and cost the one thing this repository exists
+ * to protect: the fallback was the only code here that could go stale with no
+ * test shipping beside it, because a consumer installed alone never runs
+ * pi-manager-core's suite. So the fallback ran, worked, and reported nothing
+ * while being a fork. A startup error naming every path tried is the better
+ * failure. `describeMissingCore()` is written to be read by a human.
+ *
+ * The `ManagerCore` interface below is the shim's contract, written out rather
+ * than imported. It cannot be `typeof import(".../shared/core.js")`, because
+ * that path is computed at runtime and does not exist for the compiler. What
+ * used to make this type safe was the local fallback doubling as the type
+ * source; now `test/core.test.mjs` checks every export the shim declares
+ * actually exists in the shared core, and that a core export the shim does NOT
+ * declare is a failure too — so an added or removed export cannot pass
+ * unnoticed on either side.
  *
  * DO NOT EDIT THE COPY. `test/resolver-copies.mjs` in pi-manager-core diffs
  * every copy against this file and fails when they differ; `--fix` rewrites
@@ -40,17 +51,132 @@ const CORE_EXTENSION_NAME = "manager-core";
  * Both, because the two names are both real and which one a developer used is
  * not something the consumer can know: pi installs by the first, and the
  * working title of the repo is the second. Probing only the first would make
- * every uninstalled dev checkout silently run on the local fallback — which
- * works, and so reports nothing, and so is indistinguishable from a correct
- * shared-core install. A silent fallback is the one outcome this file exists to
- * prevent, so both names are probed and the message names the one that worked.
+ * every uninstalled dev checkout fail to find a core that is sitting right
+ * next to it.
  */
 const SIBLING_DIR_NAMES = ["manager-core", "pi-manager-core"];
 
 const CONSUMER_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
-/** The shape every consumer expects, and the shape the local copy provides. */
-export type ManagerCore = typeof import("./manager-core.local.js");
+/** pi's tool_call refusal: block, and the reason the model reads. */
+export interface ToolCallRefusal {
+	block: true;
+	reason: string;
+}
+
+export interface ToolCallEvent {
+	toolName: string;
+	input: Record<string, unknown>;
+}
+
+export interface ManagerMode {
+	markEngaged(): void;
+	clearGate(): boolean;
+	isEngaged(): boolean;
+	isManagerSession(systemPrompt: string | null | undefined): boolean;
+	reset(): void;
+	checkToolCall(event: ToolCallEvent, systemPrompt: string | null | undefined): ToolCallRefusal | null;
+	install(pi: unknown): void;
+}
+
+export interface ManagerModeOptions {
+	allowedTools?: readonly string[];
+	onGateMessage?: (event: ToolCallEvent) => ToolCallRefusal | null;
+}
+
+export interface SystemPromptEventLike {
+	systemPrompt: string;
+	systemPromptOptions?: { sections?: Record<string, string> };
+}
+
+export interface ContextInjectionOptions {
+	section: string;
+	customType: string;
+	timeoutMs?: number;
+	shouldInject?: () => boolean;
+	getPrompt: () => string;
+	staticContent?: string | null;
+	sectionReachesChildren?: boolean;
+	fetchState?: (ctx: unknown) => Promise<unknown>;
+	formatState?: (
+		state: unknown,
+		options: { timeoutMs: number; extraGuidance: () => string[] },
+	) => string;
+	extraGuidance?: () => string[];
+	failureGuidance?: (error: unknown) => string;
+	assumeNothingAbout?: string;
+}
+
+export type ContextInjectionHandler = (
+	event: SystemPromptEventLike,
+	ctx: { cwd?: string },
+) => Promise<{ message: { customType: string; content: string; display: boolean } } | undefined>;
+
+export interface CommandContextLike {
+	ui: { notify(message: string, level?: string): void };
+	isIdle(): boolean;
+}
+
+export interface EngageCommandOptions {
+	name: string;
+	description?: string;
+	usage?: string;
+	engagedMessage?: string;
+	onEngage?: () => void;
+	fallbackTask?: string;
+	getArgumentCompletions?: (argumentPrefix: string) => unknown[] | null | Promise<unknown[] | null>;
+}
+
+export interface ExitCommandOptions {
+	name: string;
+	description?: string;
+	notEngagedMessage?: string;
+	exitedMessage?: string;
+	onExit?: () => boolean;
+}
+
+export interface ManagerPromptSide {
+	label: string;
+	extension: string;
+	primary: string;
+	extra?: string | null;
+	extensionDir?: string;
+}
+
+export interface ManagerPromptParts {
+	connectorPath: string;
+	connectorRole: string;
+	sides?: readonly ManagerPromptSide[];
+}
+
+/**
+ * Everything a consumer may call. Kept in step with the shared core by
+ * test/core.test.mjs, in both directions: a name declared here that the core
+ * lacks, and a name the core has that is not declared here, both fail.
+ */
+export interface ManagerCore {
+	xdgCacheHome(): string;
+	expandUserPath(raw: unknown, cwd?: string): string;
+	getPiAgentDir(): string;
+	getInstalledExtensionDir(name: string): string;
+
+	stripFrontmatter(source: unknown): string;
+	readPromptFile(path: string, role: string): string;
+	isDegradedPrompt(text: unknown): boolean;
+	composeManagerPrompt(parts: ManagerPromptParts): string;
+
+	CHILD_AGENT_PROMPT_PATTERN: RegExp;
+	readActiveAgentName(systemPrompt: string | null | undefined): string | null;
+
+	createManagerMode(options?: ManagerModeOptions): ManagerMode;
+	createContextInjection(options: ContextInjectionOptions): ContextInjectionHandler;
+
+	registerEngageCommand(
+		pi: { registerCommand: unknown; sendUserMessage: unknown },
+		options: EngageCommandOptions,
+	): void;
+	registerExitCommand(pi: { registerCommand: unknown }, options: ExitCommandOptions): void;
+}
 
 /**
  * Where this consumer's own directory sits inside pi's extensions dir, and the
@@ -86,26 +212,32 @@ function candidateDirs(): { dir: string; why: string }[] {
 	];
 }
 
-/** The property the stand-in module uses to identify itself. */
-const UNAVAILABLE_MARKER = "__managerCoreUnavailable";
-
 /** Why the core could not be found, naming every place that was tried. */
 export function describeMissingCore(): string {
 	return (
 		`manager-core could not be found. Looked in: ${candidateDirs().map((c) => c.why).join("; ")}. ` +
 		`Set ${ENV_CORE_DIR} to its directory, or install the manager-core extension alongside this one. ` +
-		"This extension keeps a working built-in copy of the shared behaviour, so it still runs — but the " +
-		"shared core has forked, which is the drift pi-manager-core exists to prevent."
+		"This is a hard error rather than a fallback: a stale copy of the core that still runs is the " +
+		"exact drift pi-manager-core exists to prevent, so it is better to stop here and say so."
 	);
 }
 
+/** Where the core actually came from, or null when it could not be found. */
+export function describeResolvedCoreSource(): string | null {
+	for (const { dir } of candidateDirs()) {
+		if (existsSync(join(dir, "shared", "core.js"))) return dir;
+	}
+	return null;
+}
+
 /**
- * The shared core, or a module whose every export explains the same failure.
+ * The shared core, or a thrown error naming every path that was tried.
  *
- * On failure the stand-in is a Proxy rather than a thrown error, so a consumer
- * that forgot to check still fails loudly and legibly at the call site instead
- * of crashing on a destructured `undefined` — and `loadManagerCoreOrLocal`
- * below can detect the stand-in by calling through it.
+ * There is no stand-in and no local copy. A Proxy that answers every property
+ * with a throwing function used to be the fallback's detection mechanism, which
+ * was itself a bug waiting: `typeof` cannot tell that Proxy from a real module,
+ * so the check that guarded the fallback could not detect a missing core.
+ * Throwing has no such blind spot.
  */
 export function loadManagerCore(): ManagerCore {
 	for (const { dir } of candidateDirs()) {
@@ -113,50 +245,5 @@ export function loadManagerCore(): ManagerCore {
 		if (!existsSync(path)) continue;
 		return createRequire(import.meta.url)(path) as ManagerCore;
 	}
-	return unavailable();
-}
-
-/**
- * A stand-in module: every property access returns a function that throws with
- * the one explanation.
- */
-function unavailable(): ManagerCore {
-	const message = describeMissingCore();
-	return new Proxy({} as ManagerCore, {
-		get(_target, prop) {
-			// The marker is read by loadManagerCoreOrLocal, and by nothing else.
-			// A boolean cannot be confused for an export a real core would have.
-			if (prop === UNAVAILABLE_MARKER) return true;
-			// `then` is checked by every await, and a symbol key is not a call.
-			if (prop === "then" || typeof prop === "symbol") return undefined;
-			return () => {
-				throw new Error(message);
-			};
-		},
-	});
-}
-
-/**
- * The shared core if it resolved, else this extension's local copy.
- *
- * The fallback is why each consumer ships `manager-core.local.ts`: a user who
- * installs one Blender extension should get a working Blender extension, and a
- * manager extension whose features collapse because an optional sibling is
- * absent would be a worse product than the duplication it replaces. The
- * fallback is only ever the mechanism — paths, gate, command registration,
- * prompt composition — and never an application's policy.
- *
- * Detection is the marker the stand-in exposes, not a type check on an export.
- * A Proxy makes `typeof` useless: every property reads as a function, so a
- * probe of the form `typeof core.x !== "function"` passes against a core that
- * is not there at all — which is exactly the bug this replaced.
- */
-export function loadManagerCoreOrLocal(local: ManagerCore): ManagerCore {
-	try {
-		const core = loadManagerCore();
-		if ((core as Record<string, unknown>)[UNAVAILABLE_MARKER] === true) return local;
-		return core;
-	} catch {
-		return local;
-	}
+	throw new Error(describeMissingCore());
 }
