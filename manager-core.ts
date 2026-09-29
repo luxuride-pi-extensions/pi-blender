@@ -74,7 +74,11 @@ export interface ManagerMode {
 	clearGate(): boolean;
 	isEngaged(): boolean;
 	isManagerSession(systemPrompt: string | null | undefined): boolean;
-	reset(): void;
+	/**
+	 * A fresh session inherits nothing. A session_start whose reason is
+	 * "reload" is not a fresh session and keeps its engagement.
+	 */
+	reset(reason?: string): void;
 	checkToolCall(event: ToolCallEvent, systemPrompt: string | null | undefined): ToolCallRefusal | null;
 	install(pi: unknown): void;
 }

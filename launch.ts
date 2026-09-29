@@ -203,6 +203,12 @@ let bridgeWatchdog: ReturnType<typeof setTimeout> | undefined;
 // Re-checks the bridge while a session runs, so a Blender that dies
 // mid-session is restarted instead of silently timing out the next request.
 let bridgeSupervisor: ReturnType<typeof setInterval> | undefined;
+// Set once the bundled scripts a launch needs turned out to be missing on
+// disk. See assertLaunchAssetsAvailable.
+let launchAssetsMissing = false;
+// Launches, back to back, that produced no heartbeat. See
+// MAX_CONSECUTIVE_FAILED_LAUNCHES.
+let consecutiveFailedLaunches = 0;
 // Set once this process has claimed its instance dir and swept its siblings.
 let instanceClaimed = false;
 
@@ -275,6 +281,63 @@ function clearBridgeWatchdog(): void {
 function confirmBridgeLaunched(): void {
 	clearBridgeWatchdog();
 	releaseLaunchClaim();
+	// A heartbeat that is both fresh and pid-confirmed is proof the launch
+	// worked, so the failure run is over. Resetting here rather than anywhere
+	// else is deliberate: the counter has to survive resetBridgeLaunch(), which
+	// the supervisor calls immediately before every retry, or the backoff below
+	// would reset itself on the tick that is meant to be counted.
+	consecutiveFailedLaunches = 0;
+}
+
+/**
+ * The bundled scripts a launch feeds to Blender, or null when they are all
+ * present.
+ *
+ * This exists because a launch can fail in a way that looks exactly like a
+ * Blender that will not start. Blender is given `--python <bootstrap>
+ * <blank.blend> --python <bridge>`, and if either path does not exist Blender
+ * exits during boot without writing a heartbeat. Every layer above then reads
+ * that as a dead bridge: the watchdog releases the claim, and the 15 s
+ * supervisor resets and relaunches. The user gets a window every fifteen
+ * seconds for as long as the session lives, with no error naming a cause.
+ *
+ * The cause is always an installation that no longer matches the code asking
+ * for it — a repository renamed under a running session, a partial checkout, a
+ * deploy that dropped the .py files. It is not transient, so retrying cannot
+ * fix it, and the honest behaviour is to say so once and stop.
+ */
+function missingLaunchAsset(): string | undefined {
+	for (const path of [getBundledBlankBootstrapPath(), getBundledBlenderBridgePath()]) {
+		if (!existsSync(path)) return path;
+	}
+	return undefined;
+}
+
+/**
+ * Refuse a launch whose scripts are not on disk, at most once per process.
+ *
+ * Checked synchronously before the spawn, and cached, so the supervisor does
+ * not re-stat two files every fifteen seconds for the rest of the session. The
+ * cache is what makes this a fix rather than a delay: without it, every tick
+ * would pass the check as soon as the file came back, which is correct — but
+ * the failure mode we are closing is a loop that never ends, and a loop that
+ * could be resumed by a well-meaning repair is a loop that hides the repair.
+ */
+function assertLaunchAssetsAvailable(): boolean {
+	if (launchAssetsMissing) return false;
+	const missing = missingLaunchAsset();
+	if (!missing) return true;
+	launchAssetsMissing = true;
+	stopBridgeSupervisor();
+	console.error(
+		`[pi-blender] not launching Blender: the bundled script ${missing} does not exist. ` +
+			"This extension cannot start its bridge, and retrying would reopen a window every " +
+			`${LIVE_BRIDGE_SUPERVISE_INTERVAL_MS / 1000}s for the rest of the session without ever working. ` +
+			"Usually this means the checkout was renamed, moved, or updated while a pi session was already " +
+			"running with the old path resolved. Restart the pi session so it loads the current extension, " +
+			"then run a blender_* tool again.",
+	);
+	return false;
 }
 
 function armBridgeWatchdog(): void {
@@ -294,6 +357,7 @@ function armBridgeWatchdog(): void {
 		// retry instead of trusting a Blender that is not there.
 		releaseLaunchClaim();
 		bridgeLaunchStarted = false;
+		consecutiveFailedLaunches += 1;
 		console.error(
 			`[pi-blender] warning: Blender was launched but wrote no bridge heartbeat within ${LIVE_BRIDGE_LAUNCH_WATCHDOG_MS / 1000}s. Treating the launch as failed; the next blender_* call will retry. If Blender is slow to start on this machine, raise the wait or launch it manually.`,
 		);
@@ -395,11 +459,76 @@ function startBridgeSupervisor(): void {
 		// Deliberately mtime-only, ignoring the pid: a fresh heartbeat with a
 		// dead pid is a crash, and the tick above already returned for that.
 		if (isHeartbeatFresh()) return;
+		// No script to launch with. Checking here as well as at the spawn means
+		// a supervisor that is already running goes quiet the moment the
+		// condition appears, instead of on its next launch attempt.
+		if (!assertLaunchAssetsAvailable()) return;
+		// A run of launches that each produced nothing is not a Blender that is
+		// slow to start, and it will not become one. Stop rather than reopen a
+		// window every fifteen seconds for the rest of the session: a Blender
+		// that is genuinely slow to start still gets the full cold-start budget
+		// on the first attempt, and every retry after a real death resets the
+		// count when the heartbeat confirms the launch.
+		if (consecutiveFailedLaunches >= MAX_CONSECUTIVE_FAILED_LAUNCHES) {
+			stopBridgeSupervisor();
+			console.error(
+				`[pi-blender] warning: ${consecutiveFailedLaunches} Blender launches in a row produced no bridge heartbeat, so automatic relaunching has stopped for this session. ` +
+					"Launch Blender manually, or restart the pi session; a blender_* call will still try once.",
+			);
+			return;
+		}
 		resetBridgeLaunch();
 		ensureLiveBridgeLaunchedForce();
 	}, LIVE_BRIDGE_SUPERVISE_INTERVAL_MS);
 	// Never hold the pi process open for a supervisor.
 	bridgeSupervisor.unref?.();
+}
+
+/**
+ * How many launches may produce no heartbeat before supervision gives up.
+ *
+ * Three is the smallest number that distinguishes a machine too slow to boot
+ * Blender from a launch that cannot work. One is indistinguishable from a
+ * momentary stall, and a supervisor that gave up after one would silently
+ * stop the recovery it exists for; a larger number just means a longer time
+ * the user spends watching a window that will never answer.
+ */
+const MAX_CONSECUTIVE_FAILED_LAUNCHES = 3;
+
+/**
+ * Stop supervising, leaving the rest of the launch state alone.
+ *
+ * Exists because a pi session can outlive the module instance that started the
+ * interval: `/reload` re-runs the extension's setup, and if the reload produced
+ * a second module instance then the first interval is still running with
+ * nothing pointing at it, and the two together launch two UIs. Nothing in the
+ * extension ever cleared it — `clearInterval` appeared nowhere in the
+ * extension — so this is the first path that can.
+ *
+ * Safe to call when no supervisor is running, and idempotent. It does not touch
+ * `bridgeLaunchStarted` or the launch claim: a stopped supervisor means "stop
+ * checking", not "forget what was launched".
+ */
+export function stopBridgeSupervisor(): void {
+	if (!bridgeSupervisor) return;
+	clearInterval(bridgeSupervisor);
+	bridgeSupervisor = undefined;
+}
+
+/**
+ * Re-arm supervision across a session_start, which `/reload` also fires.
+ *
+ * A reload is not a reason to stop supervising, and it is not a reason to
+ * start a second supervisor either. Stopping first and restarting only if one
+ * was already running makes the outcome the same whether the reload reused this
+ * module instance or created a new one — which is exactly the thing that cannot
+ * be relied on, since pi's extension cache is keyed on a generation counter and
+ * the reload path does not visibly advance it.
+ */
+export function restartBridgeSupervisor(): void {
+	if (!bridgeSupervisor) return;
+	stopBridgeSupervisor();
+	startBridgeSupervisor();
 }
 
 /**
@@ -472,6 +601,9 @@ export function ensureLiveBridgeLaunchedForce(): void {
 }
 
 function launchBridge(): void {
+	// Before the claim: a launch that cannot work must not take the launch claim
+	// away from a peer that might be able to.
+	if (!assertLaunchAssetsAvailable()) return;
 	// Cross-process first: a peer in this session that is already starting a
 	// Blender owns the launch, and this process must not add a second window.
 	if (!tryClaimLaunch()) return;

@@ -61,7 +61,7 @@ import {
 } from "./blender/runtime.js";
 import { isLiveBridgeAlive } from "./launch.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
-import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch } from "./launch.js";
+import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch, restartBridgeSupervisor } from "./launch.js";
 import { getManagerPrompt } from "./config.js";
 import { loadManagerCore } from "./manager-core.js";
 
@@ -1023,8 +1023,17 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		// Both now hang off the first actual launch (see launch.ts
 		// ensureInstanceClaimed), because a claim only means something once a
 		// UI exists and a sweep only has work to do once instance dirs do.
-		pi.on("session_start", () => {
-			managerMode.reset();
+		pi.on("session_start", (event) => {
+			// The reason matters: a /reload keeps this session's manager
+			// engagement, every other reason is a genuinely different session and
+			// inherits nothing. See createManagerMode's reset().
+			managerMode.reset(event?.reason);
+			// `/reload` re-fires this event, and it is the only lifecycle hook a
+			// reload is guaranteed to reach. Re-arming here is what keeps a reload
+			// from ending up with two supervisors: whichever module instance is
+			// live ends up with exactly one, whether the reload reused this one or
+			// built a new one.
+			restartBridgeSupervisor();
 		});
 
 		// Release this instance's Blender when the PROCESS is ending. Only for

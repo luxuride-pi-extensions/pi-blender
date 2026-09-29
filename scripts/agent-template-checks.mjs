@@ -143,29 +143,44 @@ export function usesTodo(source) {
  * states a boundary in one clause and a real instruction in the next, and
  * scanning the whole paragraph would suppress the instruction too.
  */
-export function toolsMissingFromAllowlist(source) {
-	const declared = declaredTools(source);
+/**
+ * Every pi tool name the prompt names as something to CALL, negations removed.
+ *
+ * The inverse of `toolsMissingFromAllowlist`, and it exists for a different
+ * defect: a prompt (or a README) telling an agent to use a tool that was never
+ * registered. `unity_capture_view` was implemented, dispatched in C#, listed in
+ * the README and named in the manager prompt -- and never passed to
+ * registerTool. Nothing failed: tsc was clean, the tests were green, and every
+ * document was correct about a tool that did not exist.
+ *
+ * So the caller supplies the set of tools that actually exist, and this returns
+ * what the prose promises. Negation handling is the same machinery and for the
+ * same reason: a prompt that says "you never call `x` directly" is handing the
+ * name to a reader, not asking for a call.
+ */
+export function advisedToolNames(source) {
 	const body = source.replace(/^---[\s\S]*?\n---\n/, "");
 	const mentioned = new Map();
-	// NOT destructured: `match.index` lives on the match ARRAY, so pulling
-	// element 0 out of it yields a string whose `.index` is undefined -- and
-	// `?? 0` then tests every mention at offset 0, where no negation appears.
-	//
-	// A name is kept only if EVERY mention of it is negated. First-mention-wins
-	// is wrong because prompts legitimately say both things: "you do not need
-	// to call `x`" in one sentence and "call `x` when the module fails" in the
-	// next, and a prohibition must not erase a real instruction.
 	for (const match of body.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
 		const name = match[1];
 		const negated = isNegated(body, match.index ?? 0, name);
 		mentioned.set(name, (mentioned.get(name) ?? true) && negated);
 	}
 	return [...mentioned]
-		.filter(
-			([name, negated]) =>
-				!negated && !declared.has(name) && !KNOWN_NON_TOOL_WORDS.has(name) && !BPY_NAMESPACE.test(name),
-		)
+		.filter(([name, negated]) => !negated && !KNOWN_NON_TOOL_WORDS.has(name) && !BPY_NAMESPACE.test(name))
 		.map(([name]) => name);
+}
+
+/**
+ * Tools the prompt tells the agent to call that `tools:` does not list.
+ *
+ * The candidate scan is delegated to `advisedToolNames` above, which is the
+ * same list filtered one step further. The note on the scan (snake_case vs
+ * camelCase, backticks only, line-scoped negations) belongs there.
+ */
+export function toolsMissingFromAllowlist(source) {
+	const declared = declaredTools(source);
+	return advisedToolNames(source).filter((name) => !declared.has(name));
 }
 
 /**
