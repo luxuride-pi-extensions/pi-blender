@@ -1,7 +1,7 @@
 {
 	"name": "pi-blender",
 	"version": "0.1.3",
-	"description": "pi extension: Vibe Blender integration (live Blender session, render, scene inspection) with flatpak support",
+	"description": "pi extension: Blender integration (live Blender session, render, scene inspection) with flatpak support",
 	"keywords": [
 		"pi-extension",
 		"blender",

@@ -1,7 +1,7 @@
 # pi-blender
 
 Pi extension extracted from [pi-blender](https://github.com/veoery/BlenderAgent) 0.1.2
-(MIT) — the Vibe Blender fork of the pi monorepo. Brings the live-Blender 3D
+(MIT) — the pi-blender fork of the pi monorepo. Brings the live-Blender 3D
 modeling workflow (scene state, vision-informed iteration, render loop) into
 stock pi, with fixes for a **flatpak** Blender install.
 
@@ -72,7 +72,7 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    before (heartbeat gone) is still relaunched. As defence in depth,
    `live-bridge.py` claims each request with an atomic rename before
    executing it, so even two pollers can never run one request twice.
-   `VIBE_BLENDER_NO_BLENDER=1` still opts out entirely.
+   `PI_BLENDER_NO_UI=1` still opts out entirely.
    The 15 s **liveness supervisor that restarts a closed UI runs only in the
    root session** (`launch.ts` `startBridgeSupervisor`, gated on
    `PI_SUBAGENT_CHILD` — the same discriminator the shutdown guard in
@@ -124,7 +124,7 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | `PI_BLENDER_BRIDGE_DIR` | `~/.cache/pi-blender/bridge` (each pi process uses `…/<instance-id>/`; setting this pins ONE shared dir and disables per-instance isolation — see §3) |
 | `PI_BLENDER_TMP_DIR` | `~/.cache/pi-blender/tmp` |
 | `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
-| `VIBE_BLENDER_NO_BLENDER` | unset (set `1` to never auto-launch UI) |
+| `PI_BLENDER_NO_UI` | unset (set `1` to never auto-launch UI) |
 
 ## Install
 

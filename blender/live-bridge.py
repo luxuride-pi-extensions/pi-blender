@@ -15,7 +15,7 @@ import bpy  # pyright: ignore[reportMissingImports]
 from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
 from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 
-BRIDGE_DIR = os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get("VIBE_BLENDER_BRIDGE_DIR") or os.path.join(
+BRIDGE_DIR = os.environ.get("PI_BLENDER_BRIDGE_DIR") or os.path.join(
     # Same XDG convention config.ts uses for its own default. This is only
     # reached when Blender was started BY HAND with --python live-bridge.py and
     # with neither bridge var set, because launch.ts always passes
@@ -1331,7 +1331,7 @@ def poll_requests():
 
 
 ensure_bridge_dirs()
-if not (os.environ.get("VIBE_BLENDER_BLENDER_BRIDGE_DIR") or os.environ.get("VIBE_BLENDER_BRIDGE_DIR")):
+if not (os.environ.get("PI_BLENDER_BRIDGE_DIR")):
     print(
         f'[pi-blender] warning: no bridge dir in the environment; falling back to "{BRIDGE_DIR}". '
         "The pi extension reads its own per-instance dir and will NOT see this UI, so every blender_* call "

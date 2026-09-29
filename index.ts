@@ -1,5 +1,5 @@
 /**
- * pi extension: Vibe Blender integration (extracted from pi-blender 0.1.2,
+ * pi extension: Blender integration (extracted from pi-blender 0.1.2,
  * repo veoery/BlenderAgent, MIT license).
  *
  * Registers 13 blender_* tools + bundled skills, the /blender and
@@ -280,7 +280,7 @@ function formatJsonResult(value: unknown): string {
 }
 
 
-export default function piVibeBlenderExtension(pi: ExtensionAPI) {
+export default function piBlenderExtension(pi: ExtensionAPI) {
 		pi.registerTool({
 			name: "blender_workspace_init",
 			label: "Blender Workspace Init",

@@ -483,7 +483,7 @@ function launchBridge(): void {
 	// the claim only has to land before a PEER looks, which is many seconds
 	// away.
 	void ensureInstanceClaimed();
-	if (process.env.VIBE_BLENDER_NO_BLENDER?.trim() === "1") {
+	if (process.env.PI_BLENDER_NO_UI?.trim() === "1") {
 		// Nothing will be spawned, so the claim must not outlive this call: peers
 		// would skip their own launch for a UI that is never coming.
 		releaseLaunchClaim();
@@ -513,7 +513,6 @@ function launchBridge(): void {
 				env: {
 					...process.env,
 					PI_BLENDER_BRIDGE_DIR: bridgeDir,
-					VIBE_BLENDER_BLENDER_BRIDGE_DIR: bridgeDir,
 					PI_BLENDER_BLANK_BLEND_PATH: blankBlendPath,
 				},
 				stdio: "ignore",
