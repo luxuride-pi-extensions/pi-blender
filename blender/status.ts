@@ -1,8 +1,9 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
-import { isLiveBridgeAlive } from "../launch.js";
-import { resolveRunBudget } from "./concurrency.js";
+import { isLiveBridgeAlive, isWatchWindowAuthorized } from "../launch.js";
+import { resolveRunBudget, WATCH_WINDOW_RSS_BYTES } from "./concurrency.js";
+import { countOpenHeadlessRuns } from "./run-leases.js";
 import type { BridgeStatusOptions, BridgeStatusResult } from "./types.js";
 import { readBridgeLock } from "./utils.js";
 
@@ -54,6 +55,21 @@ export async function blenderBridgeStatus(
 		? ` Headless runs are capped at ${headless.effective} of the ${headless.requested} requested (${headless.reasons.join("; ")}).`
 		: ` Headless runs may go up to ${headless.effective} at once.`;
 
+	// The OPEN count, as well as the ceiling: a budget says what is permitted,
+	// which is not the question a manager has mid-fan-out. What is running NOW,
+	// across the whole session tree, is — and when a window is open it is named
+	// apart from the runs, because it is not one of them and does not come from
+	// this budget.
+	const open = countOpenHeadlessRuns();
+	const windowOpen = alive || isWatchWindowAuthorized();
+	const windowLine = windowOpen
+		? ` A watch window is open (~${(WATCH_WINDOW_RSS_BYTES / (1024 * 1024 * 1024)).toFixed(1)} GB projected), counted apart from the runs because it is not one of this budget's.`
+		: "";
+	const openLine =
+		` ${open.running} headless Blender${open.running === 1 ? "" : "s"} open now` +
+		` against ${headless.effective} slot${headless.effective === 1 ? "" : "s"}` +
+		`${open.staleSwept > 0 ? `; ${open.staleSwept} lease${open.staleSwept === 1 ? "" : "s"} from a killed run swept` : ""}.`;
+
 	return {
 		alive,
 		busy,
@@ -69,13 +85,18 @@ export async function blenderBridgeStatus(
 		bridgeDir,
 		requestsDir,
 		workspacePath: options.workspace ?? null,
-		recommendation: `${bridgeLine}${headlessLine}`,
+		recommendation: `${bridgeLine}${headlessLine}${openLine}${windowLine}`,
 		headless: {
 			requested: headless.requested,
 			effective: headless.effective,
 			clamped: headless.clamped,
 			reasons: headless.reasons,
 			warning: headless.warning ?? null,
+			running: open.running,
+			pids: open.pids,
+			staleSwept: open.staleSwept,
+			watchWindowOpen: windowOpen,
+			watchWindowRssBytes: WATCH_WINDOW_RSS_BYTES,
 		},
 	};
 }

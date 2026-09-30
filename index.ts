@@ -1029,7 +1029,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_bridge_status",
 			label: "Blender Bridge Status",
 			description:
-				"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, how many requests are pending, and how many headless Blender runs may execute concurrently on this machine. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout.",
+				"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, how many requests are pending, how many headless Blender runs may execute concurrently on this machine, and how many are open RIGHT NOW across this session's workers. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout. The open count is the one to read mid-fan-out: the budget says what is permitted, not what your workers already spent. A /blender-watch window is reported apart from the runs, because it is not one of them.",
 			parameters: Type.Object({
 				workspace: Type.Optional(
 					Type.String({

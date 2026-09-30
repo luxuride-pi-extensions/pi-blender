@@ -125,7 +125,7 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | `PI_BLENDER_TMP_DIR` | `~/.cache/pi-blender/tmp` |
 | `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
 | `PI_BLENDER_NO_UI` | unset (set `1` to never auto-launch UI) |
-| `PI_BLENDER_MAX_PARALLEL_RUNS` | `16` — ceiling on concurrent **headless** Blender runs. A request, not a promise: the effective count is the smallest of this, the measured ceiling (4), the core count at 3 per run, and what free memory allows. The default is therefore normally clamped, and the clamp prints a warning naming the binding term. `blender_bridge_status` reports the resolved numbers. |
+| `PI_BLENDER_MAX_PARALLEL_RUNS` | `16` — ceiling on concurrent **headless** Blender runs. A request, not a promise: the effective count is the smallest of this, the measured ceiling (4), the core count at 3 per run, and what free memory allows. The default is therefore normally clamped, and the clamp prints a warning naming the binding term. `blender_bridge_status` reports the resolved numbers **and how many headless Blenders are open right now**, counted across every process in the session tree, so a manager can see what its workers spent rather than only what the ceiling permits. A `/blender-watch` window is reported separately from that count: it is not one of these runs. |
 | `PI_HOME` | `~/.pi` — root of the pi installation |
 | `PI_AGENT_DIR` | `$PI_HOME/agent` — where extensions and agents are installed, and the base for every other path this table resolves against |
 

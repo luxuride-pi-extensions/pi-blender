@@ -693,6 +693,8 @@ export interface BlenderRunResult {
 	stdout: string;
 	stderr: string;
 	code: number;
+	/** What this run was for, kept so a lease can name it. Diagnostics only. */
+	label?: string;
 }
 
 export interface ModuleRunOptions {
@@ -797,6 +799,31 @@ export interface RunBudgetReport {
 	reasons: string[];
 	/** Full explanation, or null when nothing clamped. */
 	warning: string | null;
+	/**
+	 * Headless Blenders alive right now, counted across every process in the
+	 * session tree rather than in this one.
+	 *
+	 * A per-process count would answer a question nobody asked: a manager that
+	 * spawned four workers runs no Blender itself and would report zero while
+	 * four processes saturated the box.
+	 */
+	running: number;
+	/** Their pids, so a caller can say WHICH runs rather than only how many. */
+	pids: number[];
+	/** Leases dropped because their process was gone. Non-zero after a crash. */
+	staleSwept: number;
+	/**
+	 * Whether a /blender-watch window is open, reported SEPARATELY from
+	 * `running`.
+	 *
+	 * The window is not one of the budgeted runs — it is not gated, not counted
+	 * against the ceiling, and each session may have one — so folding it into
+	 * the same number would let a caller subtract the window from the run
+	 * budget and under-count the runs actually occupying the machine.
+	 */
+	watchWindowOpen: boolean;
+	/** The window's projected RSS in bytes, so its claim can be weighed. */
+	watchWindowRssBytes: number;
 }
 
 export interface RunBlenderJsonOptions {
@@ -806,6 +833,12 @@ export interface RunBlenderJsonOptions {
 	payload: Record<string, unknown>;
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	/**
+	 * What this run is for, recorded on its lease. Diagnostics only, and the
+	 * reason the lease is worth reading: "4 open" names the processes, and a
+	 * label is what turns one into "the body module, not the rig".
+	 */
+	label?: string;
 }
 
 /** One of the measurement families `blender_geometry_probe` can run. */

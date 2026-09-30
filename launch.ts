@@ -477,7 +477,7 @@ export function ensureLiveBridgeLaunched(): void {
  * window rather than each opening their own), which is what "at most one window
  * per session" needs.
  */
-function isWatchWindowAuthorized(): boolean {
+export function isWatchWindowAuthorized(): boolean {
 	return existsSync(join(getBlenderBridgeDir(), WATCH_WINDOW_AUTHORIZED_FILE));
 }
 

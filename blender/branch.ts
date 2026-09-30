@@ -326,6 +326,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		payload = await runBlenderJson<BranchRunPayload>({
 			cwd: options.cwd,
 			blendPath: branchPath,
+			label: `branch run ${moduleName}`,
 			scriptSource: buildBranchRunScript(),
 			payload: {
 				branchPath,
@@ -377,6 +378,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 			cwd: options.cwd,
 			workspacePath: manifest.workspacePath,
 			branchPath,
+			moduleName,
 			outputPath: join(moduleDir, RENDER_FILE),
 			cameraName,
 			resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
@@ -460,6 +462,8 @@ async function renderBranch(options: {
 	cwd: string;
 	workspacePath: string;
 	branchPath: string;
+	/** Named on the run lease, so an open run says which module it renders. */
+	moduleName?: string;
 	outputPath: string;
 	cameraName: string | undefined;
 	resolution: { x: number; y: number; percentage?: number };
@@ -512,6 +516,7 @@ print("__PI_BLENDER_JSON_END__")
 	return await runBlenderJson<{ outputPath: string }>({
 		cwd: options.cwd,
 		blendPath: options.branchPath,
+		label: `branch render ${options.moduleName ?? ""}`.trim(),
 		scriptSource: script,
 		payload: {
 			cameraName: options.cameraName,
@@ -853,6 +858,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			payload = await runBlenderJson<BranchApplyPayload>({
 				cwd: options.cwd,
 				blendPath: manifest.blendPath,
+				label: `branch apply ${record.module}`,
 				scriptSource: buildBranchApplyScript(),
 				payload: {
 					branchPath: record.branchPath,

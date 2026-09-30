@@ -11,6 +11,15 @@ export interface ExecOptions {
 	signal?: AbortSignal;
 	timeout?: number;
 	cwd?: string;
+	/**
+	 * Called with the child's pid as soon as it exists, before any output.
+	 *
+	 * The pid is knowable only here: it is minted by the spawn, and the
+	 * promise resolves at exit. A caller that needs to record the process
+	 * against something (a lease file, a registry) while the process is still
+	 * running has no other hook for it.
+	 */
+	onSpawn?: (pid: number) => void;
 }
 
 export interface ExecResult {
@@ -43,6 +52,11 @@ export async function execCommand(
 		let settled = false;
 		let timeoutId: NodeJS.Timeout | undefined;
 		let abortListener: (() => void) | undefined;
+
+		// Before any stream handling: a listener that registers the child can
+		// run before the process has produced a byte, and a pid learned late
+		// would leave the earliest part of the run unrecorded.
+		if (options?.onSpawn && proc.pid !== undefined) options.onSpawn(proc.pid);
 
 		const finish = () => {
 			// `error` and `close` can both fire (a failed exec emits error, then

@@ -5,6 +5,7 @@ import { getBlenderAssetsDir, getBlenderBridgeDir, getBlenderTempDir } from "../
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
+import { acquireRunLease, releaseRunLease } from "./run-leases.js";
 import type {
 	BlenderRunResult,
 	BlenderSavedView,
@@ -177,6 +178,8 @@ export async function runBlenderProcess(options: {
 	payload: Record<string, unknown>;
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	/** What this run is for, recorded on the lease. Diagnostics only. */
+	label?: string;
 }): Promise<BlenderRunResult> {
 	const { command, args: blenderArgs } = await resolveBlenderArgv();
 	const args = options.blendPath
@@ -196,10 +199,19 @@ export async function runBlenderProcess(options: {
 	}
 
 	const release = await headlessGate().acquire();
+	// Leased after the slot and after the spawn, so what gets counted is a
+	// process that exists. The lease is what makes the count correct across the
+	// session tree: the gate above is per-process, so a manager asking how many
+	// Blenders are open would otherwise see only its own.
+	let leasedPid: number | null = null;
 	try {
 		const result = await execCommand(command, args, options.cwd, {
 			signal: options.signal,
 			timeout: options.timeoutMs,
+			onSpawn: (pid) => {
+				leasedPid = pid;
+				acquireRunLease(pid, options.label);
+			},
 		});
 
 		return {
@@ -208,6 +220,7 @@ export async function runBlenderProcess(options: {
 			code: result.code,
 		};
 	} finally {
+		if (leasedPid !== null) releaseRunLease(leasedPid);
 		release();
 	}
 }
@@ -249,6 +262,7 @@ export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise
 			payload: options.payload,
 			timeoutMs: options.timeoutMs,
 			signal: options.signal,
+			label: options.label,
 		});
 		if (result.code !== 0) {
 			// Both streams: this path is a headless probe with no live UI to
