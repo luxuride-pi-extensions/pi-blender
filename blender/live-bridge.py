@@ -4,8 +4,15 @@ import json
 import math
 import os
 import shutil
+import sys
 import time
 import traceback
+
+# --python does not put the script's own directory on sys.path in every Blender
+# build, and the read-only guard sits beside this file.
+_BRIDGE_DIR_ON_PATH = os.path.dirname(os.path.abspath(__file__))
+if _BRIDGE_DIR_ON_PATH not in sys.path:
+    sys.path.insert(0, _BRIDGE_DIR_ON_PATH)
 
 # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
 import bpy  # pyright: ignore[reportMissingImports]
@@ -14,6 +21,11 @@ import bpy  # pyright: ignore[reportMissingImports]
 # outside a Blender environment — same as the bpy import above.
 from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
 from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
+
+# Sits beside this file so a read-only run is refused in the bridge rather than
+# in the prompt that asked for it.
+# pi-lens-ignore: ast-grep:unresolved-import-python
+from readonly_guard import ReadOnlyViolation, read_only_run  # pyright: ignore[reportMissingImports]
 
 BRIDGE_DIR = os.environ.get("PI_BLENDER_BRIDGE_DIR") or os.path.join(
     # Same XDG convention config.ts uses for its own default. This is only
@@ -478,6 +490,58 @@ def handle_execute_python(request):
         "stderr": stderr_buffer.getvalue(),
         "exitCode": exit_code,
         "changed": exit_code == 0,
+    }
+
+
+def handle_read_only_python(request):
+    """Run a measurement script with the mutating half of bpy refused.
+
+    The refusal is installed in the bridge, not in the prompt, because a role
+    boundary held only in a system prompt is a suggestion: the script decides
+    whether to honour it. Nothing is saved, so a refused run leaves model.blend
+    exactly as the bridge found it even if the script got far enough to change
+    something in memory.
+    """
+    ensure_requested_blend_open(request)
+    globals_dict = {
+        "__name__": "__main__",
+        "bpy": bpy,
+        "OUTPUT_BLEND_PATH": bpy.data.filepath,
+        "WORKSPACE_PATH": request["workspacePath"],
+        "ITERATION_PATH": request["iterationPath"],
+        "READ_ONLY": True,
+    }
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+    exit_code = 0
+
+    previous_cwd = os.getcwd()
+    workspace_path = request.get("workspacePath")
+    if workspace_path:
+        os.chdir(workspace_path)
+
+    with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
+        try:
+            with open(request["userScriptPath"], encoding="utf-8") as handle:
+                code = handle.read()
+            with read_only_run(bpy):
+                exec(compile(code, request["userScriptPath"], "exec"), globals_dict)
+        except ReadOnlyViolation as violation:
+            # A refusal is the answer, not a crash: the script asked something
+            # out of scope, and the caller needs to be told what it asked.
+            exit_code = 2
+            print(str(violation))
+        except Exception:
+            exit_code = 1
+            traceback.print_exc()
+        finally:
+            os.chdir(previous_cwd)
+
+    return {
+        "stdout": stdout_buffer.getvalue(),
+        "stderr": stderr_buffer.getvalue(),
+        "exitCode": exit_code,
+        "readOnly": True,
     }
 
 
@@ -1525,6 +1589,8 @@ def handle_request(request):
         return handle_capture_view(request)
     if request_type == "execute-python":
         return handle_execute_python(request)
+    if request_type == "read-only-python":
+        return handle_read_only_python(request)
     if request_type == "render":
         return handle_render(request)
     if request_type == "set-mode":

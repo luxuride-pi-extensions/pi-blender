@@ -13,6 +13,7 @@ export { blenderExecutePython } from "./execute.js";
 export { blenderBridgeStatus } from "./status.js";
 export { blenderGeometryProbe } from "./geometry-probe.js";
 export { blenderImageProbe } from "./image-probe.js";
+export { blenderReadOnlyPython } from "./readonly.js";
 export { blenderModuleRevert, blenderModuleRun } from "./module.js";
 export { blenderRender } from "./render.js";
 export { blenderSaveView } from "./save-view.js";

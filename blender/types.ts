@@ -222,6 +222,36 @@ export interface ExecutePythonResult {
 	changed: boolean;
 }
 
+export interface ReadOnlyPythonOptions {
+	cwd: string;
+	workspace: string;
+	/**
+	 * The Python to run, as text. A read-only role has no `write` tool, so a path
+	 * would make this unusable for the role that needs it most.
+	 */
+	script: string;
+	timeoutMs?: number;
+	signal?: AbortSignal;
+}
+
+export interface ReadOnlyPythonResult {
+	workspacePath: string;
+	blendPath: string;
+	/** Copy of the script that actually ran, beside any run output. */
+	scriptPath: string;
+	runDir: string;
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+	/**
+	 * The script asked for an operation outside the role's scope, so the bridge
+	 * refused it and nothing was changed. `stdout` then names what was refused.
+	 * A refused run is a result, not an error: the measurement simply needs a
+	 * different question.
+	 */
+	refused: boolean;
+}
+
 export interface SceneInfoOptions {
 	cwd: string;
 	workspace: string;

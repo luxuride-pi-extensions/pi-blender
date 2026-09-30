@@ -51,6 +51,7 @@ import {
 	blenderLogCritique,
 	blenderModuleRevert,
 	blenderModuleRun,
+	blenderReadOnlyPython,
 	blenderRender,
 	blenderSaveView,
 	blenderSceneInfo,
@@ -1068,6 +1069,48 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_read_only_python",
+			label: "Blender Read-Only Python",
+			description:
+				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with every mutating Blender operation refused by the bridge itself — bpy.ops, bpy.data removal, assigning to an object or its vectors, and saving. Read-only, and it never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				script: Type.String({
+					description:
+						"The Python to run, as text. Inline rather than a path on purpose: a read-only role has no `write` tool, so a path-only API would make the tool unusable for exactly the role that needs it, and would push it toward asking a worker to author its own evidence.",
+				}),
+				timeoutMs: Type.Optional(
+					Type.Number({
+						description: "Bridge timeout override in ms for the script itself.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderReadOnlyPython({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					script: params.script,
+					timeoutMs: params.timeoutMs,
+					signal: _signal,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: result.refused
+								? `REFUSED: the script asked for an operation that would change the scene.\n${result.stdout.trim()}`
+								: result.stdout.trim() || "(the script printed nothing)",
+						},
+					],
 					details: result,
 				};
 			},

@@ -183,7 +183,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (14 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (15 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -244,6 +244,18 @@ Start pi in any project dir. The extension:
   refuses an interlaced or non-PNG file by name rather than decoding it wrongly.
   It costs nothing against a critic's image budget because the pixels never
   enter the model's context as an image
+- `blender_read_only_python` takes Python as inline text and returns what it
+  printed, for a read-only role that has no `write` tool. The refusal is
+  enforced in `blender/readonly_guard.py`, in the Blender process, by patching
+  the objects a script reaches through rather than by scanning its source: a
+  text scan is defeated by a name assembled from a string, and it would pass a
+  script that never mentions a forbidden name and still deletes something. It
+  covers `bpy.ops`, `bpy.data` removal, assignment to an object or to a
+  component of its vectors (`obj.location.x = 5` mutates through the vector, so
+  returning a copy is not enough — that would let the assignment succeed and the
+  script read back its own number), and saving. A refusal comes back as
+  `refused: true` naming the operation rather than as an error, because
+  "your question needed a change" is an answer
 - **delegation is enforced, not advised.** In manager mode — entered by
   `/blender` and cleared by `/blender-exit` or a new session — a `tool_call` hook blocks the
   MANAGER from `write`, `edit`, and from `read`

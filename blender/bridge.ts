@@ -367,6 +367,27 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	});
 }
 
+export async function requestLiveBlenderReadOnlyPython(options: {
+	blendPath: string;
+	workspacePath: string;
+	iterationPath: string;
+	userScriptPath: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<{ stdout: string; stderr: string; exitCode: number; readOnly: true }> {
+	return await requestLiveBlenderBridge({
+		payload: {
+			type: "read-only-python",
+			blendPath: options.blendPath,
+			workspacePath: options.workspacePath,
+			iterationPath: options.iterationPath,
+			userScriptPath: options.userScriptPath,
+		},
+		signal: options.signal,
+		timeoutMs: options.timeoutMs,
+	});
+}
+
 export async function requestLiveBlenderShutdown(options: {
 	save?: boolean;
 	signal?: AbortSignal;
