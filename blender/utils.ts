@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { getBlenderAssetsDir, getBlenderBridgeDir, getBlenderTempDir } from "../config.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
+import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
 import type {
 	BlenderRunResult,
 	BlenderSavedView,
@@ -173,16 +174,60 @@ export async function runBlenderProcess(options: {
 		? [...blenderArgs, "--background", options.blendPath, "--python", options.scriptPath, "--", JSON.stringify(options.payload)]
 		: [...blenderArgs, "--background", "--factory-startup", "--python", options.scriptPath, "--", JSON.stringify(options.payload)];
 
-	const result = await execCommand(command, args, options.cwd, {
-		signal: options.signal,
-		timeout: options.timeoutMs,
-	});
+	// Every headless Blender in this extension is spawned here, so this is the
+	// one place the concurrency ceiling can be enforced. The warning is emitted
+	// once per resolved budget rather than per run: a fan-out of twenty renders
+	// would otherwise print the same projection twenty times, and the operator
+	// only needs to be told that the clamp engaged, not that it engaged again.
+	const budget = resolveRunBudget();
+	const clampWarning = budget.warning;
+	if (clampWarning && !warnedAboutClamp.has(clampWarning)) {
+		warnedAboutClamp.add(clampWarning);
+		console.warn(`[pi-blender] ${clampWarning}`);
+	}
 
-	return {
-		stdout: result.stdout,
-		stderr: result.stderr,
-		code: result.code,
-	};
+	const release = await headlessGate().acquire();
+	try {
+		const result = await execCommand(command, args, options.cwd, {
+			signal: options.signal,
+			timeout: options.timeoutMs,
+		});
+
+		return {
+			stdout: result.stdout,
+			stderr: result.stderr,
+			code: result.code,
+		};
+	} finally {
+		release();
+	}
+}
+
+/** Warnings already printed, so a fan-out does not repeat itself per run. */
+const warnedAboutClamp = new Set<string>();
+
+/**
+ * The process-wide headless gate.
+ *
+ * One gate for the whole process rather than one per call site: the limit is a
+ * machine property, and a per-call-site gate would let four callers each admit
+ * four runs and produce sixteen on a box that budgeted for four. Deliberately
+ * not shared across processes either — each pi session has its own budget to
+ * honour, and a cross-process gate would put module workers in the same queue
+ * as the session that spawned them.
+ */
+let gate: ParallelRunGate | null = null;
+function headlessGate(): ParallelRunGate {
+	if (gate === null) {
+		gate = new ParallelRunGate(resolveRunBudget().effective);
+	}
+	return gate;
+}
+
+/** Reset the cached gate and warning set. For the tests, which vary the env. */
+export function resetHeadlessGateForTests(): void {
+	gate = null;
+	warnedAboutClamp.clear();
 }
 
 export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise<T> {

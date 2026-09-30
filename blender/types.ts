@@ -615,6 +615,27 @@ export interface BridgeStatusResult {
 	requestsDir: string;
 	workspacePath: string | null;
 	recommendation: string;
+	/**
+	 * The headless run budget, so the number that governs fan-out is reported
+	 * next to the number that governs the bridge. A caller deciding how wide to
+	 * fan out would otherwise have to read the env var and the source to learn
+	 * that "16" means 4.
+	 */
+	headless: RunBudgetReport;
+}
+
+/** The headless concurrency budget as reported, flattened for tool output. */
+export interface RunBudgetReport {
+	/** The ceiling the environment asked for. */
+	requested: number;
+	/** What will actually run at once. */
+	effective: number;
+	/** True when the machine or the measured ceiling bound the result. */
+	clamped: boolean;
+	/** One line per binding term. */
+	reasons: string[];
+	/** Full explanation, or null when nothing clamped. */
+	warning: string | null;
 }
 
 export interface RunBlenderJsonOptions {

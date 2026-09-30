@@ -919,7 +919,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_bridge_status",
 			label: "Blender Bridge Status",
 			description:
-				"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, and how many requests are pending. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout.",
+				"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, how many requests are pending, and how many headless Blender runs may execute concurrently on this machine. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout.",
 			parameters: Type.Object({
 				workspace: Type.Optional(
 					Type.String({
