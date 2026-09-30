@@ -854,3 +854,38 @@ export interface GeometryProbeWorkspaceResult extends GeometryProbeResult {
 	matchesWorkspace: boolean;
 	warnings: string[];
 }
+
+export interface MontageOptions {
+	cwd: string;
+	workspace: string;
+	/** Module the sheet is written for. Each panel also lands beside it. */
+	moduleName: string;
+	/** Preset angle names, e.g. ["front", "left", "three-quarter"]. */
+	views: string[];
+	/** Objects to frame. Defaults to every visible mesh. */
+	subject?: string[];
+	/** Sheet columns. Defaults to 1 for up to two views, otherwise 2. */
+	columns?: number;
+	/** Per-panel pixel size. Defaults to 900x700. */
+	panelResolution?: { x: number; y: number };
+	timeoutMs?: number;
+	signal?: AbortSignal;
+}
+
+export interface MontageResult {
+	workspacePath: string;
+	manifestPath: string;
+	montagePath: string;
+	panelPaths: string[];
+	views: string[];
+	layout: {
+		panelWidth: number;
+		panelHeight: number;
+		aspect: number;
+		columns: number;
+		rows: number;
+	};
+	subject: string[];
+	framing: { center: number[]; radius: number; distance: number };
+	note: string;
+}

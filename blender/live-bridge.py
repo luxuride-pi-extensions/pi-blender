@@ -27,6 +27,11 @@ from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 # pi-lens-ignore: ast-grep:unresolved-import-python
 from readonly_guard import ReadOnlyViolation, read_only_run  # pyright: ignore[reportMissingImports]
 
+# The orbit angles and the tiling, so a sheet can be composed without either
+# being rebuilt per caller.
+# pi-lens-ignore: ast-grep:unresolved-import-python
+import montage  # pyright: ignore[reportMissingImports]
+
 BRIDGE_DIR = os.environ.get("PI_BLENDER_BRIDGE_DIR") or os.path.join(
     # Same XDG convention config.ts uses for its own default. This is only
     # reached when Blender was started BY HAND with --python live-bridge.py and
@@ -1575,12 +1580,151 @@ def handle_shutdown(request):
     return result
 
 
+def handle_montage(request):
+    """Render several fixed-orbit views of one subject and tile them into a sheet.
+
+    Read-only with respect to the file it photographs: the resolution, file
+    format, filepath and scene camera are snapshotted and restored, and the
+    temporary cameras are removed, so asking for a sheet leaves the workspace
+    exactly as it was found.
+
+    The camera positions come from fixed preset angles on one orbit. A framing
+    that computed its own angles per subject would put the comparison of two
+    panels at the mercy of the geometry being judged.
+    """
+    ensure_requested_blend_open(request)
+
+    viewport = find_viewport_context()
+    scene = viewport["scene"]
+
+    view_names = list(request.get("views") or ["front", "three-quarter"])
+    if len(view_names) < 1:
+        raise RuntimeError("A montage needs at least one view.")
+    # An angle the caller misspelled must not cost a render of the panels that
+    # did resolve, so every name is checked before anything is created.
+    angles = [montage.resolve_angle(name) for name in view_names]
+
+    subjects = _resolve_probe_objects(request.get("subject") or [])
+    if not subjects:
+        raise RuntimeError("No mesh objects to frame. Pass `subject` explicitly if the scene is empty or filtered.")
+    corners = []
+    for obj in subjects:
+        minimum, maximum = _world_bounding_box(obj)
+        corners.append(minimum)
+        corners.append(maximum)
+    bounds_min = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+    bounds_max = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+    centre = tuple((bounds_min + bounds_max) * 0.5)
+    radius = max(((bounds_max - bounds_min) * 0.5).length, 0.01)
+    distance = montage.framing_distance(radius)
+
+    columns = int(request.get("columns") or (1 if len(view_names) <= 2 else 2))
+    columns = max(1, min(4, columns))
+    panel = request.get("panelResolution") or {}
+    panel_width = int(panel.get("x") or 900)
+    panel_height = int(panel.get("y") or 700)
+
+    output_dir = request["outputDir"]
+    os.makedirs(output_dir, exist_ok=True)
+    sheet_path = os.path.join(output_dir, request.get("outputName") or "montage.png")
+
+    render_settings = scene.render
+    previous_scene_camera = scene.camera
+    previous_resolution = (
+        render_settings.resolution_x,
+        render_settings.resolution_y,
+        render_settings.resolution_percentage,
+    )
+    previous_file_format = render_settings.image_settings.file_format
+    previous_filepath = render_settings.filepath
+
+    created_cameras = []
+    panels = []
+    panel_paths = []
+    try:
+        render_settings.resolution_x = panel_width
+        render_settings.resolution_y = panel_height
+        render_settings.resolution_percentage = 100
+        render_settings.image_settings.file_format = "PNG"
+
+        for index, (view_name, (azimuth, elevation)) in enumerate(zip(view_names, angles)):
+            panel_path = os.path.join(output_dir, "panel-%d-%s.png" % (index + 1, view_name))
+            camera_data = bpy.data.cameras.new("montage-camera-%d" % (index + 1))
+            camera_object = bpy.data.objects.new(camera_data.name, camera_data)
+            scene.collection.objects.link(camera_object)
+            created_cameras.append(camera_object)
+            camera_object.location = montage.camera_location(centre, distance, azimuth, elevation)
+            # Look at the subject, not at the world origin: the orbit only says
+            # where the camera sits.
+            direction = Vector(centre) - camera_object.location
+            camera_object.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+            scene.camera = camera_object
+
+            render_settings.filepath = panel_path
+            with bpy.context.temp_override(
+                window=viewport["window"],
+                screen=viewport["screen"],
+                area=viewport["area"],
+                region=viewport["region"],
+                space_data=viewport["space"],
+                scene=scene,
+            ):
+                bpy.ops.render.render(write_still=True)
+
+            panel_image = montage.read_panel(panel_path)
+            panels.append(panel_image)
+            panel_paths.append(panel_path)
+
+        # The label scale is derived from the sheet width rather than fixed, so
+        # a four-panel sheet labels readably at the default panel size.
+        sheet, layout = montage.tile(
+            panels,
+            [str(name) for name in view_names],
+            columns=columns,
+            label_scale=max(2, min(4, panel_width // (12 * columns))),
+        )
+        montage.write_png(sheet_path, sheet)
+    finally:
+        scene.camera = previous_scene_camera
+        (
+            render_settings.resolution_x,
+            render_settings.resolution_y,
+            render_settings.resolution_percentage,
+        ) = previous_resolution
+        render_settings.image_settings.file_format = previous_file_format
+        render_settings.filepath = previous_filepath
+        for camera_data in created_cameras:
+            data = camera_data.data
+            bpy.data.objects.remove(camera_data, do_unlink=True)
+            if data.users == 0:
+                bpy.data.cameras.remove(data)
+
+    return {
+        "montagePath": sheet_path,
+        "panelPaths": panel_paths,
+        "views": [str(name) for name in view_names],
+        "layout": layout,
+        "subject": [obj.name for obj in subjects],
+        "framing": {
+            "center": [_round(value) for value in centre],
+            "radius": _round(radius),
+            "distance": _round(distance),
+        },
+        "note": (
+            "Every panel is the same subject from a preset orbit angle at the same "
+            "distance, so a difference between panels is the geometry, not the framing."
+        ),
+    }
+
+
 def handle_request(request):
     request_type = request.get("type")
     if request_type == "get-session-context":
         return handle_get_session_context(request)
     if request_type == "geometry-probe":
         return handle_geometry_probe(request)
+    if request_type == "montage":
+        return handle_montage(request)
     if request_type == "open-blend":
         return handle_open_blend(request)
     if request_type == "reload-blend":

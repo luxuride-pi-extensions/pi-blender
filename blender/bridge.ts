@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
 import { ensureLiveBridgeLaunched, isLiveBridgeAlive } from "../launch.js";
 import { isHeartbeatFresh, readHeartbeatBlendPath } from "./liveness.js";
-import type { BlenderRenderViewSource, BlenderViewportShading, GeometryProbeResult } from "./types.js";
+import type {
+	BlenderRenderViewSource,
+	BlenderViewportShading,
+	GeometryProbeResult,
+	MontageResult,
+} from "./types.js";
 import {
 	acquireBridgeLock,
 	delay,
@@ -27,6 +32,14 @@ import {
  */
 const LIVE_BLEND_PATH_SETTLE_MS = 1_500;
 const HEARTBEAT_RECHECK_MS = 100;
+
+/**
+ * A montage is one render per panel, so its budget has to cover the panels
+ * rather than the single render LIVE_BRIDGE_TIMEOUT_MS was sized for. Four
+ * panels at the studio resolution is a few minutes on CPU, and cutting a sheet
+ * off partway through would leave panels on disk with no sheet to read.
+ */
+const DEFAULT_MONTAGE_TIMEOUT_MS = LIVE_BRIDGE_TIMEOUT_MS * 4;
 
 function getLiveBridgePaths(): {
 	bridgeDir: string;
@@ -341,6 +354,35 @@ export async function requestLiveBlenderSetMode(options: {
 		},
 		signal: options.signal,
 		timeoutMs: options.timeoutMs,
+	});
+}
+
+export async function requestLiveBlenderMontage(options: {
+	views: string[];
+	subject?: string[];
+	columns?: number;
+	panelResolution?: { x: number; y: number };
+	outputDir: string;
+	outputName?: string;
+	blendPath: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<MontageResult> {
+	return await requestLiveBlenderBridge<MontageResult>({
+		payload: {
+			type: "montage",
+			views: options.views,
+			subject: options.subject,
+			columns: options.columns,
+			panelResolution: options.panelResolution,
+			outputDir: options.outputDir,
+			outputName: options.outputName,
+			blendPath: options.blendPath,
+		},
+		signal: options.signal,
+		// One render per panel, so the default render timeout would cut a
+		// four-panel sheet off partway through.
+		timeoutMs: options.timeoutMs ?? DEFAULT_MONTAGE_TIMEOUT_MS,
 	});
 }
 

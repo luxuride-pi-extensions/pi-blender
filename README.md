@@ -183,7 +183,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (15 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (16 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -256,6 +256,21 @@ Start pi in any project dir. The extension:
   script read back its own number), and saving. A refusal comes back as
   `refused: true` naming the operation rather than as an error, because
   "your question needed a change" is an answer
+- `blender_montage` renders several preset orbit angles of one subject and
+  tiles them into a single labelled sheet at `modules/<name>/montage.png`,
+  with each panel also written separately at full size. The cameras sit on one
+  orbit at one distance from the subject's bounding sphere, so a difference
+  between two panels is the geometry rather than the camera; the framing
+  distance comes from the lens rather than a fixed multiplier, so a 200mm lens
+  is not framed tighter than a 50mm one. Labels are capped to their own panel,
+  because a label that runs into the next panel identifies the wrong view.
+  Read-only with respect to the file it photographs: resolution, filepath, file
+  format, scene camera and viewport are snapshotted and restored, and the
+  temporary cameras are removed. It exists because one angle cannot answer
+  every question — a silhouette that may be hiding a limb, a form that reads
+  symmetric from the front and wrong from three-quarter — and because a sheet
+  costs the same transcript weight as one render: images persist in a
+  conversation and are re-sent every request
 - **delegation is enforced, not advised.** In manager mode — entered by
   `/blender` and cleared by `/blender-exit` or a new session — a `tool_call` hook blocks the
   MANAGER from `write`, `edit`, and from `read`

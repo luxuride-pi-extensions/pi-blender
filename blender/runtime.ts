@@ -15,6 +15,7 @@ export { blenderGeometryProbe } from "./geometry-probe.js";
 export { blenderImageProbe } from "./image-probe.js";
 export { blenderReadOnlyPython } from "./readonly.js";
 export { blenderModuleRevert, blenderModuleRun } from "./module.js";
+export { blenderMontage } from "./montage.js";
 export { blenderRender } from "./render.js";
 export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
@@ -59,6 +60,8 @@ export type {
 	ModuleRevertResult,
 	ModuleRunOptions,
 	ModuleRunResult,
+	MontageOptions,
+	MontageResult,
 	RenderOptions,
 	RenderResult,
 	SaveViewOptions,

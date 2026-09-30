@@ -51,6 +51,7 @@ import {
 	blenderLogCritique,
 	blenderModuleRevert,
 	blenderModuleRun,
+	blenderMontage,
 	blenderReadOnlyPython,
 	blenderRender,
 	blenderSaveView,
@@ -1109,6 +1110,80 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							text: result.refused
 								? `REFUSED: the script asked for an operation that would change the scene.\n${result.stdout.trim()}`
 								: result.stdout.trim() || "(the script printed nothing)",
+						},
+					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_montage",
+			label: "Blender Montage",
+			description:
+				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				moduleName: Type.String({
+					description: "Module the sheet belongs to. Written to modules/<name>/montage.png, with panel-N-<view>.png beside it.",
+				}),
+				views: Type.Array(Type.String(), {
+					minItems: 1,
+					maxItems: 4,
+					description:
+						"Preset angle names. Known: front, back, left, right, top, bottom, three-quarter, three-quarter-left, three-quarter-high, profile-left, profile-right, front-high. Two to four views make a useful sheet; one view is a render with extra steps.",
+				}),
+				subject: Type.Optional(
+					Type.Array(Type.String(), {
+						description:
+							"Objects to frame. Defaults to every visible mesh, which frames the whole build. Pass names when one module is the subject and the rest of the scene is context.",
+					}),
+				),
+				columns: Type.Optional(
+					Type.Number({
+						description:
+							"Sheet columns. Default 1 for up to two views, otherwise 2. A 2x2 sheet of four panels is the most a critic can resolve before the panels get downsampled.",
+					}),
+				),
+				panelResolution: Type.Optional(
+					Type.Object({
+						x: Type.Number({ description: "Panel width in pixels (default 900)." }),
+						y: Type.Number({ description: "Panel height in pixels (default 700)." }),
+					}),
+				),
+				timeoutMs: Type.Optional(
+					Type.Number({
+						description:
+							"Bridge timeout override in ms. Defaults to four times the single-render budget, because this is one render per panel.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderMontage({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					moduleName: params.moduleName,
+					views: params.views,
+					subject: params.subject,
+					columns: params.columns,
+					panelResolution: params.panelResolution,
+					timeoutMs: params.timeoutMs,
+					signal: _signal,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: [
+								`Montage: ${result.montagePath}`,
+								`Panels: ${result.panelPaths.join(", ")}`,
+								`Views: ${result.views.join(", ")} (${result.layout.columns}x${result.layout.rows} of ${result.layout.panelWidth}x${result.layout.panelHeight})`,
+								`Framed: ${result.subject.join(", ")}`,
+								result.note,
+							].join("\n"),
 						},
 					],
 					details: result,
