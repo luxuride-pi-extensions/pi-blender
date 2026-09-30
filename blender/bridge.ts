@@ -54,6 +54,30 @@ function getLiveBridgePaths(): {
 	};
 }
 
+/**
+ * A live-bridge request that arrived with no window to serve it.
+ *
+ * A distinct type rather than a message, because the callers that CAN work
+ * without a window have to be able to recognize this and fall back: an error
+ * that only reads well is an error every caller has to string-match on, and
+ * string-matching an error is exactly how a reworded message silently changes
+ * behaviour. The tools that fall back check `instanceof`.
+ */
+export class NoWatchWindowError extends Error {
+	readonly requestType: string;
+
+	constructor(requestType: string) {
+		super(
+			`No Blender window is open, so "${requestType}" has nothing to run in. This is a windowed-Blender-only tool: ` +
+				"run /blender-watch to open the one window this session may have, or use the headless path instead " +
+				"(blender_branch_run for module work, blender_render with renderMethod \"background\" for a still, " +
+				"blender_scene_info for what is on disk).",
+		);
+		this.name = "NoWatchWindowError";
+		this.requestType = requestType;
+	}
+}
+
 async function requestLiveBlenderBridge<T>(options: {
 	payload: Record<string, unknown>;
 	signal?: AbortSignal;
@@ -147,13 +171,25 @@ async function runLockedBridgeRequest<T>(options: {
 }): Promise<T> {
 	const { requestsDir, responsesDir } = getLiveBridgePaths();
 
-	// Lazy launch: if the UI is not running yet, start it before polling so
-	// the first tool call doesn't just time out while Blender is booting.
-	// "Alive" is liveness-based (bridge heartbeat), not just the launch
-	// memory flag — a UI closed across /new is relaunched via
-	// ensureLiveBridgeLaunched() at session start and re-checked here.
-	const coldStart = !isLiveBridgeAlive();
-	ensureLiveBridgeLaunched();
+	// Fail fast when there is no window, rather than polling to a timeout.
+	//
+	// A window exists if and only if /blender-watch opened one (see
+	// isWatchWindowAuthorized). Without that, nothing is going to answer this
+	// request: no process is polling the queue and none will be launched, so
+	// waiting out the deadline would report a slow bridge where the truth is
+	// that there is no bridge. The error names the command, because "no live
+	// Blender" without a next step is the kind of dead end that reads as a bug.
+	if (!isLiveBridgeAlive()) {
+		ensureLiveBridgeLaunched();
+		if (!isLiveBridgeAlive()) {
+			throw new NoWatchWindowError(String(options.payload.type ?? "unknown"));
+		}
+	}
+
+	// Whether this request is racing a window that is still booting. Measured
+	// AFTER the launch above, so it reflects the window that will actually
+	// answer rather than the one that was absent a moment ago.
+	const coldStart = !isHeartbeatFresh();
 
 	const requestId = randomUUID();
 	const requestPath = join(requestsDir, `${requestId}.json`);
@@ -173,8 +209,8 @@ async function runLockedBridgeRequest<T>(options: {
 	);
 	await rename(tempRequestPath, requestPath);
 
-	// When this process just cold-launched the UI, give it a longer window to
-	// boot (the caller's explicit timeoutMs still wins).
+	// A cold start (a window the user just opened with /blender-watch, still
+	// booting) gets the longer budget; an already-running bridge does not.
 	const deadline = Date.now() + (options.timeoutMs ?? (coldStart ? LIVE_BRIDGE_COLD_START_TIMEOUT_MS : LIVE_BRIDGE_TIMEOUT_MS));
 	while (Date.now() < deadline) {
 		if (await fileExists(responsePath)) {

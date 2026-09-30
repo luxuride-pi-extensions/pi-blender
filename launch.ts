@@ -52,6 +52,12 @@ const FLATPAK_BLENDER_REF = "org.blender.Blender";
  */
 const LIVE_BRIDGE_SUPERVISE_INTERVAL_MS = 15_000;
 /**
+ * The marker that records "this session asked for a windowed Blender".
+ *
+ * See isWatchWindowAuthorized for why this is a file and not a module flag.
+ */
+const WATCH_WINDOW_AUTHORIZED_FILE = "watch-window.json";
+/**
  * Matches LIVE_BRIDGE_LOCK_STALE_MS in blender/utils.ts, and duplicated for the
  * same reason as the lock read above: importing from utils.ts here would close
  * an import cycle (utils.ts imports resolveBlenderArgv from this module).
@@ -438,9 +444,64 @@ export function resetBridgeLaunch(): void {
 	releaseLaunchClaim();
 }
 
+/**
+ * Launch the live-bridge Blender UI detached if it is not alive and no
+ * launch is in flight. Safe to call repeatedly (session_start, pre-request,
+ * timeout retry). Re-spawns when a previously launched UI has since been
+ * closed (e.g. across /new within the same pi process).
+ *
+ * GATED ON /blender-watch HAVING ASKED FOR A WINDOW. See
+ * isWatchWindowAuthorized. This is the chokepoint every tool path goes
+ * through, so the gate is here rather than at the call sites: a gate only
+ * some callers remember is not a gate.
+ */
 export function ensureLiveBridgeLaunched(): void {
 	if (bridgeSpawnInFlight || isLiveBridgeAlive() || bridgeLaunchStarted) return;
+	if (!isWatchWindowAuthorized()) return;
 	launchBridge();
+}
+
+/**
+ * Whether this session has authorized a windowed Blender at all.
+ *
+ * The rule is deliberately narrow: a window exists if and only if /blender-watch
+ * asked for one. A tool call must not bring a UI up behind the user's back, and
+ * neither may the supervisor.
+ *
+ * Recorded durably rather than in module state, because /reload rebuilds this
+ * module instance while the window it launched keeps running: a flag on `this`
+ * would read false in the fresh instance and the next blender_* call would treat
+ * a window the user is watching as unauthorized, then launch a second one. The
+ * marker is per-instance by design (config.ts gives every process in a
+ * delegation tree the SAME instance id, so a manager and its workers share one
+ * window rather than each opening their own), which is what "at most one window
+ * per session" needs.
+ */
+function isWatchWindowAuthorized(): boolean {
+	return existsSync(join(getBlenderBridgeDir(), WATCH_WINDOW_AUTHORIZED_FILE));
+}
+
+/** Mark this session's window as wanted, so the tools may drive it. */
+export function authorizeWatchWindow(): void {
+	mkdirSync(getBlenderBridgeDir(), { recursive: true });
+	writeFileSync(join(getBlenderBridgeDir(), WATCH_WINDOW_AUTHORIZED_FILE), `${Date.now()}\n`, "utf-8");
+}
+
+/**
+ * Withdraw the window's authorization.
+ *
+ * Called when the window is deliberately closed. Without this, a later tool
+ * call would find the authorization still on disk, decide the window is merely
+ * not-yet-up, and launch one — the supervisor's whole reason for existing,
+ * applied to a window the user just asked to have closed.
+ */
+export function unauthorizeWatchWindow(): void {
+	try {
+		rmSync(join(getBlenderBridgeDir(), WATCH_WINDOW_AUTHORIZED_FILE), { force: true });
+	} catch {
+		// An authorization this process cannot remove is not a reason to fail a
+		// tool call; the absence check is what every reader uses.
+	}
 }
 
 /**
@@ -873,7 +934,48 @@ function isHeartbeatFresh(): boolean {
 export function ensureLiveBridgeLaunchedForce(): void {
 	if (isLiveBridgeAlive()) return;
 	if (bridgeSpawnInFlight || bridgeLaunchStarted) return;
+	// Same authorization gate as the lazy path, and for the same reason: the
+	// supervisor's relaunch reaches this function, so an ungated force would
+	// reopen the window the user just closed. The one caller that is allowed to
+	// open a window unconditionally is requestWatchWindowLaunch, and it
+	// authorizes first.
+	if (!isWatchWindowAuthorized()) return;
 	launchBridge();
+}
+
+/**
+ * Open this session's watch window, or do nothing if it is already up.
+ *
+ * The single authorized path to a windowed Blender. The marker is written
+ * BEFORE the spawn so a launch that races the first tool call is already
+ * legitimate, and so a second /blender-watch in the same session is a no-op
+ * rather than a second window.
+ *
+ * resetBridgeLaunch() first so a window closed moments ago is replaced even
+ * though the stale-heartbeat check would otherwise treat the request as
+ * satisfied.
+ */
+export async function requestWatchWindowLaunch(): Promise<void> {
+	// Idempotent on the authorization, not merely on liveness. The second
+	// /blender-watch of a session arrives in the window between the spawn and
+	// the first heartbeat, where isLiveBridgeAlive() is still false — so a
+	// liveness check alone would reset the launch flags below and start a SECOND
+	// window over the one already coming up. "At most one window" has to be
+	// enforced by the record of having asked, which is what the marker is.
+	//
+	// This is also why the window's own death needs no path here: the marker is
+	// removed when the window is closed deliberately, and a marker left behind
+	// by a crash is what the supervisor's relaunch exists for.
+	if (isWatchWindowAuthorized()) {
+		await whenLaunchSettled();
+		return;
+	}
+	// The marker is written BEFORE the spawn so a tool call that races this
+	// launch finds the window legitimate rather than unauthorized.
+	authorizeWatchWindow();
+	resetBridgeLaunch();
+	ensureLiveBridgeLaunchedForce();
+	await whenLaunchSettled();
 }
 
 function launchBridge(): void {

@@ -43,6 +43,26 @@ export const DEFAULT_MAX_PARALLEL_RUNS = 16;
 const RSS_PER_RUN_BYTES = 366 * 1024 * 1024;
 
 /**
+ * Resident memory of one WINDOWED Blender, the /blender-watch process.
+ *
+ * NOT measured the way RSS_PER_RUN_BYTES above was, and deliberately reported
+ * as a rough projection rather than used as a budget term. What is known: the
+ * headless cost is 366 MB, and the difference is a GL context, the viewport draw
+ * buffers and the undo stack, none of which a --background run allocates. A GL
+ * context plus draw buffers for a 3D viewport is on the order of 100-300 MB on
+ * its own before any scene is loaded, and the undo stack grows with every
+ * operation applied through the bridge.
+ *
+ * The figure is CHOSEN to make the oversubscription visible rather than to be
+ * right: it is reported beside the headless budget so an operator can see that
+ * a viewer plus the resolved run count is a real claim on the machine. It is
+ * NOT a clamp input, because a term this soft inside a memory budget with tens
+ * of GB of slack would be a guess masquerading as a measurement, and the
+ * 366 MB above, which IS measured, would stop being the honest number here.
+ */
+export const WATCH_WINDOW_RSS_BYTES = 1_200 * 1024 * 1024;
+
+/**
  * Cores assumed per concurrent Blender.
  *
  * A headless render does not saturate its own thread pool — a scene this size

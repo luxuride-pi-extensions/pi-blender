@@ -30,9 +30,18 @@ export const WARNING_SEVERITY: Record<SessionContextWarningCode, number> = {
 	"shared-with-peer": 3,
 	"workspace-mismatch": 2,
 	"unsaved-scene": 2,
+	// A failed headless read outranks a mode note: it means the file and scene
+	// sections are from the manifest, not from the .blend, which is a weaker
+	// answer than the same sections read for real.
+	"headless-probe-failed": 2,
 	"unsaved-changes": 1,
 	"no-viewport": 1,
 	"ambiguous-selection": 1,
+	// Lowest, because it is the NORMAL state of any session that has not run
+	// /blender-watch and is about the mode rather than about the file. It
+	// matters that it is ranked at all: in a one-line prompt it has to be able
+	// to outrank nothing but still lose to anything about the user's data.
+	"no-watch-window": 0,
 };
 /**
  * Default wait for a bridge request when the caller does not supply one.

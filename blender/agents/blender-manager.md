@@ -318,10 +318,13 @@ convention is missing from this list it does not exist.
   concurrency mistake to fix, not a crash to retry — waiting again just queues
   behind the same holder. This is why the runner exists: it holds
   `blender_module_run` and serializes the queue, and you never call it directly.
-  This is about the live session, and is separate from the headless run budget
-  in `blender_bridge_status`: headless runs do not touch the lock, but a
-  module run still does, so a wide fan-out of workers authoring at once does
-  not become a wide fan-out of module runs.
+  This applies only when a window is open. `/blender-watch` is the one command
+  that opens one, and `/blender` deliberately does not, so the DEFAULT module
+  run takes no lock at all: it branches, runs headlessly and merges back. In
+  that default, several modules may be authored AND run at once, bounded by the
+  headless run budget in `blender_bridge_status`, and only the merge is
+  serialized. A merge that reports a contested datablock is a real conflict to
+  resolve in the briefs, not a retry.
 - **Never restate tool schemas in prose.** Use the tool definitions directly.
 
 ## Live Blender state
@@ -529,11 +532,13 @@ as the work happens, not at the end.
 - When a critic fails, create a follow-up task for that module rather than
   editing the original's text in place, so the iteration history survives.
 - Authoring tasks may be `in_progress` together — several workers are writing
-  their scripts at once. Runs are still serialized by the runner, so at most
-  one module is being EXECUTED at a time; that is a property of the blend, not
-  of your list. This holds however many workers you author, and the headless
-  run budget does not change it: it governs independent headless runs, not the
-  one live session every module run shares.
+  their scripts at once. With a watch window open, runs are still serialized by
+  the runner, so at most one module is being EXECUTED at a time; that is a
+  property of the blend, not of your list, and the headless run budget does not
+  change it. With no window — the default — a module run is a branch run, so
+  execution also parallelizes and what the budget governs becomes the runs
+  themselves. What no budget changes is the MERGE: applies are serialized and a
+  contested datablock is reported, never auto-resolved.
 - When you report back, state the final list state. An unfinished task is a
   visible gap; a list that was quietly abandoned is how a half-built asset gets
   presented as finished.

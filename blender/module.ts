@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
+import { blenderBranchApply, blenderBranchRun } from "./branch.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
 import type {
 	BlenderModuleRunRecord,
@@ -53,7 +54,91 @@ function getModuleRuns(manifest: { moduleRuns?: BlenderModuleRunRecord[] }): Ble
 	return manifest.moduleRuns ?? [];
 }
 
+/**
+ * Run a module, on the live session when there is one and headlessly when there
+ * is not.
+ *
+ * THE FALLBACK IS NOT AN OPTIMIZATION, it is the common case. `/blender` no
+ * longer opens a window, so a session that has not run `/blender-watch` has no
+ * live session at all — and refusing to run modules there would leave the
+ * extension unable to do its main job in its default state. The headless path
+ * delegates to the branch machinery and then applies, which is the same work a
+ * windowed run does (checkpoint, execute, save, render, record) against the one
+ * file that is actually shared.
+ *
+ * The differences that remain are reported rather than hidden: the run happened
+ * in a copy and was merged by an apply, which is visible in
+ * `executionMode` and in the moduleRuns record's `viaBranchApply`.
+ */
 export async function blenderModuleRun(options: ModuleRunOptions): Promise<ModuleRunResult> {
+	if (!isLiveBridgeAlive()) {
+		return runModuleHeadless(options);
+	}
+	return runModuleInLiveBlender(options);
+}
+
+/**
+ * The no-window path: branch, then apply, in one call.
+ *
+ * Reusing the branch pair rather than writing a second headless executor is
+ * deliberate. A module run that has just authored against a copy and merged it
+ * back IS a one-module branch apply; the code that decides what a run touched,
+ * what the apply moves, and what makes revert possible already exists and is
+ * tested for exactly this. A second executor would be a second answer to
+ * "which objects does this module own", and the two would drift.
+ */
+async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunResult> {
+	const moduleName = normalizeModuleName(options.moduleName);
+	const branchResult = await blenderBranchRun({
+		cwd: options.cwd,
+		workspace: options.workspace,
+		moduleName,
+		render: options.render,
+		view: options.view,
+		resolution: options.resolution,
+		samples: options.samples,
+		timeoutSeconds: options.timeoutSeconds,
+		signal: options.signal,
+	});
+
+	// A single staged branch cannot contest itself, so a conflict here would mean
+	// the conflict rule is wrong rather than that the operator must choose. It is
+	// still reported rather than applied blindly: a merge that silently skipped
+	// would leave the caller believing model.blend has the module's work.
+	const applyResult = await blenderBranchApply({
+		cwd: options.cwd,
+		workspace: options.workspace,
+		modules: [moduleName],
+		signal: options.signal,
+	});
+	const skipped = applyResult.skipped.filter((entry) => entry.module === moduleName);
+	if (skipped.length > 0 || applyResult.missing.includes(moduleName)) {
+		throw new Error(
+			`Module "${moduleName}" ran headlessly but was NOT merged into model.blend: ` +
+				`${skipped[0]?.conflicts.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`).join("; ") ?? "its branch blend went missing"}. ` +
+				`The work is intact in ${branchResult.branchPath}. Resolve the conflict and re-run.`,
+		);
+	}
+
+	return {
+		workspacePath: branchResult.workspacePath,
+		blendPath: branchResult.blendPath,
+		module: branchResult.module,
+		moduleDir: branchResult.moduleDir,
+		scriptPath: branchResult.scriptPath,
+		iteration: branchResult.iteration,
+		checkpointPath: branchResult.checkpointPath,
+		createdCheckpoint: true,
+		stdout: branchResult.stdout.trim(),
+		exitCode: branchResult.exitCode,
+		renderOutputPath: branchResult.renderOutputPath,
+		changed: branchResult.applyObjects.length > 0,
+		executionMode: "headless-apply",
+		liveBlenderMessage: applyResult.liveBlenderMessage,
+	};
+}
+
+async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<ModuleRunResult> {
 	const moduleName = normalizeModuleName(options.moduleName);
 
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
@@ -212,6 +297,7 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 		exitCode: result.exitCode,
 		renderOutputPath,
 		changed: result.changed,
+		executionMode: "live-session",
 	};
 }
 

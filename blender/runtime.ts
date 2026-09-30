@@ -26,6 +26,11 @@ export {
 } from "./branch.js";
 export { blenderMontage } from "./montage.js";
 export { blenderRender } from "./render.js";
+export { describeMachineLimits, resolveRunBudget, WATCH_WINDOW_RSS_BYTES } from "./concurrency.js";
+export { readHeartbeatBlendPath } from "./liveness.js";
+export { requestLiveBlenderOpenBlend } from "./bridge.js";
+export { ensureWorkspaceInitialized, loadWorkspaceManifest } from "./workspace.js";
+export { LIVE_BRIDGE_COLD_START_TIMEOUT_MS } from "./utils.js";
 export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";

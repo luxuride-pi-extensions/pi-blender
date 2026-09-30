@@ -61,13 +61,21 @@ import {
 	blenderSessionContext,
 	blenderSetMode,
 	blenderWorkspaceInit,
+	describeMachineLimits,
+	ensureWorkspaceInitialized,
 	formatCompactSessionContextPrompt,
 	getBundledBlenderSkillsDir,
+	loadWorkspaceManifest,
+	LIVE_BRIDGE_COLD_START_TIMEOUT_MS,
+	readHeartbeatBlendPath,
+	requestLiveBlenderOpenBlend,
+	resolveRunBudget,
+	WATCH_WINDOW_RSS_BYTES,
 } from "./blender/runtime.js";
 import { isLiveBridgeAlive } from "./launch.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
-import { ensureLiveBridgeLaunchedForce, resetBridgeLaunch, restartBridgeSupervisor } from "./launch.js";
-import { getManagerPrompt } from "./config.js";
+import { requestWatchWindowLaunch, restartBridgeSupervisor } from "./launch.js";
+import { getBlenderBridgeDir, getManagerPrompt } from "./config.js";
 import { loadManagerCore } from "./manager-core.js";
 
 /**
@@ -493,7 +501,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_save_view",
 			label: "Blender Save View",
 			description:
-				"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object.",
+				"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object. source=active-camera NEEDS A WINDOW (run /blender-watch first), because it photographs what the UI currently shows; binding to a named camera object works with no window at all.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -622,7 +630,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_module_run",
 			label: "Blender Module Run",
 			description:
-				"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py in the live Blender session, save the result, and optionally capture a live render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks.",
+				"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. Prefer blender_branch_run + blender_branch_apply when you want to author several modules against the same state and merge them in one pass.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -843,7 +851,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_set_mode",
 			label: "Blender Set Mode",
 			description:
-				"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI.",
+				"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI. NEEDS A WINDOW: this switches what a Blender UI is showing, so with no window open it has nothing to switch; /blender-watch opens one. Authoring itself does not need it — blender_module_run and blender_branch_run work headlessly.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1046,7 +1054,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_geometry_probe",
 			label: "Blender Geometry Probe",
 			description:
-				"Measure mesh/transform relationships in the LIVE Blender scene and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess.",
+				"Measure mesh/transform relationships in the LIVE Blender scene and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. NEEDS A WINDOW (run /blender-watch first): it measures the scene as the live session currently holds it, including unsaved edits.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1187,7 +1195,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_read_only_python",
 			label: "Blender Read-Only Python",
 			description:
-				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with every mutating Blender operation refused by the bridge itself — bpy.ops, bpy.data removal, assigning to an object or its vectors, and saving. Read-only, and it never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed.",
+				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with every mutating Blender operation refused by the bridge itself — bpy.ops, bpy.data removal, assigning to an object or its vectors, and saving. Read-only, and it never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. NEEDS A WINDOW (run /blender-watch first) because the script must run against a live session; it cannot be run headlessly, which is the one thing that tool cannot substitute for.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1229,7 +1237,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_montage",
 			label: "Blender Montage",
 			description:
-				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed.",
+				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. NEEDS A WINDOW (run /blender-watch first) for its own camera rig; without one, use blender_render per view and read the panels separately.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1389,11 +1397,10 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			}
 		});
 
-		// Blender UI is NOT launched at pi/session start. It is launched when
-		// the user engages Blender: running /blender force-launches it below
-		// (bypassing the heartbeat stale check so a Blender closed moments ago
-		// is still relaunched), and any blender_* tool call triggers the lazy
-		// ensureLiveBridgeLaunched() path in blender/bridge.ts.
+		// Blender UI is NOT launched at pi/session start, by /blender, or by any
+		// blender_* tool. A window appears only when the user runs
+		// /blender-watch, which is the one authorized spawner (see
+		// requestWatchWindowLaunch). Until then the tools work headlessly.
 
 		// /blender engages the extension: everything after the command becomes
 		// the Blender task, so no keyword detection of the prompt is needed.
@@ -1407,10 +1414,63 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			engagedMessage: "Blender engaged — this session is the manager.",
 			onEngage: () => {
 				managerMode.markEngaged();
-				// Force-launch the UI with the session: bypasses the stale-heartbeat
-				// guard so a Blender closed just before this is still relaunched.
-				resetBridgeLaunch();
-				ensureLiveBridgeLaunchedForce();
+			},
+		});
+
+		// /blender-watch opens the one windowed Blender this session may have.
+		//
+		// A plain registerCommand, NOT core.registerEngageCommand: watching is
+		// not engaging. It must not mark the session as the manager, and it
+		// must not send a user message, because nothing about opening a viewer
+		// is a task.
+		//
+		// At most one per session, and only here. The marker
+		// requestWatchWindowLaunch writes is what every other spawn path checks,
+		// so "only /blender-watch opens a window" is enforced by the code that
+		// would otherwise have to spawn one rather than by each caller's
+		// discipline. Other pi instances' windows are deliberately NOT
+		// inspected or counted: this session's invariant is about this session.
+		pi.registerCommand("blender-watch", {
+			description: "Open the one windowed Blender for this session, on a workspace's model.blend",
+			handler: async (args, ctx) => {
+				const workspace = args.trim();
+				try {
+					// An existing window is reused, never duplicated. With no
+					// argument that is the whole answer; with one, the window
+					// switches to that workspace's blend, which is still one
+					// window rather than a second one.
+					const alreadyOpen = isLiveBridgeAlive();
+					if (alreadyOpen && !workspace) {
+						const open = readHeartbeatBlendPath(getBlenderBridgeDir());
+						ctx.ui.notify(
+							`Already watching ${open ?? "the open blend"} — this session never has more than one window. Pass a workspace to switch it to another blend.`,
+							"info",
+						);
+						return;
+					}
+					if (!alreadyOpen) await requestWatchWindowLaunch();
+					if (workspace) {
+						await ensureWorkspaceInitialized({ cwd: ctx.cwd, workspace, continueExisting: true });
+					}
+					const manifest = workspace ? await loadWorkspaceManifest(ctx.cwd, workspace) : null;
+					if (manifest) {
+						await requestLiveBlenderOpenBlend({ blendPath: manifest.blendPath, timeoutMs: LIVE_BRIDGE_COLD_START_TIMEOUT_MS });
+					}
+					const budget = resolveRunBudget();
+					const { rssBytes } = describeMachineLimits();
+					ctx.ui.notify(
+						`Watching ${manifest ? manifest.blendPath : "the open blend"}. ` +
+							`A windowed Blender costs roughly ${(WATCH_WINDOW_RSS_BYTES / 1024 ** 3).toFixed(1)} GB resident and sits outside the headless budget; ` +
+							`${budget.effective} concurrent runs add about ${((budget.effective * rssBytes) / 1024 ** 3).toFixed(1)} GB.` +
+							(budget.clamped ? ` ${budget.warning}` : ""),
+						"info",
+					);
+				} catch (error) {
+					ctx.ui.notify(
+						`[pi-blender] could not open the watch window: ${error instanceof Error ? error.message : String(error)}`,
+						"error",
+					);
+				}
 			},
 		});
 

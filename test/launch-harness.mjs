@@ -113,13 +113,26 @@ export function countLaunches(record) {
  * whether the session has already launched a Blender is a fact the driver
  * would otherwise have to guess, and the two cases it separates are exactly the
  * ones that must not be conflated.
+ *
+ * `watchAuthorized` defaults to true because a launch only happens at all in a
+ * session that ran /blender-watch, and every guard test here is about what
+ * happens AFTER a window exists. Written here rather than by the driver, so
+ * "this session asked for a window" is a property of the SANDBOX instead of
+ * something each driver must remember to arrange. The gate suite passes false
+ * to model the session that has not asked for one; a default of false would
+ * have turned every guard test green for the wrong reason — a refactored gate
+ * that simply refused to launch anything would pass all of them.
  */
 export function runDriver(
 	driver,
 	staged,
 	args,
-	{ bridge, blender, subagentChild = false, launched = true, timeout = 60_000 },
+	{ bridge, blender, subagentChild = false, launched = true, watchAuthorized = true, timeout = 60_000 },
 ) {
+	if (watchAuthorized) {
+		mkdirSync(bridge, { recursive: true });
+		writeFileSync(join(bridge, "watch-window.json"), `${Date.now()}\n`, "utf-8");
+	}
 	return spawnSync(process.execPath, [driver, staged, ...args], {
 		env: {
 			...process.env,

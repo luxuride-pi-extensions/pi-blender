@@ -25,6 +25,7 @@ import { loadTs } from "./paths.mjs";
 
 const branch = await loadTs(`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`);
 const workspace = await loadTs(`${fileURLToPath(new URL("../blender/workspace.ts", import.meta.url))}`);
+const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
 async function blenderAvailable() {
@@ -319,6 +320,40 @@ test("an apply is recorded as a module run, so revert can restore what it replac
 		assert.equal(manifest.moduleRuns.length, 1, "the apply must leave a run record for revert to use");
 		assert.equal(manifest.moduleRuns[0].name, "body");
 		assert.ok(existsSync(manifest.moduleRuns[0].checkpointPath), "the recorded checkpoint must exist on disk");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("blender_module_run works with NO window, by branching and applying", { skip }, async () => {
+	// The default state of a session: /blender no longer opens a window, so this
+	// is the path a manager takes unless the user ran /blender-watch. Asserted
+	// here rather than in a unit test because what has to hold is that the
+	// object actually arrives in model.blend, which is a question about
+	// Blender's append semantics and not about this codebase.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "body", ADD_CUBE);
+		const before = await objectNames(ws.root, ws.blendPath);
+
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "body",
+			render: true,
+			timeoutSeconds: 300,
+		});
+
+		assert.equal(result.executionMode, "headless-apply", "with no window the run must report that it branched and applied");
+		assert.equal(result.exitCode, 0);
+		assert.notDeepEqual(await objectNames(ws.root, ws.blendPath), before, "the module's object never reached model.blend");
+		assert.ok(result.renderOutputPath && existsSync(result.renderOutputPath), "the headless path must still produce the render a critic needs");
+
+		// Revert has to work through the same record, because a headless run
+		// wrote model.blend exactly as a live one did.
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		assert.equal(manifest.moduleRuns.length, 1, "a headless module run must leave one run record");
+		assert.ok(manifest.moduleRuns[0].viaBranchApply, "the record must say it came from a branch apply, so a caller can tell the two paths apart");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

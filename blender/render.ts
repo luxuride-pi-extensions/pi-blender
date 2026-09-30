@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { requestLiveBlenderRender } from "./bridge.js";
+import { NoWatchWindowError, requestLiveBlenderRender } from "./bridge.js";
 import type {
 	BlenderRenderEngine,
 	BlenderRenderMethod,
@@ -190,38 +190,73 @@ export async function blenderRender(options: RenderOptions): Promise<RenderResul
 		}
 	}
 
-	const renderPayload =
-		normalizedConfig.renderMethod === "live"
-			? await requestLiveBlenderRender({
-					blendPath: manifest.blendPath,
+	let renderPayload: {
+		outputPath: string;
+		cameraName: string | null;
+		resolvedEngine?: string;
+		resolution: { x: number; y: number; percentage: number };
+	};
+	let effectiveRenderMethod: BlenderRenderMethod = normalizedConfig.renderMethod;
+	let fellBackToBackground = false;
+
+	if (normalizedConfig.renderMethod === "live") {
+		try {
+			renderPayload = await requestLiveBlenderRender({
+				blendPath: manifest.blendPath,
+				cameraName,
+				outputPath,
+				resolution: options.resolution,
+				samples: options.samples,
+				viewSource: normalizedConfig.viewSource,
+				viewportShading: normalizedConfig.viewportShading ?? "material-preview",
+				signal: options.signal,
+				timeoutMs: 360_000,
+			});
+		} catch (error) {
+			// A live render is a VIEWPORT render: it needs a window, and a
+			// session without one is the normal state rather than a fault. The
+			// background engine renders the same camera to the same file, so the
+			// still is produced and the only thing lost is that it is not a
+			// screenshot of the viewport. Refusing instead would mean no picture
+			// at all for a manager whose whole loop is looking at pictures.
+			//
+			// Only the ABSENCE of a window falls back. Any other failure is the
+			// real one and is propagated, because silently re-rendering after a
+			// genuine render error would hide the error behind a plausible image.
+			if (!(error instanceof NoWatchWindowError)) throw error;
+			effectiveRenderMethod = "background";
+			fellBackToBackground = true;
+			renderPayload = await runBlenderJson({
+				cwd: options.cwd,
+				blendPath: manifest.blendPath,
+				scriptSource: buildRenderScript(),
+				payload: {
 					cameraName,
+					renderEngine: mapBackgroundRenderEngine(normalizedConfig.renderEngine),
 					outputPath,
 					resolution: options.resolution,
 					samples: options.samples,
-					viewSource: normalizedConfig.viewSource,
-					viewportShading: normalizedConfig.viewportShading ?? "material-preview",
-					signal: options.signal,
-					timeoutMs: 360_000,
-				})
-			: await runBlenderJson<{
-					outputPath: string;
-					cameraName: string | null;
-					resolvedEngine?: string;
-					resolution: { x: number; y: number; percentage: number };
-				}>({
-					cwd: options.cwd,
-					blendPath: manifest.blendPath,
-					scriptSource: buildRenderScript(),
-					payload: {
-						cameraName,
-						renderEngine: mapBackgroundRenderEngine(normalizedConfig.renderEngine),
-						outputPath,
-						resolution: options.resolution,
-						samples: options.samples,
-					},
-					signal: options.signal,
-					timeoutMs: 360_000,
-				});
+				},
+				signal: options.signal,
+				timeoutMs: 360_000,
+			});
+		}
+	} else {
+		renderPayload = await runBlenderJson({
+			cwd: options.cwd,
+			blendPath: manifest.blendPath,
+			scriptSource: buildRenderScript(),
+			payload: {
+				cameraName,
+				renderEngine: mapBackgroundRenderEngine(normalizedConfig.renderEngine),
+				outputPath,
+				resolution: options.resolution,
+				samples: options.samples,
+			},
+			signal: options.signal,
+			timeoutMs: 360_000,
+		});
+	}
 
 	await writeFile(logPath, JSON.stringify(renderPayload, null, 2), "utf-8");
 
@@ -252,9 +287,13 @@ export async function blenderRender(options: RenderOptions): Promise<RenderResul
 		resolvedEngine: renderPayload.resolvedEngine ?? null,
 		resolution: renderPayload.resolution,
 		samples: options.samples ?? null,
-		renderMethod: normalizedConfig.renderMethod,
-		viewSource: normalizedConfig.viewSource,
-		viewportShading: normalizedConfig.viewportShading,
+		renderMethod: effectiveRenderMethod,
+		viewSource: fellBackToBackground ? "camera" : normalizedConfig.viewSource,
+		viewportShading: fellBackToBackground ? null : normalizedConfig.viewportShading,
 		renderEngine: normalizedConfig.renderEngine,
+		// A caller that asked for a live render and got a background one must be
+		// able to tell from the result alone, without reading the log: the two
+		// images differ in exactly the way that matters for judging them.
+		fellBackToBackground,
 	};
 }

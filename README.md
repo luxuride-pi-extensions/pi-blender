@@ -195,6 +195,14 @@ Start pi in any project dir. The extension:
   source scene brings its own setup. Studio objects live in a `Studio`
   collection under a `Studio` prefix, so they are easy to exclude from
   measurements.
+- opens NO Blender window itself. `/blender` engages the extension and makes
+  the session the manager; it does not put a window on the user's screen. The
+  one command that opens a window is `/blender-watch`, which is the only
+  authorized spawner: a window exists if and only if it asked for one, and a
+  session never has more than one. Every authoring path is headless and does
+  not need a window — `blender_module_run` runs a module against a branch copy
+  and merges the result, `blender_render` falls back to the background engine,
+  and `blender_session_context` reads the blend on disk
 - registers the `/blender` slash command — everything after `/blender`
   becomes the Blender task and engages the extension. The session it engages
   IS the manager: there is no manager subagent and no router hop, so the
@@ -358,11 +366,13 @@ Start pi in any project dir. The extension:
   `{"maxSubagentDepth": 3}` in `~/.pi/agent/extensions/subagent/config.json`
   (config, not the env var: child sessions carry a `runtime.maxDepth` that the
   env var never reaches)
-- launches a flatpak Blender UI when the user runs `/blender` (via
-  `ensureLiveBridgeLaunchedForce()`) or calls any `blender_*` tool (via the
-  lazy `ensureLiveBridgeLaunched()` path); a UI closed across /new is
-  automatically re-spawned on the next engagement, while an already-running
-  UI is left alone
+- launches a windowed Blender only when `/blender-watch` asks for it, and
+  keeps that one window alive across the session while the user wants it. A
+  `blender_*` tool call alone never opens a window, and neither does the
+  supervisor; a tool that genuinely needs a window (`blender_set_mode`,
+  `blender_geometry_probe`, `blender_read_only_python`, `blender_montage`, and
+  `blender_save_view` with `source=active-camera`) says so rather than bringing
+  one up
 
 Example prompts:
 

@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { requestLiveBlenderSessionContext } from "./bridge.js";
+import { NoWatchWindowError, requestLiveBlenderSessionContext } from "./bridge.js";
 import { findLiveOwnersOfBlend } from "./ownership.js";
 import type {
 	BlenderSessionContextCategory,
@@ -7,8 +7,132 @@ import type {
 	SessionContextResult,
 	SessionContextWarningCode,
 } from "./types.js";
-import { fileExists, LIVE_BRIDGE_TIMEOUT_MS, normalizeWorkspacePath, WARNING_SEVERITY } from "./utils.js";
+import { fileExists, LIVE_BRIDGE_TIMEOUT_MS, normalizeWorkspacePath, runBlenderJson, WARNING_SEVERITY } from "./utils.js";
 import { getManifestPath, loadWorkspaceManifest } from "./workspace.js";
+
+/**
+ * The same snapshot, read from the .blend by a headless Blender.
+ *
+ * Answers what is on DISK, which is the part a manager can act on and the part
+ * a window cannot change behind its back: which file, which scene, which
+ * camera. It deliberately does not invent the live-only sections —
+ * selection, mode and viewport are properties of a running session, and a
+ * plausible-looking answer for them would be worse than an honest null.
+ *
+ * The failure mode this guards is worth naming: without it, a session with no
+ * window has no way to read its own workspace at all, and a manager asked
+ * "what is selected" would be told to open Blender — the one thing it was told
+ * it should not do by hand.
+ */
+const HEADLESS_CONTEXT_SCRIPT = `
+import bpy, json, os
+
+scene = bpy.context.scene
+active = bpy.context.view_layer.objects.active if bpy.context.view_layer else None
+result = {
+    "blendPath": bpy.data.filepath if bpy.data.filepath else None,
+    "isSaved": bool(bpy.data.filepath),
+    # Nothing has run against this process, so the file is by construction
+    # exactly what is on disk. Claiming dirty here would be a fabrication that
+    # every caller would have to learn to discount.
+    "isDirty": False,
+    "scene": {
+        "name": scene.name if scene else None,
+        "availableScenes": [candidate.name for candidate in bpy.data.scenes],
+        "frameCurrent": int(scene.frame_current) if scene else None,
+        "activeCameraName": scene.camera.name if scene and scene.camera else None,
+    },
+    "objectCount": len(bpy.data.objects),
+}
+print("PI_BLENDER_JSON:" + json.dumps(result))
+`;
+
+interface HeadlessContext {
+	blendPath: string | null;
+	isSaved: boolean;
+	isDirty: boolean;
+	scene: {
+		name: string | null;
+		availableScenes: string[];
+		frameCurrent: number | null;
+		activeCameraName: string | null;
+	};
+	objectCount: number;
+}
+
+async function headlessSessionContext(options: SessionContextOptions): Promise<SessionContextResult> {
+	const requestedWorkspacePath = options.workspace ? normalizeWorkspacePath(options.cwd, options.workspace) : null;
+	let blendPath: string | null = null;
+	let workspacePath: string | null = null;
+	let matchesWorkspace: boolean | null = null;
+	let headless: HeadlessContext | null = null;
+	let failure: string | null = null;
+
+	// A workspace is the only way to know WHICH file to read; with no workspace
+	// there is nothing to open, which is reported rather than guessed at.
+	if (requestedWorkspacePath) {
+		const manifest = await loadWorkspaceManifest(options.cwd, options.workspace ?? requestedWorkspacePath);
+		blendPath = manifest.blendPath;
+		workspacePath = manifest.workspacePath;
+		matchesWorkspace = true;
+		try {
+			headless = await runBlenderJson<HeadlessContext>({
+				cwd: options.cwd,
+				blendPath: manifest.blendPath,
+				scriptSource: HEADLESS_CONTEXT_SCRIPT,
+				payload: {},
+				timeoutMs: options.timeoutMs,
+				signal: options.signal,
+			});
+		} catch (error) {
+			// The file sections are then reported from the manifest, which is the
+			// same path the caller asked for, rather than left as a hard failure
+			// over a probe that was a bonus.
+			failure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	const warningCodes: SessionContextWarningCode[] = [];
+	const warnings: string[] = [];
+	const warn = (code: SessionContextWarningCode, message: string): void => {
+		warningCodes.push(code);
+		warnings.push(message);
+	};
+	warn(
+		"no-watch-window",
+		"No Blender window is open, so this is a headless read of what is on disk: there is no selection, mode or viewport to report. " +
+			"Run /blender-watch for a live view. Edits still go through the headless module path.",
+	);
+	if (!requestedWorkspacePath) {
+		warn(
+			"workspace-mismatch",
+			"No workspace was named, and with no window there is no open blend to infer one from, so there is no file to read. " +
+				"Pass a workspace to read its model.blend.",
+		);
+	}
+	if (failure) {
+		warn("headless-probe-failed", `The headless read of ${blendPath ?? "the blend"} failed: ${failure}`);
+	}
+
+	return {
+		requestedWorkspacePath,
+		requestedBlendPath: blendPath,
+		workspacePath,
+		matchesWorkspace,
+		sharedWith: [],
+		warningCodes,
+		warnings,
+		file: shouldInclude(options.include, "file")
+			? { blendPath: headless?.blendPath ?? blendPath, isSaved: headless?.isSaved ?? blendPath !== null, isDirty: headless?.isDirty ?? false }
+			: null,
+		scene: shouldInclude(options.include, "scene")
+			? (headless?.scene ?? { name: null, availableScenes: [], frameCurrent: null, activeCameraName: null })
+			: null,
+		selection: null,
+		mode: null,
+		viewport: null,
+	};
+}
 
 function shouldInclude(
 	include: BlenderSessionContextCategory[] | undefined,
@@ -18,10 +142,22 @@ function shouldInclude(
 }
 
 export async function blenderSessionContext(options: SessionContextOptions): Promise<SessionContextResult> {
-	const bridgeResult = await requestLiveBlenderSessionContext({
-		signal: options.signal,
-		timeoutMs: options.timeoutMs ?? LIVE_BRIDGE_TIMEOUT_MS,
-	});
+	let bridgeResult: Awaited<ReturnType<typeof requestLiveBlenderSessionContext>>;
+	try {
+		bridgeResult = await requestLiveBlenderSessionContext({
+			signal: options.signal,
+			timeoutMs: options.timeoutMs ?? LIVE_BRIDGE_TIMEOUT_MS,
+		});
+	} catch (error) {
+		// No window is open, which is the normal state of a session that has not
+		// run /blender-watch. Selection, mode and viewport are properties of a
+		// LIVE session and have no headless equivalent, so those are honestly
+		// null; the file and scene are not, and a manager that cannot read what
+		// is on disk is blind in the one mode this extension spends most of its
+		// time in. So this reads the blend headlessly instead of failing.
+		if (!(error instanceof NoWatchWindowError)) throw error;
+		return headlessSessionContext(options);
+	}
 
 	const warnings: string[] = [];
 	const warningCodes: SessionContextWarningCode[] = [];

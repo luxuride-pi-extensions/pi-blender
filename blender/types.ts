@@ -517,7 +517,22 @@ export type SessionContextWarningCode =
 	| "shared-with-peer"
 	| "unsaved-changes"
 	| "no-viewport"
-	| "ambiguous-selection";
+	| "ambiguous-selection"
+	/**
+	 * The snapshot came from a headless read, not a live window.
+	 *
+	 * Its own code because a caller deciding whether it may trust the SELECTION
+	 * is asking a question whose answer changes with the mode, and a caller that
+	 * cannot tell the two apart would either distrust a correct answer or trust
+	 * a null one. Always present when there is no window.
+	 */
+	| "no-watch-window"
+	/**
+	 * The headless read itself failed, so the file and scene sections are from
+	 * the manifest rather than from the .blend. Separate from no-watch-window
+	 * because that one is a mode and this one is a fault.
+	 */
+	| "headless-probe-failed";
 
 export interface SaveViewOptions {
 	cwd: string;
@@ -612,6 +627,17 @@ export interface RenderResult {
 	viewSource: BlenderRenderViewSource;
 	viewportShading: BlenderViewportShading | null;
 	renderEngine: BlenderRenderEngine | null;
+	/**
+	 * A `live` render that could not run in a window and was produced by the
+	 * background engine instead.
+	 *
+	 * Its own field rather than a warning, because the caller needs to REASON
+	 * about it: a viewport screenshot and a render-engine image differ in
+	 * lighting, viewport shading and overlays, and a critic judging "is the
+	 * material right" from one and not the other is being asked a different
+	 * question. Also means `renderMethod` above is what actually ran.
+	 */
+	fellBackToBackground: boolean;
 }
 
 export interface CritiqueLogOptions {
@@ -697,6 +723,19 @@ export interface ModuleRunResult {
 	exitCode: number;
 	renderOutputPath: string | null;
 	changed: boolean;
+	/**
+	 * Where the script actually ran.
+	 *
+	 * A field rather than nothing because the two paths are not
+	 * interchangeable in what the caller may conclude: a live run mutated
+	 * model.blend in place, while `headless-apply` authored against a copy and
+	 * merged back, so an object the run did not change may still differ from
+	 * the state before it. `headless-apply` is also what happens whenever no
+	 * window is open, which after /blender stopped opening one is the DEFAULT.
+	 */
+	executionMode: "live-session" | "headless-apply";
+	/** Present when the run was a headless branch apply; what the live session did about it. */
+	liveBlenderMessage?: string;
 }
 
 export interface ModuleRevertOptions {
