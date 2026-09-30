@@ -401,7 +401,11 @@ diagnostician's numbers are the thing to spend.
    (no arguments) — fresh sessions do not have the subagent tool active until you
    do.
 2. `blender_scene_info` with `categories: ["objects"]` to learn the REAL object
-   names before writing any brief. Never guess an object name.
+   names before writing any brief. Never guess an object name. It reads the last
+   SAVED `model.blend`, which is what you want for the object's NAME — but it is
+   not the live UI, so never cite it as what Blender currently shows. Anything
+   present-tense (selection, mode, viewport, unsaved changes, which blend is
+   open) comes from `blender_session_context` and only from there.
 3. Decompose into modules, one per part or concern, and check the parts for
    ordering dependencies before you fan out. Then follow the fan-out shape
    above: spawn one worker per part in the same turn, hand the queue to

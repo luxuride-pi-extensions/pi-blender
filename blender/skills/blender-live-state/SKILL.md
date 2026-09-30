@@ -34,7 +34,26 @@ The bridge serializes all requests through a lock. Two concurrent mutating calls
 - If a bridge call times out or reports a lock, call `blender_bridge_status` before retrying: it reports whether the UI is running, whether another request holds the slot, and how many requests are pending.
 - A cold start (Blender not running) can take up to ~120 s. That is not a hang.
 
-## 4. Camera and view etiquette
+## 4. Live state vs the saved file: they are different tools, not different calls to one
+
+This is the single most expensive confusion in this workspace, so it is worth stating as a rule rather than a preference.
+
+| question | tool | why |
+| --- | --- | --- |
+| "what is selected", "update it", "what does Blender show now", "is my unsaved change there" | `blender_session_context` | reads the live UI |
+| "what objects exist", "what materials are assigned", "what is the render resolution" | `blender_scene_info` | reads the last SAVED `model.blend`, in a separate background Blender |
+
+`blender_scene_info` spawns a headless Blender on the workspace blend **as it was last written to disk**. It cannot see:
+
+- a worker's edits that are still running,
+- a change you just made in the UI but did not save,
+- anything at all in a different blend than `model.blend`.
+
+So "the scene info says the object is at the origin" and "I just moved it" are both true, and the second is newer. Asserting live state from scene info is not a close call — it is answering about a file that is one save behind.
+
+The corollary when something looks wrong: check which tool you used before you check whether the model is wrong. If the question was about live state, re-read with `blender_session_context`; the numbers from `blender_scene_info` may be correct for the file and irrelevant to the screen.
+
+## 5. Camera and view etiquette
 
 - Treat user-created views/cameras as locked unless the user asks you to change them.
 - For evaluation, create agent-owned views (`agent_eval_main`, `agent_eval_wide`, `agent_eval_detail`) and update them across iterations.

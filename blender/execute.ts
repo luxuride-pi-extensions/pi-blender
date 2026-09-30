@@ -2,7 +2,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { requestLiveBlenderExecutePython } from "./bridge.js";
 import type { ExecutePythonOptions, ExecutePythonResult } from "./types.js";
-import { fileExists, normalizeUserPath } from "./utils.js";
+import { fileExists, formatBlenderFailure, normalizeUserPath } from "./utils.js";
 import {
 	ensureWorkspaceInitialized,
 	ensureWorkspaceScriptExists,
@@ -98,7 +98,15 @@ export async function blenderExecutePython(options: ExecutePythonOptions): Promi
 		if (iteration !== null) {
 			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		}
-		throw new Error(result.stderr.trim() || result.stdout.trim() || `Blender exited with code ${result.exitCode}`);
+		// Both streams, not stderr-or-stdout: a failing script's traceback is on
+		// stderr and its own diagnostics are usually on stdout, so preferring
+		// stderr throws away the half that explains what the script was doing.
+		throw new Error(
+			formatBlenderFailure({
+				streams: { stdout: result.stdout, stderr: result.stderr },
+				subject: `Blender exited with code ${result.exitCode}`,
+			}),
+		);
 	}
 
 	return {

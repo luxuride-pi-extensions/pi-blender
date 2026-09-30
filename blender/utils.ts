@@ -140,6 +140,26 @@ export function parseJsonBlock<T>(stdout: string): T {
 	}
 }
 
+/**
+ * A Blender failure message that keeps both streams.
+ *
+ * A failing script's traceback is on stderr and its own diagnostics are almost
+ * always on stdout, because a script that prints its measurements before it
+ * discovers the problem prints them. Picking one stream discards the half that
+ * explains what the script was doing, so both are labelled and an empty stream
+ * says so rather than leaving a blank section.
+ */
+export function formatBlenderFailure(options: {
+	streams: { stdout: string; stderr: string };
+	subject: string;
+}): string {
+	const label = (name: string, value: string): string =>
+		`--- ${name} ---\n${value.trim() || "(empty)"}`;
+	return [options.subject, label("stdout", options.streams.stdout), label("stderr", options.streams.stderr)].join(
+		"\n",
+	);
+}
+
 export async function runBlenderProcess(options: {
 	cwd: string;
 	blendPath?: string;
@@ -177,7 +197,15 @@ export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise
 			signal: options.signal,
 		});
 		if (result.code !== 0) {
-			throw new Error(result.stderr.trim() || result.stdout.trim() || `Blender exited with code ${result.code}`);
+			// Both streams: this path is a headless probe with no live UI to
+			// report to, so the JSON never arrives and the streams are the only
+			// evidence of what failed.
+			throw new Error(
+				formatBlenderFailure({
+					streams: { stdout: result.stdout, stderr: result.stderr },
+					subject: `Blender exited with code ${result.code}`,
+				}),
+			);
 		}
 		return parseJsonBlock(result.stdout) as T;
 	} finally {

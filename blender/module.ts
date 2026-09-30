@@ -10,7 +10,13 @@ import type {
 	ModuleRunOptions,
 	ModuleRunResult,
 } from "./types.js";
-import { fileExists, getSavedViewCameraObjectName, LIVE_BRIDGE_INIT_TIMEOUT_MS, nowIso } from "./utils.js";
+import {
+	fileExists,
+	formatBlenderFailure,
+	getSavedViewCameraObjectName,
+	LIVE_BRIDGE_INIT_TIMEOUT_MS,
+	nowIso,
+} from "./utils.js";
 import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from "./workspace.js";
 
 const MODULE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -189,7 +195,10 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 		// Point at the script that actually ran (the preamble injection may
 		// have used the run-local copy, not the module source file).
 		throw new Error(
-			`Module "${moduleName}" script failed (exit ${result.exitCode}). The blend was not saved to the workspace, and this failed attempt was not recorded in moduleRuns (nothing to revert — model.blend still holds the pre-run state, backstopped by ${checkpointPath}).\nScript that ran: ${effectiveScriptPath}\nSource: ${scriptPath}\n${result.stderr.trim() || result.stdout.trim()}`,
+			formatBlenderFailure({
+				streams: { stdout: result.stdout, stderr: result.stderr },
+				subject: `Module "${moduleName}" script failed (exit ${result.exitCode}). The blend was not saved to the workspace, and this failed attempt was not recorded in moduleRuns (nothing to revert — model.blend still holds the pre-run state, backstopped by ${checkpointPath}).\nScript that ran: ${effectiveScriptPath}\nSource: ${scriptPath}`,
+			}),
 		);
 	}
 
