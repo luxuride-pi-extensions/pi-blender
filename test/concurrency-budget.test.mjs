@@ -131,10 +131,14 @@ test("the memory and core terms describe this machine, not a hardcoded box", () 
 	// clamp is reading a lie.
 	const result = budget();
 	assert.match(result.reasons.join("; "), new RegExp(`${cpus().length} cores at 3 per run`));
-	// The memory term is asserted on its own rather than through `reasons`,
-	// because reasons lists only BINDING terms and memory is not one here: this
-	// box has enough free RAM that it would allow ~26 runs, so its absence from
-	// the list is the correct report, not a missing term.
-	assert.equal(result.reasons.some((reason) => reason.includes("MB per run")), false);
+	// The memory term is asserted CONDITIONALLY, because whether it binds is a
+	// property of this machine at this instant, not of this code: the test suite
+	// runs eight Blenders in parallel, so free memory swings far enough to make
+	// memory the binding term on a loaded run and not on an idle one. Asserting
+	// its absence turned a real clamp report into a flake; what must hold either
+	// way is that if it is reported, it names the per-run figure.
+	if (result.reasons.some((reason) => reason.includes("per run") && reason.includes("free memory"))) {
+		assert.match(result.reasons.join("; "), /free memory at 366 MB per run allows \d+/);
+	}
 	assert.ok(freemem() > 0);
 });

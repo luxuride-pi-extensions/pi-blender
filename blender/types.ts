@@ -655,9 +655,102 @@ export interface CritiqueLogOptions {
 	materials: number;
 	completeness: number;
 	quality: number;
-	viewAdequacy: string;
+	/**
+	 * Is this a valid instance of the category at all — does it render as a
+	 * mug, not as a well-formed object with a brief's worth of its features?
+	 *
+	 * Separate from `accuracy` (which asks whether it matches ITS brief)
+	 * because the failure this catches is the one that poisons training data:
+	 * the model learns the category from whatever was shipped, so a plausible
+	 * non-instance is worse than an ugly instance. Zero means the category is
+	 * not satisfied, and nothing else about the asset can recover that.
+	 */
+	validity: number;
+	/**
+	 * Whether the render is good enough to JUDGE from: 2 shows the whole
+	 * subject and its silhouette, 1 partly occluded or ambiguous, 0 does not
+	 * show the subject.
+	 *
+	 * Scored rather than free text because it gates the critique rather than
+	 * the asset: for a mesh dataset an ugly render of a good mesh is still a
+	 * good sample, but a render that cannot show the object makes every score
+	 * below it meaningless, and an unscoreable critique must not be averaged in
+	 * as though it were.
+	 */
+	viewAdequacy: number;
+	/** Free-text note about the view, kept because the score cannot say why. */
+	viewNote: string;
 	issues: string[];
 	nextAction: string;
+	/**
+	 * Reject the asset outright, whatever the score.
+	 *
+	 * Distinct from a low score on purpose: a scored failure is still a
+	 * finished attempt, and a dataset wants the record of it. A reject says the
+	 * attempt should never have been made — the category is unsatisfiable here,
+	 * or the work is structurally wrong rather than merely unpolished.
+	 */
+	rejectReason?: string;
+}
+
+/**
+ * What happened to an asset's instruction.
+ *
+ * `present` is the interactive terminal state; `reject` is what an exhausted
+ * budget means when nobody is watching. Conflating them made every
+ * budget-exhausted failure indistinguishable from a success in the log, so a
+ * downstream filter had to re-read prose to sort them.
+ */
+export type CritiqueVerdict = "continue" | "present" | "reject";
+
+/**
+ * The fields a cross-batch ranking reads off one critique entry.
+ *
+ * Flat and separate from `CritiqueLogResult.entry` on purpose: a ranking
+ * filters and sorts these, and giving it the whole entry would mean teaching
+ * it about iterations and budgets it has no business knowing.
+ */
+/**
+ * Interchange formats the exporter dispatches to.
+ *
+ * USD is absent on purpose: no exporter is guaranteed present in a stock
+ * Blender build, and a format that silently fails on one machine is worse than
+ * one that is not offered at all.
+ */
+export type ExportFormat = "glb" | "gltf" | "obj" | "stl";
+
+export interface AssetExportOptions {
+	cwd: string;
+	workspace: string;
+	format?: ExportFormat;
+	/** Named subset to export. Omit for the whole blend. */
+	objects?: string[];
+	outputDir?: string;
+	/** Base filename without extension. Defaults to the blend's name. */
+	name?: string;
+	/** Include animation data (glTF only). */
+	animations?: boolean;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}
+
+export interface AssetExportResult {
+	workspacePath: string;
+	exportPath: string;
+	format: ExportFormat;
+	bytes: number;
+	meshCount: number;
+	objects?: string[];
+}
+
+export interface CritiqueVerdictRecord {
+	moduleName: string;
+	verdict: CritiqueVerdict;
+	score: number;
+	validity: number;
+	viewUsable: boolean;
+	iterationBudgetExceeded: boolean;
+	rejectReason?: string;
 }
 
 export interface CritiqueLogResult {
@@ -670,20 +763,33 @@ export interface CritiqueLogResult {
 	moduleName: string;
 	/** 1-based position of this critique within the module's current budget. */
 	budgetUsed: number;
-	/**
-	 * True when the 5-iteration budget for the current instruction is spent
-	 * and the score is still below the present threshold: stop iterating and
-	 * present the current state instead.
-	 */
-	iterationBudgetExceeded: boolean;
+/**
+		 * True when the module's iteration budget is spent and the score is
+		 * still below the present threshold, with no reject reason given.
+		 * Together with `verdict` this is what distinguishes a finished
+		 * attempt that failed from an asset that was abandoned.
+		 */
+		iterationBudgetExceeded: boolean;
+		/** Whether the view this was judged from was good enough to judge from. */
+		viewUsable: boolean;
+		/** How the instruction ended. See CritiqueVerdict. */
+		verdict: CritiqueVerdict;
 		accuracy: number;
 		geometry: number;
 		materials: number;
 		completeness: number;
 		quality: number;
-		viewAdequacy: string;
+		/**
+		 * Category validity, echoed because it is the only axis whose zero is
+		 * unrecoverable, so a reader scanning scores needs to see it without
+		 * also reading prose.
+		 */
+		validity: number;
+		viewAdequacy: number;
+		viewNote: string;
 		issues: string[];
 		nextAction: string;
+		rejectReason?: string;
 		loggedAt: string;
 		shouldPresent: boolean;
 	};

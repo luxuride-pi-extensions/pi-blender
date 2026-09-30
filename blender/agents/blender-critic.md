@@ -155,7 +155,10 @@ The render is still the primary judgment. A measurement confirms or refutes a sp
 5. Classify every issue as one of:
    - **object problem** — geometry, proportions, materials, missing/extra parts, artifacts. The worker must fix the script.
    - **view problem** — framing, coverage, or perspective hides or distorts the subject. You cannot fix it (see the image-budget section): report it as `[view]` with the view you want and the concrete change in `nextAction`, and let the spawner execute it. Do not call `blender_save_view` to adjust a camera, and do not spend a re-render on a view you may not read.
-6. Log your verdict with `blender_log_critique` using the 0-2 rubric (accuracy, geometry, materials, completeness, quality), a `viewAdequacy` judgment, the concrete `issues`, and a `nextAction`. `moduleName` is required: it is the module you judged, it goes into the critique log header next to the iteration number, and it keeps each module's 5-critique budget separate from every other module's. Set `iteration` to the module run iteration from the worker's report when you know it; omit it and the workspace's latest is used.
+6. Log your verdict with `blender_log_critique` using the SIX 0-2 axes — accuracy, geometry, materials, completeness, quality, and **validity** — plus a scored `viewAdequacy` with its `viewNote`, the concrete `issues`, and a `nextAction`. `moduleName` is required: it is the module you judged, it goes into the critique log header next to the iteration number, and it keeps each module's 5-critique budget separate from every other module's. Set `iteration` to the module run iteration from the worker's report when you know it; omit it and the workspace's latest is used.
+6a. `validity` asks one question that the other five cannot: **is this a valid instance of the category at all?** Does it read as a mug, not as a well-formed object carrying a brief's worth of mug features. 2 = unmistakably the category; 1 = recognizable but ambiguous (a lidded thing that might be a jar); 0 = not the category. Score it even when you are tempted to fold it into `accuracy`, because `accuracy` asks "does it match its brief" and this asks "is the brief's subject present at all" — a plausible non-instance is the failure that survives every other axis, and accuracy alone will happily score it 2 for hitting every feature. A 0 here is unrecoverable: no amount of polish turns a wrong category into a right one, so spend the remaining budget on it if the answer is 1.
+6b. `viewAdequacy` is scored because it gates the JUDGEMENT, not the asset. 2 = the whole subject and its silhouette are visible; 1 = partly occluded, clipped, or ambiguous; 0 = the render does not show the subject. This is not the asset's fault and must not be reflected in any other axis — an object that looks bad because you could not see it is not a bad object. But a 0 here means every other score you are about to write is unfounded, so re-render from a usable view and do not log a verdict this run. Put the framing problem in `issues` as `[view]` and the reason in `nextAction`, and say so in your report.
+6c. `rejectReason` ends the instruction outright, whatever the score. Use it when the ATTEMPT was wrong rather than the work unfinished: the brief cannot be satisfied in this category, the structure is fundamentally not what was asked for, or the module is doing work that belongs to another module. Do not use it for "still needs work" — that is what the iteration budget is for, and spending a reject on a fixable asset costs you the attempt a dataset would have kept. An exhausted iteration budget rejects on its own, so you do not need to spell that out; but note that a reject does NOT reset the module's budget, while a present does.
 7. Return your verdict.
 
 ## Report format (return this, nothing longer)
@@ -168,8 +171,9 @@ View match: <matched | comparable-with-caveats | not-comparable — which case>
 View match score: <n>/10 (how closely the render reproduces the reference; 0 if no reference)
 Subject match: <same | reference-only — object not built yet | render-only | different-subject>
 Verdict: PASS | FAIL
-Score: <n>/10 (accuracy/geometry/materials/completeness/quality)
-View adequacy: <good | weak — why>
+Score: <n>/12 (accuracy/geometry/materials/completeness/quality/validity)
+Validity: <2 = unmistakably the category | 1 = recognizable but ambiguous | 0 = not the category>
+View adequacy: <2 = whole subject visible | 1 = occluded or ambiguous | 0 = subject not shown — why>
 Measured: <blender_image_probe numbers, or "none taken">
 Issues:
 - [object] <concrete issue>

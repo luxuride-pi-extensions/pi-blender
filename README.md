@@ -377,6 +377,20 @@ Start pi in any project dir. The extension:
   is showing, which has no meaning in a process with no screen. Those two
   refuse and name `/blender-watch` instead of opening a window behind the
   user's back
+- exports the workspace blend to an interchange format with
+  `blender_export_asset` (`glb`, `gltf`, `obj`, `stl`), headlessly and
+  read-only. USD is deliberately not offered: no exporter is guaranteed in a
+  stock Blender build, and a format that silently fails on one machine is worse
+  than one not offered. glTF export applies modifiers, so the training geometry
+  is the geometry that was rendered
+- ranks a batch against itself with `blender_rank_assets`, reading
+  `critique.log` for structure only — never for prose. An absolute threshold
+  can say whether an asset is good enough; it cannot say whether it is the best
+  of a thousand, and the 60th-vs-95th-percentile gap is invisible to a rubric
+  that has only seen one asset at a time. Only presented, usable-view entries
+  are eligible, and `topFraction` (default 0.1) takes the slice. The report
+  warns when rejects outnumber presents, because that points at the brief
+  rather than at the assets
 
 Example prompts:
 

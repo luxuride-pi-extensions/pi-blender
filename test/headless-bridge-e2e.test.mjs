@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,8 @@ const load = (name) => loadTs(join(REPO, name));
 
 const bridge = await load("blender/bridge.ts");
 const geometryProbe = await load("blender/geometry-probe.ts");
+const exportAsset = await load("blender/export-asset.ts");
+const ranking = await load("blender/ranking.ts");
 const readonly = await load("blender/readonly.ts");
 const montage = await load("blender/montage.ts");
 const workspace = await load("blender/workspace.ts");
@@ -145,6 +147,26 @@ test("a geometry probe finds a real gap between two objects with no window", { s
 	}
 });
 
+/** A critique.log block exactly as blenderLogCritique writes one. */
+function block(module, { score, validity, view = 2, decision }) {
+	return [
+		`[2026-01-01T00:00:00.000Z] iteration_01 module=${module} budget 1/5`,
+		`Score: ${score}/12`,
+		"Accuracy: 2/2",
+		"Geometry & Proportions: 2/2",
+		"Materials & Appearance: 2/2",
+		"Completeness: 2/2",
+		"Quality: 2/2",
+		`Category validity: ${validity}/2`,
+		`View adequacy: ${view}/2 — fine`,
+		"Issues:",
+		"- none",
+		"Next action: present",
+		decision,
+		"",
+	].join("\n");
+}
+
 test("a read-only script runs with no window, and is still refused the mutating half", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {
@@ -201,6 +223,109 @@ test("a montage renders its panels headless", { skip }, async () => {
 			["Subject"],
 			"the sheet framed something other than what was asked for, which is the failure a fixed orbit is supposed to prevent",
 		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an asset exports to glTF headlessly, and the file is really there", { skip }, async () => {
+	// The claim this whole feature makes is that the asset leaves Blender. A
+	// reported path is not an asset, so the assertion is that a file exists with
+	// a GLB header and the blend is untouched.
+	const ws = await makeWorkspace();
+	try {
+		await addBox(ws, "Subject", 0);
+		const out = join(ws.workspacePath, "exports");
+		const result = await exportAsset.blenderExportAsset({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			format: "glb",
+			objects: ["Subject"],
+			outputDir: out,
+			name: "subject",
+		});
+
+		assert.equal(result.format, "glb");
+		assert.ok(existsSync(result.exportPath), `no export at ${result.exportPath}`);
+		assert.ok(result.bytes > 0, "an export of zero bytes is a path, not an asset");
+		// GLB is a binary container: the ASCII magic "glTF" then version 2.
+		assert.equal(readFileSync(result.exportPath).subarray(0, 4).toString("ascii"), "glTF");
+		assert.equal(result.meshCount >= 1, true);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("exporting a named object the blend does not have fails by name", { skip }, async () => {
+	// Silently exporting the whole blend instead of the requested subset is the
+	// failure this catches: it fills a dataset with studio cameras and lights
+	// while the caller believes it selected the asset.
+	const ws = await makeWorkspace();
+	try {
+		await addBox(ws, "Subject", 0);
+		await assert.rejects(
+			() =>
+				exportAsset.blenderExportAsset({
+					cwd: ws.root,
+					workspace: ws.workspacePath,
+					format: "glb",
+					objects: ["Subject", "Nonexistent"],
+					outputDir: join(ws.workspacePath, "exports"),
+				}),
+			/Nonexistent/,
+			"an export that cannot find what it was asked for must name it, not proceed with something else",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an unsupported format is refused before Blender is ever spawned", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		await assert.rejects(
+			() =>
+				exportAsset.blenderExportAsset({
+					cwd: ws.root,
+					workspace: ws.workspacePath,
+					format: "usd",
+					outputDir: join(ws.workspacePath, "exports"),
+				}),
+			/Unsupported export format/,
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the ranking keeps the best slice and says why when it cannot", { skip }, async () => {
+	// A ranking is only useful if it refuses to pretend: a batch with nothing
+	// presented has no selection, and saying so is the answer.
+	const ws = await makeWorkspace();
+	try {
+		const log = join(ws.workspacePath, "critique.log");
+		writeFileSync(
+			log,
+			[
+				block("chair-a", { score: 9, validity: 2, decision: "Decision: present to user" }),
+				block("chair-b", { score: 12, validity: 2, decision: "Decision: present to user" }),
+				block("chair-c", { score: 11, validity: 1, decision: "Decision: present to user" }),
+				block("stool", { score: 12, validity: 0, decision: "Decision: REJECT — the brief asked for a chair" }),
+				block("table", { score: 12, validity: 2, decision: "Decision: present to user" }),
+				"",
+			].join(""),
+			"utf-8",
+		);
+		const result = await ranking.blenderRankAssets({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			topFraction: 0.4,
+		});
+
+		assert.equal(result.eligible, 4, "four presented assets; the rejected stool is not one of them");
+		assert.equal(result.selected.length, 2);
+		assert.deepEqual(result.selected.map((a) => a.moduleName), ["chair-b", "table"], "two 12s, and the tie breaks on the name because both are equally valid");
+		assert.equal(result.counts.reject, 1);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

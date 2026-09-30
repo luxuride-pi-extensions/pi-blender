@@ -32,6 +32,11 @@ from readonly_guard import ReadOnlyViolation, read_only_run  # pyright: ignore[r
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import montage  # pyright: ignore[reportMissingImports]
 
+# The interchange exporters. Separate for the same reason as montage: the format
+# table and the sanitising are separable from request plumbing.
+# pi-lens-ignore: ast-grep:unresolved-import-python
+import export_asset  # pyright: ignore[reportMissingImports]
+
 BRIDGE_DIR = os.environ.get("PI_BLENDER_BRIDGE_DIR") or os.path.join(
     # Same XDG convention config.ts uses for its own default. This is only
     # reached when Blender was started BY HAND with --python live-bridge.py and
@@ -1751,6 +1756,12 @@ def handle_request(request):
         return handle_geometry_probe(request)
     if request_type == "montage":
         return handle_montage(request)
+    if request_type == "export":
+        # The opener is passed in rather than imported: opening the blend belongs
+        # to the session this bridge owns, and export_asset is also runnable
+        # outside it (the exporter's own tests), where there is no opener to
+        # import from.
+        return export_asset.handle_export(request, ensure_requested_blend_open)
     if request_type == "open-blend":
         return handle_open_blend(request)
     if request_type == "reload-blend":

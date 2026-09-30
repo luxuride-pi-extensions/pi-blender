@@ -51,6 +51,8 @@ import {
 	blenderGeometryProbe,
 	blenderImageProbe,
 	blenderLogCritique,
+	blenderRankAssets,
+	blenderExportAsset,
 	blenderModuleRevert,
 	blenderModuleRun,
 	blenderMontage,
@@ -72,6 +74,7 @@ import {
 	resolveRunBudget,
 	WATCH_WINDOW_RSS_BYTES,
 } from "./blender/runtime.js";
+import type { AssetExportOptions } from "./blender/types.js";
 import { isLiveBridgeAlive } from "./launch.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { requestWatchWindowLaunch, restartBridgeSupervisor } from "./launch.js";
@@ -190,6 +193,8 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_session_context",
 	"blender_bridge_status",
 	"blender_log_critique",
+	"blender_rank_assets",
+	"blender_export_asset",
 ]);
 
 /** Image types `read` would attach to the request, mirroring pi's own sniffing. */
@@ -901,7 +906,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_log_critique",
 			label: "Blender Log Critique",
 			description:
-				"Append a structured critique entry to the workspace critique.log using the 0-10 Blender iteration rubric, plus a view adequacy judgment for the current render perspective.",
+				"Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric: five 0-2 craft axes plus a 0-2 category-validity axis, a 0-2 view adequacy that gates whether the judgement counts at all, and an optional rejectReason. Resolves a verdict (continue / present / reject) and records it, so blender_rank_assets can select across a batch without re-reading prose.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -941,9 +946,20 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					minimum: 0,
 					maximum: 2,
 				}),
-				viewAdequacy: Type.String({
+				validity: Type.Number({
 					description:
-						"Non-scored judgment of whether the current render view is good enough for evaluation, including any framing, coverage, or perspective problems.",
+						"Is this a valid instance of the CATEGORY at all -- does it read as a mug, not as a well-formed object carrying a brief's worth of mug features? Separate from accuracy, which asks whether it matches its brief. Zero means the category is not satisfied, and no amount of polish recovers that.",
+					minimum: 0,
+					maximum: 2,
+				}),
+				viewAdequacy: Type.Number({
+					description:
+						"Can the asset be judged FROM this render? 2 = the whole subject and its silhouette are visible, 1 = partly occluded or ambiguous, 0 = the render does not show the subject. Scored because it gates the JUDGEMENT, not the asset: an ugly render of a good mesh is still a good sample, but a render that cannot show the object makes every other score meaningless, so an unusable view never presents.",
+					minimum: 0,
+					maximum: 2,
+				}),
+				viewNote: Type.String({
+					description: "Free text on the framing, coverage, or perspective, kept because the score cannot say why.",
 				}),
 				issues: Type.Array(
 					Type.String({
@@ -951,8 +967,14 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					}),
 				),
 				nextAction: Type.String({
-					description: 'Either a fix to attempt next or "present to user" when the result is good enough.',
+					description: 'Either a fix to attempt next, or "present to user" when the result is good enough.',
 				}),
+				rejectReason: Type.Optional(
+					Type.String({
+						description:
+							"Reject the asset outright, whatever it scored. Use this when the ATTEMPT was wrong -- the category is unsatisfiable from this brief, or the structure is fundamentally not what was asked for -- rather than merely unpolished. Distinct from a low score on purpose: a scored failure is a finished attempt worth keeping the record of, and this says it should never have been made.",
+					}),
+				),
 			}),
 			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 				const result = await blenderLogCritique({
@@ -965,13 +987,118 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					materials: params.materials,
 					completeness: params.completeness,
 					quality: params.quality,
+					validity: params.validity,
 					viewAdequacy: params.viewAdequacy,
+					viewNote: params.viewNote,
 					issues: params.issues,
 					nextAction: params.nextAction,
+					rejectReason: params.rejectReason,
 				});
 
 				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_rank_assets",
+			label: "Blender Rank Assets",
+			description:
+				"Rank a batch against ITSELF and return the best slice. An absolute threshold can say whether an asset is good enough; it can never say whether it is the best of a thousand, and the gap between the 60th and 95th percentile is invisible to a rubric that only ever sees one asset at a time. Reads critique.log's STRUCTURE (never its prose), keeps each module's latest judgement, ranks only presented assets judged from a usable view, and returns the top fraction best-first plus per-verdict counts and batch-level warnings. Use this before shipping a batch for training or curation: when rejects outnumber presents, the brief is usually wrong rather than the assets.",
+			parameters: Type.Object({
+				workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+				topFraction: Type.Optional(
+					Type.Number({
+						description:
+							"Fraction of ELIGIBLE assets to keep, 0..1, default 0.1. A batch of 100 with a 0.1 slice returns the best 10. Always at least one asset is kept, so a batch of 3 returns its best rather than nothing.",
+					}),
+				),
+				minScore: Type.Optional(
+					Type.Number({
+						description:
+							"Score an asset must reach before it may be ranked at all, default 0. The verdict already gates on the present threshold; raise this only to keep borderline-but-presented assets out of a slice.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderRankAssets({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					topFraction: params.topFraction,
+					minScore: params.minScore,
+				});
+
+				const lines = [
+					`${result.selected.length} of ${result.eligible} eligible asset(s), top ${Math.round(result.topFraction * 100)}%:`,
+					...result.selected.map(
+						(asset) => `  ${asset.rank}. ${asset.moduleName} — ${asset.score}/12, validity ${asset.validity}/2 (${Math.round(asset.relativeScore * 100)}% of best)`,
+					),
+					`Verdicts: ${result.counts.present} present, ${result.counts.reject} reject, ${result.counts.continue} mid-iteration`,
+					...result.warnings.map((warning) => `Warning: ${warning}`),
+				];
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_export_asset",
+			label: "Blender Export Asset",
+			description:
+				"Export the workspace blend to an interchange format: glb or gltf (materials, scene graph, modifiers applied) or obj (geometry, UVs, materials) or stl. This is what makes the asset leave Blender at all -- .blend is not an interchange format and no training pipeline reads it. Works headlessly. Pass `objects` to export a named subset, which is how you keep the studio rig out of a dataset. Read-only with respect to model.blend: the exporter writes a new file and never saves back.",
+			parameters: Type.Object({
+				workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+				format: Type.Optional(
+					Type.String({
+						description: "glb (default, single file), gltf (separate .bin and textures), obj, or stl. USD is not offered because no exporter is guaranteed present in a stock Blender build.",
+						enum: ["glb", "gltf", "obj", "stl"],
+					}),
+				),
+				objects: Type.Optional(
+					Type.Array(Type.String(), {
+						description:
+							"Names to export, when given. Omit for the whole blend. Naming the asset's own objects is how a studio camera and three lights stay out of the dataset.",
+					}),
+				),
+				outputDir: Type.Optional(
+					Type.String({
+						description: "Directory for the exported file. Defaults to the blend's own directory.",
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description: "Base filename, without extension. Defaults to the blend's name. Sanitised, since it usually comes from a prompt.",
+					}),
+				),
+				animations: Type.Optional(
+					Type.Boolean({
+						description: "Include animation data (glTF only). Default false.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderExportAsset({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					format: params.format as AssetExportOptions["format"],
+					objects: params.objects,
+					outputDir: params.outputDir,
+					name: params.name,
+					animations: params.animations,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Exported ${result.format} to ${result.exportPath} (${result.bytes} bytes, ${result.meshCount} mesh(es)).`,
+						},
+					],
 					details: result,
 				};
 			},
