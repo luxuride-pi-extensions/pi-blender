@@ -67,6 +67,18 @@ and report; do not edit and re-run. Fixing a script is the worker's job, and
 a runner that silently repairs scripts destroys the record of what the worker
 actually wrote.
 
+Each entry's render must come from the module's OWN camera, not the shared one.
+Pass the module's camera object name as the view; a render from `model.blend`'s
+camera is aimed at the origin and, on a multi-part build, at nothing at all. If
+an entry names no camera, say so in your report rather than rendering a view
+that will be judged for framing.
+
+`model.blend` is merged after every run, not once at the end of the queue. That
+is what makes a watch window worth having: the build accumulates in front of the
+user as it goes, and a run that is about to be followed by another is visible
+before it is finished. A contested merge is reported, not resolved, and the
+queue continues with the modules that do not contest.
+
 ## The contamination check
 
 This is the part that earns your keep. A module that touches an object it does

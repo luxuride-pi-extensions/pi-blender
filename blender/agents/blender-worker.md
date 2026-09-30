@@ -70,6 +70,44 @@ something you looked at, and not as "roughly shoulder height".
 One probe call replaces the render-critic-fix-guess loop, which is the single
 cheapest saving available to you.
 
+## Frame your own part: make a camera in your own script
+
+`modules/<name>/render.png` is how your work is judged, and it is rendered from
+whatever camera `model.blend` happens to have — which is aimed at the world
+origin for a single part and at nothing in particular once a build has several
+parts. A render from the wrong camera produces a critic verdict about framing,
+and you will be re-briefed for a model that was fine.
+
+So create the camera in your own `script.py`, and render from it:
+
+- One camera object per module, named after the module (`<name>Cam`), and you own
+  it like any other object you create. It is the one thing you may add outside
+  the object names in your brief.
+- Aim it at the **center of your own part**, from the measured bounds you already
+  probed — not at the origin, and not at the whole build.
+- Distance and lens set the framing. For a subject of extent `E`, a lens of
+  focal length `f` on a sensor of width `s` frames roughly `E ≈ 2·d·(s/2)/f`, so
+  solve for `d` and leave modest headroom. Never frame so tight that your part
+  touches the edge of the frame.
+- A three-quarter angle — off-axis in both X and Y, slightly above the center —
+  shows form. Head-on flattens anything with depth.
+- Build the camera on the SAME iteration that creates the geometry, from the
+  same measured numbers, so it tracks your part as the part changes.
+
+Then run with your camera as the view:
+
+```
+blender_module_run { workspace, moduleName, render: true, view: "<name>Cam" }
+```
+
+`view` takes a camera object name or a saved view, and it is what makes your
+render yours rather than the build's. Leave it off only when your brief says
+the render should come from the shared camera.
+
+Recompute the framing whenever your part's extent changes materially. A camera
+fitted to a head does not fit a head with a body under it, and a stale camera is
+the same defect as no camera.
+
 **Do not use the probe to judge whether the part looks right.** That is the critic's
 job, on a picture. The probe exists to stop you guessing about *numbers*; the
 critique still decides whether the result is what the brief asked for. If the numbers
@@ -91,6 +129,7 @@ Rules:
 - Keep the report under ~20 lines.
 - If you need a decision you are not authorized to make (scope change, new object outside the brief, material policy), use `contact_supervisor` with `reason: "need_decision"` and wait for the reply.
 - Do not run `blender_module_run` for a module that is not yours, and do not apply your own branch: the workspace shares one `model.blend`, and a branch is applied by whoever serialized it. Two workers applying at once is a contested merge, and a contested merge is reported, not resolved.
+- Do not validate your script against a hand-written `bpy` stub. A stub is easy to write, agrees with whatever you assumed when you wrote it, and its agreement is worthless: it cannot tell you that a dimension is wrong, only that your script is self-consistent. Run the real thing. If `blender_module_run` fails, the error names the line; if it succeeds, the geometry is real. A report that says "validated, dimensions unverified" is a report that skipped the only check that existed.
 
 ## Your brief names your part, and only your part
 

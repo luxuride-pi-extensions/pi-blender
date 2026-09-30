@@ -120,6 +120,55 @@ obj = bpy.data.objects.get("Mug")
 obj.location.x = 5.0
 `;
 
+/**
+ * A module that builds its own geometry AND its own camera, aimed at the
+ * geometry rather than at the world origin. This is the shape the worker prompt
+ * now requires, and it is the only way a per-module render is framed on the
+ * part instead of on whatever `model.blend`'s shared camera happens to point at.
+ */
+const CUBE_WITH_OWN_CAMERA = `
+import bpy
+from mathutils import Vector
+bpy.ops.mesh.primitive_cube_add()
+obj = bpy.context.object
+obj.name = "Mug"
+
+min_corner = Vector((min(v.co[i] for v in obj.data.vertices) for i in range(3)))
+max_corner = Vector((max(v.co[i] for v in obj.data.vertices) for i in range(3)))
+for i in range(3):
+    min_corner[i] += obj.location[i]
+    max_corner[i] += obj.location[i]
+center = (min_corner + max_corner) / 2.0
+extent = max(max_corner[i] - min_corner[i] for i in range(3))
+
+data = bpy.data.cameras.new("MugCam")
+data.lens = 50.0
+cam = bpy.data.objects.new("MugCam", data)
+bpy.context.scene.collection.objects.link(cam)
+distance = extent * 2.0
+cam.location = center + Vector((distance, -distance, distance * 0.5))
+cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
+bpy.context.scene.camera = cam
+`;
+
+/** The camera a blend file would render from, by name. */
+async function activeCameraName(cwd, blendPath) {
+	const utils = await loadTs(fileURLToPath(new URL("../blender/utils.ts", import.meta.url)));
+	return await utils.runBlenderJson({
+		cwd,
+		blendPath,
+		scriptSource: `
+import bpy, json, sys
+json.loads(sys.argv[sys.argv.index("--") + 1])
+print("__PI_BLENDER_JSON_START__")
+print(json.dumps(bpy.context.scene.camera.name if bpy.context.scene.camera else None))
+print("__PI_BLENDER_JSON_END__")
+`,
+		payload: {},
+		timeoutMs: 120_000,
+	});
+}
+
 test("a branch run stages changes WITHOUT touching model.blend", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {
@@ -354,6 +403,43 @@ test("blender_module_run works with NO window, by branching and applying", { ski
 		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
 		assert.equal(manifest.moduleRuns.length, 1, "a headless module run must leave one run record");
 		assert.ok(manifest.moduleRuns[0].viaBranchApply, "the record must say it came from a branch apply, so a caller can tell the two paths apart");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a module's own camera survives the apply, and renders from it", { skip }, async () => {
+	// The per-module review loop depends on two things holding at once: the
+	// camera the worker authored travels into model.blend with its geometry, so
+	// the user's window can be pointed at it, and a run naming that camera
+	// renders from it instead of the shared studio camera. If the camera were
+	// dropped by the apply it would simply not exist for anyone to point at, and
+	// a render ignoring the name would silently fall back to the studio framing.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "mug", CUBE_WITH_OWN_CAMERA);
+
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "mug",
+			render: true,
+			view: "MugCam",
+			timeoutSeconds: 300,
+		});
+
+		assert.equal(result.exitCode, 0);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.ok(names.includes("Mug"), "the geometry must reach model.blend");
+		assert.ok(names.includes("MugCam"), "the module's camera must reach model.blend too, or the window and the critic see different framings");
+
+		const active = await activeCameraName(ws.root, ws.blendPath);
+		assert.equal(active, "StudioCamera", "a module must not hijack the shared scene camera: the apply brings datablocks across, not the scene's pointers, and the studio camera is what a whole-build render wants");
+
+		assert.ok(result.renderOutputPath && existsSync(result.renderOutputPath));
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		const recorded = manifest.renderOutputs.at(-1);
+		assert.equal(recorded?.view, "MugCam", "the manifest must record which view produced the render, so a later critic is not handed the wrong one");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

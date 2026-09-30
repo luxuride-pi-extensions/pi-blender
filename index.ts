@@ -167,17 +167,43 @@ const BLENDER_MANAGER_ROSTER = new Set([
  * The previous list was `memory_*` and `scratchpad`, neither of which any
  * installed package provides, so the gate refused every tool the manager
  * actually has.
+ *
+ * The context tools are a different kind of entry from the rest. Everything else
+ * here is a tool this repo registers or a package that ships it; `compress` and
+ * its siblings come from a plugin the host may or may not have loaded. Listing
+ * a tool the session does not have is harmless — a tool call that names an
+ * absent tool is never made, and nothing here asserts its existence — while
+ * omitting one that IS present is how a manager spends a 100k-context session
+ * re-reading a build it already summarized.
  */
 const MANAGER_ALLOWED_TOOL_NAMES = new Set([
-	// Delegation, supervision, and the two halves of waiting: bg_wait blocks on
-	// this session's own async runs, subagent_supervisor answers a child that
-	// needs a decision. Both belong to pi-subagents, not to an index.ts, so a
-	// deny-by-default gate has to name them here.
+	// The two halves of waiting: bg_wait blocks on this session's own async
+	// runs, subagent_supervisor answers a child that needs a decision. Both
+	// belong to pi-subagents, not to an index.ts, so a deny-by-default gate has
+	// to name them here.
 	"subagent",
 	"subagents_enable",
 	"bg_wait",
 	"subagent_supervisor",
 	"contact_supervisor",
+	// Context management, from the ambient billion-context plugin. A manager is
+	// the one role in a Blender session whose transcript grows without bound:
+	// workers and critics each get a fresh context, but the manager reads every
+	// report, every verdict and every diff for the whole build, and a directed
+	// generation run is dozens of modules. It is also the only role that can
+	// afford it — compressing early is what makes a long run finish, and it is
+	// the integrator's own memory rather than anyone else's.
+	//
+	// These are named here because the gate is deny-by-default, and the gate is
+	// the only thing standing between a manager and an unbounded transcript. The
+	// plugin is ambient: it is loaded for the session, not declared in a
+	// template's `extensions:`, which is the same arrangement as
+	// `ask_user_question` below.
+	"compress",
+	"decompress",
+	"search_context",
+	"acp_status",
+	"acp_cache",
 	// Planning and reading agent definitions to write a brief with.
 	"todo",
 	"read",

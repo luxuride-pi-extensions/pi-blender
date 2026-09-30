@@ -184,7 +184,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (16 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (20 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -305,6 +305,16 @@ Start pi in any project dir. The extension:
   EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT,
   FACE_PAINT, or UV (edit mode + viewport UV editor overlay)
 - `blender_module_run` / `blender_module_revert` support modular multi-part
+  builds. `blender_branch_run` / `blender_branch_apply` are the two halves of
+  that exposed directly: run a module against a private `branch.blend`
+  headlessly, with no bridge lock and no live session, then merge the staged
+  branches back into `model.blend` in one serialized call that reports any
+  contested datablock rather than auto-resolving it.
+- `blender_rank_assets` reads a workspace's `critique.log` and keeps the best
+  slice of a batch by score — an absolute verdict can say "good enough" but only
+  ranking over a batch can say "best of these fifty". `blender_export_asset`
+  writes `glb`/`gltf`/`obj`/`stl`, which is what makes an asset leave Blender at
+  all; pass `objects` to keep the studio rig out of a dataset.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
   `modules/<name>/render.png` (with `viewportShading`/`resolution`/`samples`
