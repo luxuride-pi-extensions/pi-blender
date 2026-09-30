@@ -177,6 +177,48 @@ modules, checking for ordering dependencies, deciding whether the parts need a
 merge, and the final presentation. Nothing else is a barrier, and a barrier you
 insert at "all workers reported" is one round trip you did not need.
 
+## Fill the budget you actually have
+
+The honest count above decides **what** to fan out. This decides **how wide**,
+and the answer is: as wide as the machine allows, never narrower than your
+honest count and never wider than the budget.
+
+`blender_bridge_status` reports the headless run budget — `requested` is the
+ceiling you asked for, `effective` is what the machine will actually run, and
+`clamped` says the machine said no. Read `effective`. On a build where the parts
+are genuinely independent, the width you want is `effective`, not the number of
+parts you happened to think of, and not one.
+
+- **Author wide, run wide.** With no window open, workers both author AND run,
+  headlessly, in their own processes. So a turn that spawns four workers when
+  six would fit leaves two slots idle for the whole build, and a build of nine
+  modules run four at a time is nine modules' worth of latency for no reason.
+- **If the parts genuinely number fewer than the budget, the budget is not an
+  invitation to invent work.** Two real parts is two workers. Fanning out to
+  fill a number is how a mug becomes a mug, a saucer, a spoon and a third
+  ornament nobody asked for — and every extra part is a merge, a critic, a
+  verdict and a task you now own. Width is a ceiling you may reach, not a quota
+  you must meet.
+- **The pool that actually fills up is critics, not workers.** By the time
+  anything is worth judging there are more renders than turns, and a critic
+  costs a fresh context and one image. When several modules are waiting to be
+  judged, judge them in ONE turn — one async critic each, not a sequence of
+  single spawns. A build that fans out its workers and then judges them one at
+  a time has parallelized the cheap half of the work.
+- **Never over-subscribe the runs.** More concurrent runs than `effective` does
+  not go faster; they queue inside the gate, and a queued run holds a slot while
+  it waits, so a burst past the ceiling makes every run slower and reports
+  contention you then have to diagnose. The budget is a measurement, not a
+  suggestion.
+- **With a window open, width buys authoring only.** The runs still serialize on
+  that one session, so extra workers mostly add briefs and contexts; the honest
+  count is then the better number. Say so in your own reasoning rather than
+  fanning out and hoping.
+
+The point of maximizing parallelism is not the width. It is that a slot left
+idle is wall-clock nobody gets back, and a critic run behind another critic is
+latency the user watches.
+
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 rendered from its own camera, judged, re-briefed and run again — and each of
 those runs lands in `model.blend` as it happens, so a watch window shows the
@@ -272,7 +314,8 @@ number to consult instead. What caps the width is the budget: with no window,
 authoring and running are both parallel, so fan out up to what
 `blender_bridge_status` reports it will allow; with a window open, the runs
 serialize, and a sixth worker is not six times faster than a fourth — it is one
-more context and one more brief, all waiting on the same lock.
+more context and one more brief, all waiting on the same lock. "Fill the budget
+you actually have" below says how to read that number.
 
 So do not read a wider fan-out as free because the merge is serialized. That
 serialization is a property of the BLEND, not a licence to add workers: it
@@ -564,12 +607,13 @@ diagnostician's numbers are the thing to spend.
    open) comes from `blender_session_context` and only from there.
 3. Decompose into modules, **one model each** — a brief naming two objects is
    two briefs — and check the parts for ordering dependencies before you fan
-   out. Then follow the fan-out shape
-   above: spawn one async worker per independent part in the same turn and stop
-   that turn, then handle each module as its own report arrives — spawn its
-   critic, record its task, move on. A lock-wait error naming the holder is a
-   concurrency mistake to fix, not a crash to retry — and with the runner in
-   place it should not happen at all.
+   out. Read `blender_bridge_status` for `effective`, and fan out as wide as
+   that allows: with no window, worker authoring AND headless runs are both
+   parallel, so spawn every independent part as an async run in one turn and
+   stop that turn. A lock-wait error naming the holder is a concurrency mistake
+   to fix, not a crash to retry — and with the runner in place it should not
+   happen at all. Never spawn past `effective`: a queued run holds its slot and
+   makes every run slower.
 4. Spawn a worker with a compact brief: goal, **the one model it OWNS** (name the
    objects that make up that model, and the model is one thing), the rule that it
    touches nothing else, that it creates a camera for its own
@@ -580,7 +624,10 @@ diagnostician's numbers are the thing to spend.
 5. Spawn a fresh critic on the render, read the verdict, decide: accept, issue a
    follow-up brief, or spawn the diagnostician. Do this for the module whose
    report you are holding, and return to the others afterwards — a module mid
-   critique is not a reason to pause the build. A verdict that is about `[view]`
+   critique is not a reason to pause the build. **When several modules are waiting
+   to be judged, judge them in one turn, one async critic each**: the critic pool
+   is usually the larger one, and judging serially parallelizes the cheap half of
+   the work only. A verdict that is about `[view]`
    rather than the part is a camera problem: name the fix in the follow-up brief
    rather than re-briefing the geometry. At most 5 iterations per user
    instruction. **If two consecutive iterations return the same failure, stop
