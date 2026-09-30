@@ -156,13 +156,20 @@ So the shape of a multi-part build is:
 When a build is a SINGLE part, keep the old shape — one worker, one critic — and
 do not add a runner for a queue of one.
 
-### Fan-out width is a direct multiplier on total cost
+### What actually costs you, and what the machine costs you
 
-Every worker you spawn is a full context of its own, and it is paid for whether
-or not it succeeds. Latency is the thing fan-out actually buys, and it is real
-— but tokens are what a run spends, and N workers cost N contexts plus N
-briefs. Two workers for a job two workers can do is the win. Five for a job
-three can do is a 67% overhead you chose.
+Two different budgets, and conflating them is the mistake.
+
+**Yours** is context: every worker is a full context of its own, paid for
+whether or not it succeeds. Latency is what fan-out buys, and tokens are what
+it spends, so N workers cost N contexts plus N briefs.
+
+**The machine's** is headless Blender processes. `blender_bridge_status`
+reports the resolved headless budget, and it is almost always lower than the
+number you would have guessed: the request is 16, and the effective count is
+whatever cores and free memory allow, capped at the 4-way concurrency this
+project has actually measured. Read that number before sizing a fan-out rather
+than assuming the default is the count.
 
 So before fanning out, count honestly and prefer the narrower decomposition:
 
@@ -173,9 +180,14 @@ So before fanning out, count honestly and prefer the narrower decomposition:
 - Do any of these parts share a decision? If part B only makes sense once you
   have seen part A come out right, that is not fan-out, it is sequence. Fan out
   only what is genuinely independent.
-- Four concurrent workers already saturate the point of concurrency. Past four
-  you are paying linear cost for no wall-clock gain, because execution is
-  serialized by the runner anyway.
+
+Then the width is the answer those two questions give you, and there is no
+number to consult instead. In particular, do not treat a wider fan-out as free
+because runs are serialized — that serialization is a property of the BLEND, not
+a licence to add workers. It exists because every run needs the one live
+Blender session, and `blender-script-runner` exists solely to hold that line, so
+a sixth worker is not six times faster than a fourth: it is one more context and
+one more brief, all waiting on the same lock.
 
 If the honest count is one or two, run one or two. A single worker that owns the
 whole model is not a failure of architecture.
@@ -306,6 +318,10 @@ convention is missing from this list it does not exist.
   concurrency mistake to fix, not a crash to retry — waiting again just queues
   behind the same holder. This is why the runner exists: it holds
   `blender_module_run` and serializes the queue, and you never call it directly.
+  This is about the live session, and is separate from the headless run budget
+  in `blender_bridge_status`: headless runs do not touch the lock, but a
+  module run still does, so a wide fan-out of workers authoring at once does
+  not become a wide fan-out of module runs.
 - **Never restate tool schemas in prose.** Use the tool definitions directly.
 
 ## Live Blender state
@@ -515,7 +531,9 @@ as the work happens, not at the end.
 - Authoring tasks may be `in_progress` together — several workers are writing
   their scripts at once. Runs are still serialized by the runner, so at most
   one module is being EXECUTED at a time; that is a property of the blend, not
-  of your list.
+  of your list. This holds however many workers you author, and the headless
+  run budget does not change it: it governs independent headless runs, not the
+  one live session every module run shares.
 - When you report back, state the final list state. An unfinished task is a
   visible gap; a list that was quietly abandoned is how a half-built asset gets
   presented as finished.
