@@ -186,19 +186,20 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"bg_wait",
 	"subagent_supervisor",
 	"contact_supervisor",
-	// Context management, from the ambient billion-context plugin. A manager is
-	// the one role in a Blender session whose transcript grows without bound:
-	// workers and critics each get a fresh context, but the manager reads every
-	// report, every verdict and every diff for the whole build, and a directed
-	// generation run is dozens of modules. It is also the only role that can
-	// afford it — compressing early is what makes a long run finish, and it is
-	// the integrator's own memory rather than anyone else's.
+	// Context management, from the ambient billion-context plugin (its
+	// `pi.extensions` entry registers these with pi, so they are real tools in
+	// this session, not an MCP surface). A manager is the one role whose
+	// transcript grows without bound: workers and critics each start fresh, but
+	// the manager reads every brief, report and verdict for a whole build, and a
+	// directed generation run is dozens of modules. It is also the only role that
+	// can afford to lose detail, because everything it still needs is in
+	// `todo` and in what it wrote down.
 	//
-	// These are named here because the gate is deny-by-default, and the gate is
-	// the only thing standing between a manager and an unbounded transcript. The
-	// plugin is ambient: it is loaded for the session, not declared in a
-	// template's `extensions:`, which is the same arrangement as
-	// `ask_user_question` below.
+	// Listed here because the gate is deny-by-default, and the gate is the only
+	// thing between a manager and an unbounded transcript. Named rather than
+	// assumed: pi itself ships no compression tool, so these come from the
+	// plugin, and the plugin is loaded for the session the same way
+	// `ask_user_question` below is.
 	"compress",
 	"decompress",
 	"search_context",

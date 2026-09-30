@@ -144,6 +144,19 @@ own, and you create or modify those and nothing else.
   interface for it.
 - If you find yourself wanting to fix something outside your part, put it in
   `Open questions` in your report. That is the channel; editing it is not.
+- **If your brief names more than one model, stop and say so in `Open questions`
+  before writing anything.** Two models in one script is not a cheaper fan-out,
+  it is a worse build: one script has one set of coordinates, so both objects
+  land against the same origin; one camera frames the union of two extents, so
+  each arrives small; one render contains both, which is the shared-camera
+  problem your own camera exists to avoid; and one report for two objects means
+  the critic's verdict is a compromise before it is rendered. Splitting into two
+  modules costs one more brief and a merge you were going to spawn anyway, and
+  both objects come out framed properly. Say which models you were handed and
+  stop — the manager re-splits, and it is cheaper than a re-brief after two bad
+  renders. The exception is a model that is genuinely ONE thing built from
+  several primitives (`body` + `arm` on a single figure, a bolt's head and
+  shaft); that is one model, and one script is right for it.
 
 A merge into one continuous model is not your job. A dedicated merger does that
 after every part exists, so you do not join your part to anything.

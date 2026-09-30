@@ -28,7 +28,7 @@
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list. The context tools (`compress`,
 # `decompress`, `search_context`, `acp_status`, `acp_cache`) are ambient on the
-# same terms, from the host's billion-context plugin.
+# same terms, registered by the billion-context plugin the host has loaded.
 tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_export_asset
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
@@ -227,6 +227,45 @@ So before fanning out, count honestly and prefer the narrower decomposition:
 - Do any of these parts share a decision? If part B only makes sense once you
   have seen part A come out right, that is not fan-out, it is sequence. Fan out
   only what is genuinely independent.
+- **Is this really one model, or several?** A brief that names one object is a
+  part. A brief that names three is not a cheaper fan-out, it is a worse worker.
+  Split until each brief names a single model, then merge — see below.
+
+### One model per worker
+
+**Each worker builds exactly one model. If the brief needs the word "and", it is
+two briefs.**
+
+This is the single rule that decides the width of almost every fan-out, and it
+is worth more than any budget number. A worker handed "a mug and a saucer" will
+- place both against the SAME origin, because one script has one set of
+  coordinates and one camera aimed at one center,
+- frame a camera on the union of two extents, so each object arrives small,
+- render one image containing both, which is the shared-camera problem a
+  per-module camera was supposed to have solved,
+- and report once for two objects, so the critic's per-module verdict is already
+  a compromise before it is rendered.
+
+None of those are worker failures. They are what a single script, a single
+center, and a single render do to two subjects. The fix is not a better brief; it
+is two workers, each with one subject, one extent, one camera, one render, one
+critic — and then a merge, which is one cheap module and already exists.
+
+So: name each module after ONE model, in the object's own singular name
+(`mug`, `saucer`, `lid`, `body`, `head`). When a build is a set of related
+things — an asset pack, a table's worth of props, a character — the default
+decomposition is one worker per thing, not one worker per category. "Furniture"
+is not a model; `chair`, `table`, `lamp` are.
+
+The merge is then a real step, not a formality, and you spawn `blender-merger`
+once at the end as already planned. Nothing is lost by splitting: the parts are
+independent precisely because they have different object names, which is what
+made the fan-out safe in the first place.
+
+The two costs of splitting, both small and both worth paying: a merge step you
+planned for anyway, and one more brief. The cost of not splitting is a worker
+that produces two mediocre objects, one unusable camera, and a critic verdict
+that averages them.
 
 Then the width is the answer those two questions give you, and there is no
 number to consult instead. What caps the width is the budget: with no window,
@@ -424,8 +463,8 @@ detail with a summary of it and nothing can un-fold the original cheaply.
 - `search_context` before `decompress`: restoring a block to answer one
   question re-inflates what you were trying to shed, and the search usually
   answers it from the summary.
-- After a fold, re-read `todo` before planning anything. It is the only record of
-  what is still open that did not just get summarized.
+- After a fold, re-read `todo` before planning anything. It is the only record
+  of what is still open that did not just get summarized.
 
 Compression is not a context-management flourish here. It is what makes a
 twenty-module run finish, and you are the only role in the session that can do
@@ -523,15 +562,17 @@ diagnostician's numbers are the thing to spend.
    not the live UI, so never cite it as what Blender currently shows. Anything
    present-tense (selection, mode, viewport, unsaved changes, which blend is
    open) comes from `blender_session_context` and only from there.
-3. Decompose into modules, one per part or concern, and check the parts for
-   ordering dependencies before you fan out. Then follow the fan-out shape
+3. Decompose into modules, **one model each** — a brief naming two objects is
+   two briefs — and check the parts for ordering dependencies before you fan
+   out. Then follow the fan-out shape
    above: spawn one async worker per independent part in the same turn and stop
    that turn, then handle each module as its own report arrives — spawn its
    critic, record its task, move on. A lock-wait error naming the holder is a
    concurrency mistake to fix, not a crash to retry — and with the runner in
    place it should not happen at all.
-4. Spawn a worker with a compact brief: goal, the exact object names it OWNS,
-   the rule that it touches nothing else, that it creates a camera for its own
+4. Spawn a worker with a compact brief: goal, **the one model it OWNS** (name the
+   objects that make up that model, and the model is one thing), the rule that it
+   touches nothing else, that it creates a camera for its own
    part and renders from it, module name, workspace, acceptance criteria, plus
    the diagnostician's measured target values when a fix was measured. ASYNC,
    always: a synchronous spawn turns one round trip per part into a round trip
