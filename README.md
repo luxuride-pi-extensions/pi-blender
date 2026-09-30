@@ -271,6 +271,16 @@ Start pi in any project dir. The extension:
   symmetric from the front and wrong from three-quarter — and because a sheet
   costs the same transcript weight as one render: images persist in a
   conversation and are re-sent every request
+- `blender_log_critique` requires the `moduleName` it judged. The iteration
+  number alone stops identifying what was reviewed once several modules are
+  judged at once, and under parallel runs `latestIteration` is whichever run
+  finished last — so a critique would carry a sibling's number. The module name
+  goes into the log header with the budget position
+  (`[ts] iteration_07 module=shirt budget 2/5`), and the budget is claimed
+  under the manifest lock, so two critics judging one module at the same time
+  cannot both take the last slot. Budgets are per module and reset when that
+  module presents, so a pack of models reviewed in parallel each get their own
+  five
 - **delegation is enforced, not advised.** In manager mode — entered by
   `/blender` and cleared by `/blender-exit` or a new session — a `tool_call` hook blocks the
   MANAGER from `write`, `edit`, and from `read`

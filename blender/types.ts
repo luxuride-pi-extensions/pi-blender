@@ -161,6 +161,12 @@ export interface BlenderWorkspaceManifest {
 	renderOutputs: BlenderRenderOutput[];
 	/** Appended by blender_module_run; absent until the first module run. */
 	moduleRuns?: BlenderModuleRunRecord[];
+	/**
+	 * Per-module critique counts for the current instruction, absent until the
+	 * first critique. Reset to zero for a module when one of its critiques
+	 * presents, which is what ends that module's instruction.
+	 */
+	critiqueCounts?: Record<string, number>;
 }
 
 export interface WorkspaceInitOptions {
@@ -489,6 +495,12 @@ export interface RenderResult {
 export interface CritiqueLogOptions {
 	cwd: string;
 	workspace: string;
+	/**
+	 * The module this critique judged. Required rather than derived: under
+	 * parallel module runs `latestIteration` is whichever run finished last,
+	 * so stamping a critique with it labels an entry with a sibling's number.
+	 */
+	moduleName: string;
 	iteration?: number;
 	accuracy: number;
 	geometry: number;
@@ -504,14 +516,18 @@ export interface CritiqueLogResult {
 	workspacePath: string;
 	critiqueLogPath: string;
 	entry: {
-		iteration: number;
-		score: number;
-		/**
-		 * True when the 5-iteration budget for the current instruction is spent
-		 * and the score is still below the present threshold: stop iterating and
-		 * present the current state instead.
-		 */
-		iterationBudgetExceeded: boolean;
+	iteration: number;
+	score: number;
+	/** The module judged, echoed so a reader never has to infer it. */
+	moduleName: string;
+	/** 1-based position of this critique within the module's current budget. */
+	budgetUsed: number;
+	/**
+	 * True when the 5-iteration budget for the current instruction is spent
+	 * and the score is still below the present threshold: stop iterating and
+	 * present the current state instead.
+	 */
+	iterationBudgetExceeded: boolean;
 		accuracy: number;
 		geometry: number;
 		materials: number;

@@ -1,72 +1,43 @@
-import { appendFile, readFile } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import type { CritiqueLogOptions, CritiqueLogResult } from "./types.js";
 import { nowIso } from "./utils.js";
-import { ensureWorkspaceCritiqueLogExists, loadWorkspaceManifest } from "./workspace.js";
+import { ensureWorkspaceCritiqueLogExists, loadWorkspaceManifest, updateManifest } from "./workspace.js";
 
 /**
- * The guidance tells the agent to stop after 5 iterations per instruction.
- * The critique log is the only place that history exists, so the cap is
- * counted here rather than trusted as prose the model may drift from.
+ * The guidance tells the agent to stop after 5 iterations per module. The cap
+ * is counted here rather than trusted as prose the model may drift from.
+ *
+ * Per module, not per instruction: several modules are judged at once and a
+ * shared budget would be spent by the first two, leaving the rest unlimited.
  */
-export const MAX_ITERATIONS_PER_INSTRUCTION = 5;
+export const MAX_ITERATIONS_PER_MODULE = 5;
 
-/** Matches a critique block header line, e.g. `[2026-01-02T03:04:05.678Z] iteration_03`. */
-const CRITIQUE_HEADER_RE = /^\[[^\]]+\] iteration_\d+$/;
-
-/** Marks a critique that ended its instruction, so the next one starts a fresh budget. */
+/** Marks a critique that ended its module's instruction, resetting its budget. */
 const CRITIQUE_PRESENT_DECISION = "Decision: present to user";
 
 /**
- * Count critique entries logged since the last present-to-user decision.
+ * Claim this critique's position in its module's budget, under the manifest
+ * lock.
  *
- * This deliberately does NOT count by iteration number. `iteration` is a global
- * run counter shared with module runs and ad-hoc `blender_execute_python`
- * calls, so consecutive critiques of one instruction routinely land on
- * different numbers — the previous implementation counted only entries with a
- * matching number, which meant `priorCritiques` was almost always 0 and
- * `MAX_ITERATIONS_PER_INSTRUCTION` could never fire. The cap was decorative.
+ * The claim MUST be assigned onto `current` — updateManifest persists the
+ * mutated manifest, not the callback's return value.
  *
- * An "instruction" therefore ends at the first critique that presents to the
- * user, and the next one starts a fresh budget.
+ * A present resets the counter to 1 rather than 0, because this critique is
+ * itself the first of the next instruction's budget. Reading the count back out
+ * of critique.log instead would race: two critics for one module would both
+ * read the same file, both compute the same position, and both proceed, which
+ * is exactly when the cap is meant to hold.
  */
-async function countCritiquesSinceLastPresent(critiqueLogPath: string): Promise<number> {
-	try {
-		const raw = await readFile(critiqueLogPath, "utf-8");
-		// Split into one chunk per entry, each starting at a header line. The
-		// header is the only line that *defines* an entry: counting lines that
-		// merely contain the marker would let an `issues` bullet quoting a
-		// header count as a whole extra critique.
-		const entries: string[] = [];
-		let current: string[] | null = null;
-		for (const line of raw.split("\n")) {
-			if (CRITIQUE_HEADER_RE.test(line.trim())) {
-				current = [];
-				entries.push("");
-			}
-			if (current) {
-				current.push(line);
-				// Patch the tail entry: a single append per line, no re-splitting.
-				entries[entries.length - 1] = current.join("\n");
-			}
-		}
-
-		// Walk back to the most recent present-to-user decision; the entries
-		// after it are the current instruction's.
-		let count = 0;
-		for (let i = entries.length - 1; i >= 0; i -= 1) {
-			const entry = entries[i];
-			if (entry === undefined) {
-				continue;
-			}
-			if (entry.includes(CRITIQUE_PRESENT_DECISION)) {
-				break;
-			}
-			count += 1;
-		}
-		return count;
-	} catch {
-		return 0;
-	}
+export function claimCritiqueBudget(
+	current: { critiqueCounts?: Record<string, number> },
+	moduleName: string,
+	shouldPresent: boolean,
+): number {
+	const counts = current.critiqueCounts ?? {};
+	const previous = counts[moduleName] ?? 0;
+	const budgetUsed = shouldPresent || previous === 0 ? 1 : previous + 1;
+	current.critiqueCounts = { ...counts, [moduleName]: budgetUsed };
+	return budgetUsed;
 }
 
 function validateCritiqueScore(name: string, value: number): void {
@@ -84,24 +55,41 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 	if (options.viewAdequacy.trim().length === 0) {
 		throw new Error('Critique field "viewAdequacy" must be a non-empty string.');
 	}
+	const moduleName = options.moduleName.trim();
+	if (moduleName.length === 0) {
+		throw new Error(
+			"blender_log_critique requires the moduleName it judged. The iteration number alone cannot identify what was judged once several modules are being reviewed at once.",
+		);
+	}
 
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const critiqueLogPath = await ensureWorkspaceCritiqueLogExists(manifest.workspacePath);
-	const iteration = options.iteration ?? manifest.latestIteration;
 	const score = options.accuracy + options.geometry + options.materials + options.completeness + options.quality;
-	const loggedAt = nowIso();
 	const shouldPresent = score >= 8;
-	// Counted since the last present-to-user decision, not by iteration number:
-	// see countCritiquesSinceLastPresent for why the iteration number is the
-	// wrong key.
-	// `priorCritiques` counts entries already in the log, so the critique being
-	// written is number priorCritiques + 1. Compare that against the cap rather
-	// than the prior count, or the budget only trips on the sixth critique.
-	const critiquesIncludingThisOne = (await countCritiquesSinceLastPresent(critiqueLogPath)) + 1;
-	const iterationBudgetExceeded = !shouldPresent && critiquesIncludingThisOne >= MAX_ITERATIONS_PER_INSTRUCTION;
+
+	// Read the manifest first to find the log, then claim under its lock: the
+	// callback needs to know whether this critique presents (the score says so)
+	// and only then is it known whether the claim resets the budget.
+	const claimed = await updateManifest(
+		manifest.manifestPath,
+		(current) => ({
+			budgetUsed: claimCritiqueBudget(current, moduleName, shouldPresent),
+			iteration: options.iteration ?? current.latestIteration,
+		}),
+	);
+
+	// The claimed iteration is read inside the lock for the same reason the
+	// budget is claimed there: manifest.latestIteration read outside it is
+	// whichever module run finished last, not the run that produced the image
+	// this critique is about.
+	const iteration = claimed.iteration;
+	const iterationBudgetExceeded = !shouldPresent && claimed.budgetUsed >= MAX_ITERATIONS_PER_MODULE;
+	const loggedAt = nowIso();
 	const entry = {
 		iteration,
 		score,
+		moduleName,
+		budgetUsed: claimed.budgetUsed,
 		iterationBudgetExceeded,
 		accuracy: options.accuracy,
 		geometry: options.geometry,
@@ -115,8 +103,11 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 		shouldPresent,
 	};
 
+	// module= and budget= are in the header because the header is the only line
+	// that defines an entry, so those two facts are the ones a reader can find
+	// without parsing prose.
 	const logBlock = [
-		`[${loggedAt}] iteration_${String(iteration).padStart(2, "0")}`,
+		`[${loggedAt}] iteration_${String(iteration).padStart(2, "0")} module=${moduleName} budget ${claimed.budgetUsed}/${MAX_ITERATIONS_PER_MODULE}`,
 		`Score: ${score}/10`,
 		`Accuracy: ${options.accuracy}/2`,
 		`Geometry & Proportions: ${options.geometry}/2`,
@@ -130,7 +121,7 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 		shouldPresent
 			? "Decision: present to user"
 			: iterationBudgetExceeded
-				? `Decision: iteration budget reached (${MAX_ITERATIONS_PER_INSTRUCTION}) — stop and present the current state to the user`
+				? `Decision: iteration budget reached (${MAX_ITERATIONS_PER_MODULE}) — stop and present the current state to the user`
 				: "Decision: continue iterating",
 		"",
 	].join("\n");

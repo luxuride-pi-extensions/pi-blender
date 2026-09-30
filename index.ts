@@ -796,9 +796,14 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
 				}),
+				moduleName: Type.String({
+					description:
+						"The module this critique judged. Names the part the render shows, and keeps each module's 5-iteration budget its own rather than shared across a fan-out.",
+				}),
 				iteration: Type.Optional(
 					Type.Number({
-						description: "Optional iteration number. Defaults to the current workspace iteration.",
+						description:
+							"Optional iteration number, for a run whose number differs from the workspace's latest. Omit it and the latest is used.",
 					}),
 				),
 				accuracy: Type.Number({
@@ -843,6 +848,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 				const result = await blenderLogCritique({
 					cwd: ctx.cwd,
 					workspace: params.workspace,
+					moduleName: params.moduleName,
 					iteration: params.iteration,
 					accuracy: params.accuracy,
 					geometry: params.geometry,

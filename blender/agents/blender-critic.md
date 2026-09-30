@@ -155,7 +155,7 @@ The render is still the primary judgment. A measurement confirms or refutes a sp
 5. Classify every issue as one of:
    - **object problem** — geometry, proportions, materials, missing/extra parts, artifacts. The worker must fix the script.
    - **view problem** — framing, coverage, or perspective hides or distorts the subject. You cannot fix it (see the image-budget section): report it as `[view]` with the view you want and the concrete change in `nextAction`, and let the spawner execute it. Do not call `blender_save_view` to adjust a camera, and do not spend a re-render on a view you may not read.
-6. Log your verdict with `blender_log_critique` using the 0-2 rubric (accuracy, geometry, materials, completeness, quality), a `viewAdequacy` judgment, the concrete `issues`, and a `nextAction`. Set `iteration` to the module run iteration from the worker's report when you know it.
+6. Log your verdict with `blender_log_critique` using the 0-2 rubric (accuracy, geometry, materials, completeness, quality), a `viewAdequacy` judgment, the concrete `issues`, and a `nextAction`. `moduleName` is required: it is the module you judged, it goes into the critique log header next to the iteration number, and it keeps each module's 5-critique budget separate from every other module's. Set `iteration` to the module run iteration from the worker's report when you know it; omit it and the workspace's latest is used.
 7. Return your verdict.
 
 ## Report format (return this, nothing longer)
