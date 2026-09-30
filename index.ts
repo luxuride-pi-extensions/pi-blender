@@ -44,6 +44,8 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	blenderAddReference,
+	blenderBranchApply,
+	blenderBranchRun,
 	blenderBridgeStatus,
 	blenderExecutePython,
 	blenderGeometryProbe,
@@ -683,6 +685,106 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					viewportShading: params.viewportShading,
 					resolution: params.resolution,
 					samples: params.samples,
+					timeoutSeconds: params.timeoutSeconds,
+					signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_branch_run",
+			label: "Blender Branch Run",
+			description:
+				"Run a workspace module HEADLESSLY against its own private copy of model.blend (modules/<name>/branch.blend), then stage the result for a later blender_branch_apply. No live Blender session is touched and no bridge lock is taken, so several modules can run at once — the concurrency ceiling is the headless run budget, not the one live session. Reports exactly which objects and materials the script changed, which is what the apply uses to bring back only this module's work instead of reverting its siblings'. A failed run leaves model.blend untouched and there is nothing to revert.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				moduleName: Type.String({
+					description:
+						"Module name (lowercase letters, digits, dashes). Resolves to modules/<name>/script.py.",
+				}),
+				render: Type.Optional(
+					Type.Boolean({
+						description: "Render the BRANCH (not model.blend) to modules/<name>/render.png for critique. Defaults to true.",
+						default: true,
+					}),
+				),
+				view: Type.Optional(
+					Type.String({
+						description:
+							'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
+					}),
+				),
+				resolution: Type.Optional(
+					Type.Object({
+						x: Type.Number({ description: "Render width in pixels." }),
+						y: Type.Number({ description: "Render height in pixels." }),
+						percentage: Type.Optional(Type.Number({ description: "Resolution percentage (default 100)." })),
+					}),
+				),
+				samples: Type.Optional(
+					Type.Number({
+						description: "Sample count override for Cycles renders.",
+					}),
+				),
+				timeoutSeconds: Type.Optional(
+					Type.Number({
+						description: "Execution timeout in seconds.",
+						default: 300,
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderBranchRun({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					moduleName: params.moduleName,
+					render: params.render,
+					view: params.view,
+					resolution: params.resolution,
+					samples: params.samples,
+					timeoutSeconds: params.timeoutSeconds,
+					signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_branch_apply",
+			label: "Blender Branch Apply",
+			description:
+				"Apply staged branch runs into model.blend, one at a time under a lock, so concurrent module runs can be merged in a fixed order. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				modules: Type.Array(Type.String(), {
+					description:
+						"Module names to apply, in any order — they are applied in the order their branch runs were staged. Every one must have a staged branch run.",
+				}),
+				timeoutSeconds: Type.Optional(
+					Type.Number({
+						description: "Per-apply timeout in seconds.",
+						default: 300,
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderBranchApply({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					modules: params.modules,
 					timeoutSeconds: params.timeoutSeconds,
 					signal,
 				});

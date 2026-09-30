@@ -10,21 +10,20 @@ import type {
 	ModuleRunOptions,
 	ModuleRunResult,
 } from "./types.js";
+import { fileExists, formatBlenderFailure, getSavedViewCameraObjectName, LIVE_BRIDGE_INIT_TIMEOUT_MS, nowIso } from "./utils.js";
 import {
-	fileExists,
-	formatBlenderFailure,
-	getSavedViewCameraObjectName,
-	LIVE_BRIDGE_INIT_TIMEOUT_MS,
-	nowIso,
-} from "./utils.js";
+	buildModuleScriptPreamble,
+	getModuleDir,
+	getModuleRunCheckpointName,
+	getModuleScriptPath,
+	getRunDir,
+	LEGACY_CHECKPOINT_FILE,
+	MODULE_PREAMBLE_MARKER,
+	MODULE_SCRIPT_FILE,
+	normalizeModuleName,
+	RENDER_FILE,
+} from "./module-paths.js";
 import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from "./workspace.js";
-
-const MODULE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const MODULE_SCRIPT_FILE = "script.py";
-const MODULE_PREAMBLE_MARKER = "# --- pi-blender module preamble";
-/** Read-only pre-run checkpoint from a workspace predating per-run checkpoints. */
-const LEGACY_CHECKPOINT_FILE = "pre.blend";
-const RENDER_FILE = "render.png";
 
 /**
  * Default module-render resolution.
@@ -42,47 +41,6 @@ const RENDER_FILE = "render.png";
  */
 const DEFAULT_MODULE_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
 
-function getModuleDir(workspacePath: string, moduleName: string): string {
-	return join(workspacePath, "modules", moduleName);
-}
-
-/**
- * Deterministic preamble prepended to every module script, mirroring what
- * blenderExecutePython injects in the root loop.
- *
- * Without it, a module script had to re-derive the workspace and blend paths
- * itself, and its only documented contract (the prose in the skill: "use
- * explicit `workspace`") was not something an error message could point at.
- * Now a worker that gets it wrong sees the contract in its own traceback.
- */
-export function buildModuleScriptPreamble(workspacePath: string, blendPath: string, moduleName: string): string {
-	return [
-		"# --- pi-blender module preamble (do not edit) ---",
-		`# workspace: ${workspacePath}`,
-		`# module: ${moduleName}`,
-		``,
-		"import bpy",
-		``,
-		`WORKSPACE_PATH = r"${workspacePath}"`,
-		`BLEND_PATH = r"${blendPath}"`,
-		`MODULE_NAME = r"${moduleName}"`,
-		``,
-		"# --- end preamble ---",
-		``,
-		"",
-	].join("\n");
-}
-
-/** Runs directory name for one iteration, e.g. runs/03. */
-function getRunDirName(iteration: number): string {
-	return String(iteration).padStart(2, "0");
-}
-
-/** Per-run checkpoint name, e.g. pre-03.blend. */
-function getRunCheckpointName(iteration: number): string {
-	return `pre-${getRunDirName(iteration)}.blend`;
-}
-
 function getLatestRun(manifest: { moduleRuns?: BlenderModuleRunRecord[] }, moduleName: string): BlenderModuleRunRecord | undefined {
 	return [...(manifest.moduleRuns ?? [])].reverse().find((run) => run.name === moduleName);
 }
@@ -96,16 +54,11 @@ function getModuleRuns(manifest: { moduleRuns?: BlenderModuleRunRecord[] }): Ble
 }
 
 export async function blenderModuleRun(options: ModuleRunOptions): Promise<ModuleRunResult> {
-	const moduleName = options.moduleName.trim();
-	if (!MODULE_NAME_RE.test(moduleName)) {
-		throw new Error(
-			`Invalid module name "${options.moduleName}". Use lowercase letters, digits, and dashes (max 64 chars), e.g. "table-top".`,
-		);
-	}
+	const moduleName = normalizeModuleName(options.moduleName);
 
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const moduleDir = getModuleDir(manifest.workspacePath, moduleName);
-	const scriptPath = join(moduleDir, MODULE_SCRIPT_FILE);
+	const scriptPath = getModuleScriptPath(manifest.workspacePath, moduleName);
 	if (!(await fileExists(scriptPath))) {
 		throw new Error(
 			`Module script not found: ${scriptPath}. Write the module's bpy script there first (worker agent), then run it.`,
@@ -163,7 +116,7 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 	// used to be written too, doubling blend I/O every run while silently
 	// drifting from any real checkpoint; it is now read-only, consulted only to
 	// revert workspaces created before per-run checkpoints existed.
-	const runDir = join(moduleDir, "runs", getRunDirName(iteration));
+	const runDir = getRunDir(manifest.workspacePath, moduleName, iteration);
 	await mkdir(runDir, { recursive: true });
 
 	let effectiveScriptPath = scriptPath;
@@ -176,7 +129,7 @@ export async function blenderModuleRun(options: ModuleRunOptions): Promise<Modul
 		);
 	}
 
-	const checkpointPath = join(runDir, getRunCheckpointName(iteration));
+	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
 	await copyFile(manifest.blendPath, checkpointPath);
 
 	const result = await requestLiveBlenderExecutePython({
@@ -324,10 +277,7 @@ export function applySuccessfulRun(
 }
 
 export async function blenderModuleRevert(options: ModuleRevertOptions): Promise<ModuleRevertResult> {
-	const moduleName = options.moduleName.trim();
-	if (!MODULE_NAME_RE.test(moduleName)) {
-		throw new Error(`Invalid module name "${options.moduleName}".`);
-	}
+	const moduleName = normalizeModuleName(options.moduleName);
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const moduleRuns = getModuleRuns(manifest);
 

@@ -252,7 +252,26 @@ export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise
 				}),
 			);
 		}
-		return parseJsonBlock(result.stdout) as T;
+		try {
+			return parseJsonBlock(result.stdout) as T;
+		} catch (error) {
+			// A missing JSON block on a ZERO exit code is not a parse bug, it is a
+			// script that raised at top level: Blender's `--python` prints the
+			// traceback to stderr and still exits 0, so `result.code === 0` says
+			// nothing about whether the script ran. Without this, a single bad
+			// subscript in a Blender data API reported "failed to parse JSON
+			// output" and the traceback naming the actual line was discarded --
+			// the caller could not tell a malformed payload from a wrong API call.
+			// Both streams are included for the same reason as above.
+			throw new Error(
+				formatBlenderFailure({
+					streams: { stdout: result.stdout, stderr: result.stderr },
+					subject: `Blender exited with code 0 but produced no JSON result block: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				}),
+			);
+		}
 	} finally {
 		await cleanupTempFile(scriptPath);
 	}

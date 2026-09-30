@@ -15,6 +15,15 @@ export { blenderGeometryProbe } from "./geometry-probe.js";
 export { blenderImageProbe } from "./image-probe.js";
 export { blenderReadOnlyPython } from "./readonly.js";
 export { blenderModuleRevert, blenderModuleRun } from "./module.js";
+export {
+	blenderBranchApply,
+	blenderBranchRun,
+	computeBranchConflicts,
+	findRecordConflicts,
+	getBranchBlendPath,
+	recordOwnedDatablocks,
+	stagedBranchRuns,
+} from "./branch.js";
 export { blenderMontage } from "./montage.js";
 export { blenderRender } from "./render.js";
 export { blenderSaveView } from "./save-view.js";
@@ -24,8 +33,15 @@ export { blenderSetMode } from "./set-mode.js";
 export type {
 	AddReferenceOptions,
 	AddReferenceResult,
+	BlenderBranchRunRecord,
 	BlenderReference,
 	BlenderModuleRunRecord,
+	BranchApplyOptions,
+	BranchApplyResult,
+	BranchConflict,
+	BranchRunOptions,
+	BranchRunResult,
+	BranchRunStatus,
 	BlenderRenderOutput,
 	BlenderSavedView,
 	BlenderSceneUnits,

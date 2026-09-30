@@ -119,6 +119,119 @@ export interface BlenderModuleRunRecord {
 	sequence: number;
 	exitCode: number;
 	status: "ok" | "failed";
+	/**
+	 * Set when this record was written by a branch apply rather than by a live
+	 * module run. The blend state is identical either way, and the checkpoint is
+	 * the same file, so revert treats them alike; the field is provenance, so a
+	 * reader can tell which of the two paths changed model.blend.
+	 */
+	viaBranchApply?: string;
+}
+
+/** Where a staged branch run is in its life. */
+export type BranchRunStatus = "staged" | "applied" | "conflict" | "failed";
+
+/** One object's contested by two or more staged branches. */
+export interface BranchConflict {
+	objectName: string;
+	/** The modules contesting it, including the one this record is. */
+	modules: string[];
+}
+
+/**
+ * A module run executed headlessly against its own copy of model.blend.
+ *
+ * The apply set is the whole point of the record: it is what the apply copies
+ * back, and what two records are compared on to decide they conflict. It is
+ * WIDER than the objects the script touched, because a parented object cannot
+ * travel without its parent, and a parent cannot come back without its children
+ * — the widening is done in the branch script and reported here rather than
+ * discovered at apply time.
+ */
+export interface BlenderBranchRunRecord {
+	module: string;
+	iteration: number;
+	/** Monotonic, shared with moduleRuns, so apply and revert order the same way. */
+	sequence: number;
+	/** The module's private copy of model.blend that the script ran against. */
+	branchPath: string;
+	scriptPath: string;
+	/** model.blend as it was when this run claimed the iteration; the apply's revert point. */
+	checkpointPath: string;
+	at: string;
+	/** Objects whose content hash differed before and after the run. */
+	touchedObjects: string[];
+	/**
+	 * Materials whose node tree or flat settings differed.
+	 *
+	 * Tracked separately because a paint module can change a material with no
+	 * object moving at all, and object-only tracking would report it as having
+	 * touched nothing and drop its work at apply time.
+	 */
+	touchedMaterials: string[];
+	addedObjects: string[];
+	removedObjects: string[];
+	/** Everything the apply brings back: touched plus required relatives. */
+	applyObjects: string[];
+	status: BranchRunStatus;
+	appliedAt?: string;
+	conflicts?: BranchConflict[];
+	renderOutputPath?: string | null;
+}
+
+export interface BranchRunOptions {
+	cwd: string;
+	workspace: string;
+	moduleName: string;
+	/** Capture a render of the BRANCH, not of model.blend. Defaults to true. */
+	render?: boolean;
+	view?: string;
+	resolution?: { x: number; y: number; percentage?: number };
+	samples?: number;
+	timeoutSeconds?: number;
+	signal?: AbortSignal;
+}
+
+export interface BranchRunResult {
+	workspacePath: string;
+	blendPath: string;
+	module: string;
+	moduleDir: string;
+	scriptPath: string;
+	branchPath: string;
+	iteration: number;
+	runDir: string;
+	checkpointPath: string;
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	touchedObjects: string[];
+	touchedMaterials: string[];
+	addedObjects: string[];
+	removedObjects: string[];
+	applyObjects: string[];
+	renderOutputPath: string | null;
+	status: BranchRunStatus;
+}
+
+export interface BranchApplyOptions {
+	cwd: string;
+	workspace: string;
+	/** Modules to apply, in any order; conflicts are computed over all staged runs. */
+	modules: string[];
+	timeoutSeconds?: number;
+	signal?: AbortSignal;
+}
+
+export interface BranchApplyResult {
+	workspacePath: string;
+	blendPath: string;
+	applied: Array<{ module: string; iteration: number; appended: string[]; removed: string[] }>;
+	/** Conflicted modules, with the object that stopped each. Their branch blends are untouched. */
+	skipped: Array<{ module: string; conflicts: BranchConflict[] }>;
+	/** Modules whose branch blend had vanished from disk before the apply. */
+	missing: string[];
+	liveBlenderMessage: string;
 }
 
 /**
@@ -161,6 +274,15 @@ export interface BlenderWorkspaceManifest {
 	renderOutputs: BlenderRenderOutput[];
 	/** Appended by blender_module_run; absent until the first module run. */
 	moduleRuns?: BlenderModuleRunRecord[];
+	/**
+	 * Appended by blender_branch_run; absent until the first branch run.
+	 *
+	 * Separate from moduleRuns rather than sharing it, because the two answer
+	 * different questions. A branch record describes work that has NOT touched
+	 * model.blend yet, and mixing it into the run history would make revert
+	 * offer to restore a state that a staged branch never replaced.
+	 */
+	branchRuns?: BlenderBranchRunRecord[];
 	/**
 	 * Per-module critique counts for the current instruction, absent until the
 	 * first critique. Reset to zero for a module when one of its critiques
