@@ -581,7 +581,7 @@ export interface RunBlenderJsonOptions {
 }
 
 /** One of the measurement families `blender_geometry_probe` can run. */
-export type GeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "topology";
+export type GeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "shape" | "topology";
 
 export interface GeometryProbeBounds {
 	min: number[];
@@ -717,6 +717,103 @@ export interface GeometryProbeOptions {
 	expectedAxis?: "X" | "Y" | "Z";
 	timeoutMs?: number;
 	signal?: AbortSignal;
+}
+
+/**
+ * Shape measurements that no render can settle: whether the mesh agrees with
+ * itself across a mirror plane, how its radius changes along its own long
+ * axis, and how far its surface departs from its convex hull.
+ */
+export interface GeometryProbeSelfSymmetry {
+	/** The world axis the mesh was tested against, or null when it is not symmetric about any of them. */
+	mirrorAxis: "X" | "Y" | "Z" | null;
+	/** Mean and worst vertex distance to the mirrored position, in Blender units. */
+	meanDeviation: number | null;
+	maxDeviation: number | null;
+	/** Mean deviation as a fraction of the mesh's own size, so scale cannot disguise symmetry. */
+	deviationRatio: number | null;
+	/** All three candidate axes, best first. */
+	perAxis: { axis: "X" | "Y" | "Z"; meanDeviation: number }[];
+}
+
+export interface GeometryProbeShape {
+	vertices: number;
+	faces: number;
+	dimensions: number[];
+	/** Axis the radius profile is sampled along — the mesh's own long axis. */
+	profileAxis: "X" | "Y" | "Z" | null;
+	profile: {
+		/** Normalized position along the profile axis, 0 at the -extreme end. */
+		t: number[];
+		/** Mean distance from the profile axis at each sample. */
+		radius: number[];
+		/** Standard deviation within each sample: a bulge reads as a spike here. */
+		spread: number[];
+		/** Fraction of consecutive samples shrinking; below ~0.9 is not a clean taper. */
+		monotonic: number;
+		/** (first radius - last radius) / first radius. */
+		taper: number;
+	} | null;
+	selfSymmetry: GeometryProbeSelfSymmetry;
+	/** Fraction of vertex pairs whose connecting segment leaves the mesh. */
+	convexityRatio: number | null;
+	openEdges: number;
+	looseVerts: number;
+	note?: string;
+}
+
+export interface ImageProbeOptions {
+	cwd: string;
+	workspace: string;
+	/** Path to a PNG. Relative paths resolve against the workspace root. */
+	path: string;
+	/** The image's background colour in 0..1 per channel. Defaults to black. */
+	background?: [number, number, number];
+	/** Per-channel tolerance, 0..1, for calling a pixel background. */
+	tolerance?: number;
+	/** Luma grid resolution. Default [8,8]. */
+	grid?: [number, number];
+	/** How many dominant subject colours to report. Default 6, 0 disables. */
+	paletteLimit?: number;
+}
+
+export interface ImageProbeResult {
+	path: string;
+	workspacePath: string;
+	width: number;
+	height: number;
+	bitDepth: number;
+	colorType: number;
+	alphaPresent: boolean;
+	imageSizeBytes: number;
+	grid: { nx: number; ny: number };
+	background: [number, number, number];
+	tolerance: number;
+	/** Inclusive pixel range of the subject, or null when nothing was found. */
+	subjectBounds: { x0: number; x1: number; y0: number; y1: number } | null;
+	subjectPixelCount: number;
+	subjectCoverage: number;
+	transparentPixels: number;
+	/** Mean subject colour in 0..255 per channel. */
+	meanColour: [number, number, number];
+	/** Mean luma per grid cell in 0..1; null where a cell holds no subject. */
+	lumaGrid: (number | null)[][];
+	silhouette: {
+		rowsOccupied: number;
+		rowCount: number;
+		/** Widest single row of subject pixels — a proxy for a horizontal limb. */
+		widestRow: number;
+		/** Contiguous bands of occupied rows, with each band's widest row. */
+		coverageByRow: { from: number; to: number; maxWidth: number }[];
+	};
+	/**
+	 * Mean absolute per-channel step between horizontally adjacent pixels over
+	 * the subject. Low means a soft, blurry or low-contrast silhouette.
+	 */
+	edgeSharpness: number | null;
+	/** Dominant subject colours, most common first, as #rrggbb with fractions. */
+	palette: { hex: string; fraction: number }[];
+	warnings: string[];
 }
 
 export interface GeometryProbeWorkspaceResult extends GeometryProbeResult {

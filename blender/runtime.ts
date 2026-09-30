@@ -12,6 +12,7 @@ export type { LiveOwnerInfo, OwnerLiveness } from "./ownership.js";
 export { blenderExecutePython } from "./execute.js";
 export { blenderBridgeStatus } from "./status.js";
 export { blenderGeometryProbe } from "./geometry-probe.js";
+export { blenderImageProbe } from "./image-probe.js";
 export { blenderModuleRevert, blenderModuleRun } from "./module.js";
 export { blenderRender } from "./render.js";
 export { blenderSaveView } from "./save-view.js";

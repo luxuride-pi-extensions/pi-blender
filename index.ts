@@ -47,6 +47,7 @@ import {
 	blenderBridgeStatus,
 	blenderExecutePython,
 	blenderGeometryProbe,
+	blenderImageProbe,
 	blenderLogCritique,
 	blenderModuleRevert,
 	blenderModuleRun,
@@ -153,10 +154,14 @@ const BLENDER_MANAGER_ROSTER = new Set([
  * actually has.
  */
 const MANAGER_ALLOWED_TOOL_NAMES = new Set([
-	// Delegation and supervision: without these the manager cannot do the one
-	// thing its prompt tells it to do.
+	// Delegation, supervision, and the two halves of waiting: bg_wait blocks on
+	// this session's own async runs, subagent_supervisor answers a child that
+	// needs a decision. Both belong to pi-subagents, not to an index.ts, so a
+	// deny-by-default gate has to name them here.
 	"subagent",
 	"subagents_enable",
+	"bg_wait",
+	"subagent_supervisor",
 	"contact_supervisor",
 	// Planning and reading agent definitions to write a brief with.
 	"todo",
@@ -961,11 +966,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("bounds"),
 							Type.Literal("axis"),
 							Type.Literal("pair"),
+							Type.Literal("shape"),
 							Type.Literal("topology"),
 						]),
 						{
 							description:
-								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect.",
+								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect.",
 						},
 					),
 				),
@@ -999,6 +1005,65 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					expectedAxis: params.expectedAxis,
 					timeoutMs: params.timeoutMs,
 					signal: _signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_image_probe",
+			label: "Blender Image Probe",
+			description:
+				"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, and dominant subject colours. Read-only, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it. Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				path: Type.String({
+					description:
+						"Path to the PNG to measure, e.g. `modules/<name>/render.png`. Relative paths resolve against the workspace root.",
+				}),
+				background: Type.Optional(
+					Type.Array(Type.Number(), {
+						minItems: 3,
+						maxItems: 3,
+						description:
+							"The image's background colour as three 0..1 values (r, g, b). Defaults to black. This is a property of the shot, so read it from the render settings or the world rather than guessing from a corner pixel — a wrong value makes the background read as subject and empties the measurement.",
+					}),
+				),
+				tolerance: Type.Optional(
+					Type.Number({
+						description:
+							"Per-channel 0..1 tolerance for calling a pixel background (default 0). Raise it for a noisy or film-grain background, or for an antialiased edge that should count as subject.",
+					}),
+				),
+				grid: Type.Optional(
+					Type.Array(Type.Number(), {
+						minItems: 2,
+						maxItems: 2,
+						description:
+							"Luma grid resolution as [nx, ny] (default [8,8], maximum 32 per side). Each cell is the mean luma of the subject pixels inside it, and null where there are none — a null cell means the subject does not reach that part of the frame.",
+					}),
+				),
+				paletteLimit: Type.Optional(
+					Type.Number({
+						description: "How many dominant subject colours to report (default 6, 0 disables).",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderImageProbe({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					path: params.path,
+					background: params.background as [number, number, number] | undefined,
+					tolerance: params.tolerance,
+					grid: params.grid as [number, number] | undefined,
+					paletteLimit: params.paletteLimit,
 				});
 
 				return {

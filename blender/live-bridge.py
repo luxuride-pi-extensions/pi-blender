@@ -681,9 +681,27 @@ GEOMETRY_PROBE_CHECKS = (
     "bounds",
     "axis",
     "pair",
+    "shape",
     "topology",
 )
 GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT = 4000
+# The shape family is a summary, not a dump: it reports counts, a few scalars
+# and a short profile, so the sample cap has to be generous enough for the
+# symmetry and convexity averages to be stable without pulling a 200k-vertex
+# mesh through every loop.
+GEOMETRY_PROBE_SHAPE_SAMPLE_LIMIT = 20000
+# Convexity is a nearest-surface-point query per sampled vertex, so it is
+# measured on its own coarser sample. 1000 vertices is where the ratio stops
+# visibly drifting on a deliberately lumpy mesh.
+GEOMETRY_PROBE_CONVEXITY_VERTEX_LIMIT = 1000
+# A vertex of a genuinely convex mesh lies ON its hull, so the tolerance is
+# float noise on a scale of the mesh's own size, not a modelling tolerance.
+GEOMETRY_PROBE_CONVEXITY_EPSILON = 1e-5
+SHAPE_PROFILE_SAMPLES = 8
+# A deviation below this fraction of the mesh's size is float noise on a
+# mirrored mesh, not an asymmetry, so it is reported as a ratio and the mirror
+# axis is still named.
+SHAPE_SYMMETRY_EPSILON = 1e-4
 # Relative slack for the in-contact threshold, so float noise cannot flip the
 # verdict for parts that are exactly at the requested tolerance.
 PAIR_TOLERANCE_EPSILON = 1e-9
@@ -1037,6 +1055,282 @@ def _probe_topology(obj):
     }
 
 
+def _sample_world_points(obj, limit):
+    """World-space points, evenly subsampled above `limit`, plus the total count.
+
+    Returns (points, total) so a caller can report the real vertex count next to
+    a sample-derived number, which is otherwise indistinguishable from one taken
+    over every vertex.
+    """
+    total = len(obj.data.vertices)
+    stride = max(1, total // limit)
+    coords = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices[::stride]]
+    if coords and stride > 1:
+        coords.append(obj.matrix_world @ obj.data.vertices[-1].co)
+    return coords, total
+
+
+def _shape_self_symmetry(points, minimum, maximum):
+    """How far each world axis mirror disagrees with the mesh.
+
+    The mesh's own bounding-box centre is the mirror plane, not the world
+    origin: a model that simply sits off to one side is still symmetric, and
+    testing against the origin would report every placed object as lopsided.
+
+    Each mirrored point is matched to its nearest real vertex, so the number is
+    a genuine surface-to-surface distance rather than a difference of two
+    arbitrary index pairs — a mesh with uneven vertex density does not read as
+    asymmetric just because its indices are not mirrored.
+    """
+    try:
+        # pi-lens-ignore: ast-grep:unresolved-import-python
+        from mathutils import kdtree  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return {
+            "mirrorAxis": None,
+            "meanDeviation": None,
+            "maxDeviation": None,
+            "deviationRatio": None,
+            "perAxis": [],
+            "reason": "mathutils.kdtree unavailable in this Blender build",
+        }
+
+    if len(points) < 3:
+        return {
+            "mirrorAxis": None,
+            "meanDeviation": None,
+            "maxDeviation": None,
+            "deviationRatio": None,
+            "perAxis": [],
+            "reason": "fewer than 3 sampled vertices",
+        }
+
+    size = max(maximum[i] - minimum[i] for i in range(3))
+    if size <= 0.0:
+        size = 1.0
+
+    tree = kdtree.KDTree(len(points))
+    for index, point in enumerate(points):
+        tree.insert(point, index)
+    tree.balance()
+
+    center = (minimum + maximum) * 0.5
+    per_axis = []
+    deviations = {}
+    for axis_index, axis_name in enumerate(("X", "Y", "Z")):
+        total = 0.0
+        worst = 0.0
+        for point in points:
+            mirrored = Vector(point)
+            mirrored[axis_index] = 2.0 * center[axis_index] - mirrored[axis_index]
+            distance = tree.find(mirrored)[2]
+            total += distance
+            if distance > worst:
+                worst = distance
+        deviations[axis_name] = worst
+        per_axis.append(
+            {
+                "axis": axis_name,
+                "meanDeviation": _round(total / len(points)),
+                "ratio": _round((total / len(points)) / size, 5),
+            }
+        )
+
+    per_axis.sort(key=lambda entry: entry["ratio"])
+    best = per_axis[0]
+    symmetric = best["ratio"] <= 0.05
+    return {
+        "mirrorAxis": best["axis"] if symmetric else None,
+        "meanDeviation": best["meanDeviation"],
+        "maxDeviation": _round(deviations[best["axis"]]),
+        "deviationRatio": best["ratio"] if symmetric else None,
+        "perAxis": [
+            {"axis": entry["axis"], "meanDeviation": entry["meanDeviation"]}
+            for entry in per_axis
+        ],
+        "note": None if symmetric else "least-asymmetric axis; none within 5% of the mesh size",
+    }
+
+
+def _shape_radius_profile(points, minimum, maximum):
+    """Mean distance from the mesh's own long axis, sampled along it.
+
+    The axis is the mesh's largest bounding-box dimension, because that is what
+    a reader means by "the object's axis" and because a principal axis from the
+    covariance sweep is an arbitrary in-plane direction on a symmetric object.
+    `spread` alongside `radius` is what separates a smooth taper from a bulge:
+    a locally fatter band raises the spread without changing the trend.
+    """
+    axis_index = max(range(3), key=lambda i: maximum[i] - minimum[i])
+    axis_name = ("X", "Y", "Z")[axis_index]
+    extent = maximum[axis_index] - minimum[axis_index]
+    if extent <= 0.0:
+        return None, axis_name
+
+    center = (minimum + maximum) * 0.5
+    half_width = extent / (2.0 * SHAPE_PROFILE_SAMPLES)
+    samples = []
+    for index in range(SHAPE_PROFILE_SAMPLES):
+        position = minimum[axis_index] + extent * ((index + 0.5) / SHAPE_PROFILE_SAMPLES)
+        slab = [point for point in points if abs(point[axis_index] - position) <= half_width]
+        if not slab:
+            continue
+        distances = []
+        for point in slab:
+            axis_point = Vector((center.x, center.y, center.z))
+            axis_point[axis_index] = point[axis_index]
+            distances.append((point - axis_point).length)
+        mean = sum(distances) / len(distances)
+        variance = sum((value - mean) ** 2 for value in distances) / len(distances)
+        samples.append(
+            {
+                "t": _round((index + 0.5) / SHAPE_PROFILE_SAMPLES, 4),
+                "radius": _round(mean),
+                "spread": _round(variance ** 0.5),
+            }
+        )
+
+    if len(samples) < 2:
+        return None, axis_name
+
+    shrinking = sum(1 for a, b in zip(samples, samples[1:]) if b["radius"] <= a["radius"])
+    first = samples[0]["radius"]
+    taper = (first - samples[-1]["radius"]) / first if first > 0.0 else 0.0
+    return (
+        {
+            "t": [sample["t"] for sample in samples],
+            "radius": [sample["radius"] for sample in samples],
+            "spread": [sample["spread"] for sample in samples],
+            "monotonic": _round(shrinking / (len(samples) - 1), 4),
+            "taper": _round(taper, 4),
+        },
+        axis_name,
+    )
+
+
+def _shape_convexity(obj, points):
+    """Fraction of the surface that lies on or inside the mesh's own convex hull.
+
+    A perfect sphere or capsule reads 1.0; a dumbbell, a saddle or a limb
+    junctioned onto a torso reads lower. It is a shape defect a silhouette can
+    hide, because the offending part may be facing away or occluded.
+    """
+    try:
+        # pi-lens-ignore: ast-grep:unresolved-import-python
+        import bmesh  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return None, "bmesh unavailable in this Blender build", None
+
+    try:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        result = bmesh.ops.convex_hull(bm, input=list(bm.verts))
+        # The hull's own faces are the BMFace entries of `geom`; bm afterwards
+        # holds the original mesh with its interior faces deleted, so re-reading
+        # bm would measure the wrong surface.
+        for entry in ("geom", "geom_cut"):
+            faces = [item for item in result.get(entry, []) if isinstance(item, bmesh.types.BMFace)]
+            if faces:
+                break
+        else:
+            bm.free()
+            return None, f"convex hull returned no faces (keys: {', '.join(sorted(result))})", None
+        world_corners = []
+        polygons = []
+        for face in faces:
+            first = len(world_corners)
+            world_corners.extend(tuple(obj.matrix_world @ vert.co) for vert in face.verts)
+            polygons.append(list(range(first, len(world_corners))))
+        bm.free()
+        hull = BVHTree.FromPolygons(world_corners, polygons, all_triangles=False, epsilon=0.0)
+    except Exception as error:
+        return None, f"convex hull failed: {error}", None
+
+    matrix = obj.matrix_world
+    # Distance to the hull surface, not a ray. A hull built from the mesh's own
+    # faces is a surface with no interior, so a ray from any vertex finds the
+    # nearest face and the direction chosen decides the answer; a sphere would
+    # read 0.0 or 1.0 depending on which side the ray happened to leave from.
+    # The nearest surface point does not have that ambiguity, and a vertex of a
+    # genuinely convex mesh sits on the hull at distance zero.
+    limit = min(GEOMETRY_PROBE_CONVEXITY_VERTEX_LIMIT, len(obj.data.vertices))
+    stride = max(1, len(obj.data.vertices) // limit)
+    on_hull = 0
+    counted = 0
+    worst = 0.0
+    for vertex in obj.data.vertices[::stride]:
+        origin = matrix @ vertex.co
+        found, _, _, distance = hull.find_nearest(origin)
+        if found is None:
+            continue
+        counted += 1
+        if distance <= GEOMETRY_PROBE_CONVEXITY_EPSILON:
+            on_hull += 1
+        else:
+            worst = max(worst, distance)
+    if counted == 0:
+        return None, "no vertices sampled", None
+    return _round(on_hull / counted, 4), None, worst
+
+
+def _probe_shape(obj):
+    """Shape measurements no render can settle.
+
+    Symmetry, a radius profile along the mesh's own axis, convexity and open
+    edges. All of it is a scalar or a short series: the point is to give the
+    analyst a sentence with numbers in it ("the taper is monotonic but the base
+    is 8% too fat"), not the vertex data to form that sentence herself.
+    """
+    points, total = _sample_world_points(obj, GEOMETRY_PROBE_SHAPE_SAMPLE_LIMIT)
+    minimum, maximum = _world_bounding_box(obj)
+    profile, profile_axis = _shape_radius_profile(points, minimum, maximum)
+    convexity, convexity_reason, worst_gap = _shape_convexity(obj, points)
+
+    open_edges = None
+    loose_verts = None
+    try:
+        # pi-lens-ignore: ast-grep:unresolved-import-python
+        import bmesh  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        pass
+    else:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        # Fewer than two adjacent faces, not zero: a boundary edge of a grid or
+        # the rim of a hole has one, and is exactly the defect a closed mesh
+        # never has.
+        # Fewer than two adjacent faces, not zero. A 2x2 grid has 12 edges of
+        # which 8 are boundary, and every one of them still has ONE adjacent
+        # face, so `== 0` reports a wide-open plane as watertight.
+        # Fewer than two adjacent faces, not zero. A 2x2 grid has 12 edges of
+        # which 8 are boundary, and every boundary edge still has ONE adjacent
+        # face, so `== 0` reports a wide-open plane as watertight.
+        open_edges = sum(1 for edge in bm.edges if len(edge.link_faces) < 2)
+        loose_verts = sum(1 for vert in bm.verts if not vert.link_edges)
+        bm.free()
+
+    entry = {
+        "vertices": total,
+        "faces": len(obj.data.polygons),
+        "dimensions": _round_vector(maximum - minimum),
+        "profileAxis": profile_axis,
+        "profile": profile,
+        "selfSymmetry": _shape_self_symmetry(points, minimum, maximum),
+        "convexityRatio": convexity,
+        "openEdges": open_edges,
+        "looseVerts": loose_verts,
+    }
+    if profile is None:
+        entry["note"] = "mesh has no extent along its long axis; radius profile unavailable"
+    elif convexity_reason is not None:
+        entry["note"] = f"convexity unavailable: {convexity_reason}"
+    elif convexity is not None and convexity < 1.0:
+        entry["deepestInsideHull"] = _round(worst_gap, 5)
+    if total > len(points):
+        entry["sampleNote"] = f"symmetry, profile and convexity used {len(points)} of {total} vertices, evenly subsampled"
+    return entry
+
+
 def handle_geometry_probe(request):
     """Measure mesh/transform relationships in the LIVE scene.
 
@@ -1136,6 +1430,9 @@ def handle_geometry_probe(request):
                     "ringRoundness": _ring_roundness(points, smallest, center),
                     "center": _round_vector(center),
                 }
+
+        if "shape" in requested:
+            entry["shape"] = _probe_shape(obj)
 
         if "topology" in requested:
             entry["topology"] = _probe_topology(obj)

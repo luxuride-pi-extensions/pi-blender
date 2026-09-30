@@ -183,7 +183,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (13 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status` (14 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -225,6 +225,25 @@ Start pi in any project dir. The extension:
   rather than guessing
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
   `textures`, and `paintSettings` for paint/UV/rig planning
+- `blender_geometry_probe` accepts a `shape` check alongside `transform`,
+  `bounds`, `axis`, `pair`, and `topology`. `shape` measures the mesh rather
+  than its placement: a radius profile along the mesh's own longest axis
+  (mean, spread, monotonic, taper), self-symmetry about the mesh's own
+  bounding-box centre (not the world origin), convexity as the fraction of
+  sampled vertices lying on the mesh's own convex hull, and the open-edge and
+  loose-vertex counts. A render is a projection, so it cannot show a saddle
+  facing away, distinguish an asymmetric form from a symmetric one, or see the
+  inside of a hollow shell
+- `blender_image_probe` samples a rendered PNG that is already on disk and
+  returns numbers rather than an image: subject bounds and coverage, an
+  nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
+  colour and a dominant-colour palette. `background` is a required input
+  rather than an inferred one, because a wrong backdrop is read as subject and
+  empties the whole measurement. It decodes PNG in-process (bit depths 1-16,
+  colour types 0/2/3/4/6, all five filters) with no new dependency, and
+  refuses an interlaced or non-PNG file by name rather than decoding it wrongly.
+  It costs nothing against a critic's image budget because the pixels never
+  enter the model's context as an image
 - **delegation is enforced, not advised.** In manager mode — entered by
   `/blender` and cleared by `/blender-exit` or a new session — a `tool_call` hook blocks the
   MANAGER from `write`, `edit`, and from `read`
