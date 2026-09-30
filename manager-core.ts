@@ -71,6 +71,11 @@ export interface ToolCallEvent {
 
 export interface ManagerMode {
 	markEngaged(): void;
+	/**
+	 * Record an application tool call: turns on guidance injection WITHOUT
+	 * raising the write/edit/image gate. The two are separate decisions.
+	 */
+	markUsed(): void;
 	clearGate(): boolean;
 	isEngaged(): boolean;
 	isManagerSession(systemPrompt: string | null | undefined): boolean;
