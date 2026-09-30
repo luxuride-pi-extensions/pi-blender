@@ -369,10 +369,14 @@ Start pi in any project dir. The extension:
 - launches a windowed Blender only when `/blender-watch` asks for it, and
   keeps that one window alive across the session while the user wants it. A
   `blender_*` tool call alone never opens a window, and neither does the
-  supervisor; a tool that genuinely needs a window (`blender_set_mode`,
-  `blender_geometry_probe`, `blender_read_only_python`, `blender_montage`, and
-  `blender_save_view` with `source=active-camera`) says so rather than bringing
-  one up
+  supervisor. Most tools need no window at all: with none open they run
+  headlessly against `model.blend`, through the same bridge script the window
+  serves, so the two paths cannot drift apart. Only two things genuinely
+  require one — `blender_set_mode` and `blender_save_view` with
+  `source=active-camera` — because both photograph or rearrange what a viewport
+  is showing, which has no meaning in a process with no screen. Those two
+  refuse and name `/blender-watch` instead of opening a window behind the
+  user's back
 
 Example prompts:
 

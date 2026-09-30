@@ -31,6 +31,7 @@ const PROBE_TIMEOUT_MULTIPLIER = 4;
 export async function blenderGeometryProbe(options: GeometryProbeOptions): Promise<GeometryProbeWorkspaceResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const bridgeResult = await requestLiveBlenderGeometryProbe({
+		blendPath: manifest.blendPath,
 		objects: options.objects,
 		pairs: options.pairs,
 		checks: options.checks,

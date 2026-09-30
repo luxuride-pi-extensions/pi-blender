@@ -180,11 +180,21 @@ export async function runBlenderProcess(options: {
 	signal?: AbortSignal;
 	/** What this run is for, recorded on the lease. Diagnostics only. */
 	label?: string;
+	/**
+	 * Flags for the SCRIPT, appended after the `--` separator that ends
+	 * Blender's own arguments. They cannot go before the blend: Blender's
+	 * argument parser treats an unrecognised `--flag` there as a filename and
+	 * reports `Cannot read file ".../--serve"`, so a script-level flag placed in
+	 * the natural position stops the run before the script is ever loaded.
+	 */
+	scriptArgs?: string[];
 }): Promise<BlenderRunResult> {
 	const { command, args: blenderArgs } = await resolveBlenderArgv();
+	const trailing = options.scriptArgs ?? [];
+	const tail = [JSON.stringify(options.payload), ...trailing];
 	const args = options.blendPath
-		? [...blenderArgs, "--background", options.blendPath, "--python", options.scriptPath, "--", JSON.stringify(options.payload)]
-		: [...blenderArgs, "--background", "--factory-startup", "--python", options.scriptPath, "--", JSON.stringify(options.payload)];
+		? [...blenderArgs, "--background", options.blendPath, "--python", options.scriptPath, "--", ...tail]
+		: [...blenderArgs, "--background", "--factory-startup", "--python", options.scriptPath, "--", ...tail];
 
 	// Every headless Blender in this extension is spawned here, so this is the
 	// one place the concurrency ceiling can be enforced. The warning is emitted
@@ -263,6 +273,7 @@ export async function runBlenderJson<T>(options: RunBlenderJsonOptions): Promise
 			timeoutMs: options.timeoutMs,
 			signal: options.signal,
 			label: options.label,
+			scriptArgs: options.scriptArgs,
 		});
 		if (result.code !== 0) {
 			// Both streams: this path is a headless probe with no live UI to

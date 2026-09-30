@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getBlenderBridgeDir } from "../config.js";
+import { getBlenderAssetsDir, getBlenderBridgeDir } from "../config.js";
 import { ensureLiveBridgeLaunched, isLiveBridgeAlive } from "../launch.js";
 import { isHeartbeatFresh, readHeartbeatBlendPath } from "./liveness.js";
 import type {
@@ -14,9 +14,11 @@ import {
 	acquireBridgeLock,
 	delay,
 	fileExists,
+	formatBlenderFailure,
 	LIVE_BRIDGE_COLD_START_TIMEOUT_MS,
 	LIVE_BRIDGE_POLL_MS,
 	LIVE_BRIDGE_TIMEOUT_MS,
+	runBlenderProcess,
 } from "./utils.js";
 
 /**
@@ -76,6 +78,116 @@ export class NoWatchWindowError extends Error {
 		this.name = "NoWatchWindowError";
 		this.requestType = requestType;
 	}
+}
+
+/**
+ * Run one bridge request in a throwaway headless Blender.
+ *
+ * The windowed path answers from a session whose UI may hold unsaved work, a
+ * selection, a mode and a viewport; none of those exist here, and a request that
+ * needs one of them (set-mode, capture-view) still refuses, loudly, from the
+ * same handler. What the remaining requests actually need is a loaded blend
+ * and bpy, so they run against live-bridge.py itself in `--serve` mode: one
+ * request through the SAME dispatch table the window uses, then exit. Reusing
+ * the table is the point — a second headless implementation of a geometry probe
+ * is a second answer to "how far apart are these two parts".
+ *
+ * The blend is opened by Blender from argv rather than by
+ * ensure_requested_blend_open, because a fresh process has nothing to discard
+ * and the dirty-blend guard would only ever be true here if the file itself
+ * changed under us.
+ */
+async function runHeadlessBridgeRequest<T>(options: {
+	payload: Record<string, unknown>;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+	cwd?: string;
+	label?: string;
+}): Promise<T> {
+	const requestType = String(options.payload.type ?? "unknown");
+	const result = await runBlenderProcess({
+		cwd: options.cwd ?? process.cwd(),
+		blendPath: typeof options.payload.blendPath === "string" ? options.payload.blendPath : undefined,
+		scriptPath: join(getBlenderAssetsDir(), "live-bridge.py"),
+		// Blender has to be told to serve rather than poll. The flag goes AFTER
+		// the `--`: in the position where it belongs semantically, Blender's
+		// argument parser reads it as a blend filename and refuses to start
+		// (`unknown argument, loading as file: --serve`). `execCommand` appends
+		// `-- <payload>`, so serve_once finds the request in sys.argv and the
+		// mode flag behind it.
+		payload: options.payload,
+		timeoutMs: options.timeoutMs ?? LIVE_BRIDGE_TIMEOUT_MS,
+		signal: options.signal,
+		label: options.label ?? `headless ${requestType}`,
+		scriptArgs: ["--serve"],
+	});
+
+	// Blender exits 0 even when a --python script raises, so the exit code says
+	// only that Blender started. The payload is the answer, and a missing one
+	// means serve_once never got to print — which is a crash in the bridge
+	// itself, not a refused request, so both streams are kept.
+	if (result.code !== 0 || !result.stdout.includes("__PI_BLENDER_JSON_START__")) {
+		throw new Error(
+			formatBlenderFailure({
+				streams: { stdout: result.stdout, stderr: result.stderr },
+				subject:
+					result.code !== 0
+						? `Headless Blender exited with code ${result.code} serving "${requestType}"`
+						: `Headless Blender served "${requestType}" but printed no result block`,
+			}),
+		);
+	}
+
+	const start = result.stdout.indexOf("__PI_BLENDER_JSON_START__") + "__PI_BLENDER_JSON_START__".length;
+	const end = result.stdout.indexOf("__PI_BLENDER_JSON_END__");
+	let response: { ok: true; result: T } | { ok: false; error?: string; traceback?: string };
+	try {
+		response = JSON.parse(result.stdout.slice(start, end).trim()) as typeof response;
+	} catch (error) {
+		// A block that is present but unparseable is Blender's own JSON encoder
+		// failing on the result, not a request this code got wrong, so the raw
+		// block is kept alongside both streams.
+		throw new Error(
+			formatBlenderFailure({
+				streams: { stdout: result.stdout, stderr: result.stderr },
+				subject: `Headless "${requestType}" produced a result block that is not JSON: ${error instanceof Error ? error.message : String(error)}`,
+			}),
+		);
+	}
+	if (!response.ok) {
+		// The refusal messages here are written for a user reading a terminal:
+		// "no live VIEW_3D viewport" tells them to run /blender-watch, which is
+		// the only thing that can fix it.
+		throw new Error(`${response.error ?? `Headless "${requestType}" failed.`}${response.traceback ? `\n\n${response.traceback}` : ""}`);
+	}
+	return response.result;
+}
+
+/**
+ * A request that does not need a window, run wherever it can run.
+ *
+ * `required` names the windowed-only request types, and it lives here rather
+ * than in each caller because "which requests need a viewport" is a property of
+ * the bridge, not of the five tools that happen to call it today. A type that
+ * is not listed and has no window still raises from its own handler, which is
+ * the honest outcome: the tool found out by trying, and said why.
+ */
+const WINDOW_ONLY_REQUEST_TYPES = new Set(["set-mode", "capture-view"]);
+
+export async function requestBridge<T>(options: {
+	payload: Record<string, unknown>;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+	cwd?: string;
+	label?: string;
+}): Promise<T> {
+	if (isLiveBridgeAlive()) {
+		return await requestLiveBlenderBridge<T>(options);
+	}
+	if (WINDOW_ONLY_REQUEST_TYPES.has(String(options.payload.type ?? ""))) {
+		throw new NoWatchWindowError(String(options.payload.type ?? "unknown"));
+	}
+	return await runHeadlessBridgeRequest<T>(options);
 }
 
 async function requestLiveBlenderBridge<T>(options: {
@@ -404,7 +516,7 @@ export async function requestLiveBlenderMontage(options: {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<MontageResult> {
-	return await requestLiveBlenderBridge<MontageResult>({
+	return await requestBridge<MontageResult>({
 		payload: {
 			type: "montage",
 			views: options.views,
@@ -423,6 +535,7 @@ export async function requestLiveBlenderMontage(options: {
 }
 
 export async function requestLiveBlenderGeometryProbe(options: {
+	blendPath: string;
 	objects?: string[];
 	pairs?: string[][];
 	checks?: string[];
@@ -431,9 +544,15 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<GeometryProbeResult> {
-	return await requestLiveBlenderBridge<GeometryProbeResult>({
+	return await requestBridge<GeometryProbeResult>({
 		payload: {
 			type: "geometry-probe",
+			// Named, and not optional: the windowed bridge always has the
+			// workspace blend open, which is why this used to work without one.
+			// Headless there is no session, so a probe with no blendPath would
+			// measure whatever --factory-startup gave it and report it as the
+			// workspace.
+			blendPath: options.blendPath,
 			objects: options.objects,
 			pairs: options.pairs,
 			checks: options.checks,
@@ -453,7 +572,7 @@ export async function requestLiveBlenderReadOnlyPython(options: {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<{ stdout: string; stderr: string; exitCode: number; readOnly: true }> {
-	return await requestLiveBlenderBridge({
+	return await requestBridge({
 		payload: {
 			type: "read-only-python",
 			blendPath: options.blendPath,

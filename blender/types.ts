@@ -839,6 +839,12 @@ export interface RunBlenderJsonOptions {
 	 * label is what turns one into "the body module, not the rig".
 	 */
 	label?: string;
+	/**
+	 * Extra arguments appended AFTER the JSON payload, for a script that takes
+	 * arguments of its own. After the payload because Blender treats everything
+	 * before `--` as its own arguments.
+	 */
+	scriptArgs?: string[];
 }
 
 /** One of the measurement families `blender_geometry_probe` can run. */

@@ -158,6 +158,31 @@ def write_response(request_id, payload):
         json.dump(payload, handle, indent=2)
 
 
+def render_override(viewport, scene, **extra):
+    """bpy.context override for an engine render, with a window if there is one.
+
+    A background Blender has no window, screen, area or region to override, and
+    passing None for them makes the override context manager fail on an argument
+    the caller did not choose. So the override carries whatever exists: the full
+    set in a windowed session, and just the scene headless. Either way the render
+    itself is the same call with the same settings — which is the point of
+    routing a windowed request through this file at all.
+    """
+    context = {"scene": scene}
+    if viewport is not None:
+        context.update(
+            {
+                "window": viewport["window"],
+                "screen": viewport["screen"],
+                "area": viewport["area"],
+                "region": viewport["region"],
+                "space_data": viewport["space"],
+            }
+        )
+    context.update(extra)
+    return bpy.context.temp_override(**context)
+
+
 def find_viewport_context():
     best = find_optional_viewport_context()
     if best is None:
@@ -1401,12 +1426,17 @@ def _probe_shape(obj):
 
 
 def handle_geometry_probe(request):
-    """Measure mesh/transform relationships in the LIVE scene.
+    """Measure mesh/transform relationships in the open scene.
 
     Read-only by construction: it builds BVHs and reads vertex coordinates,
     and never mutates or saves. That is what makes it safe for a diagnostician
     to call while the manager has a worker mid-iteration.
+
+    The blend is opened if this is a fresh process. The windowed bridge already
+    has the workspace open, so the call was free there; headless there is no
+    session and an unopened file measures nothing at all.
     """
+    ensure_requested_blend_open(request)
     requested = request.get("checks") or list(GEOMETRY_PROBE_CHECKS)
     unknown = [check for check in requested if check not in GEOMETRY_PROBE_CHECKS]
     if unknown:
@@ -1594,9 +1624,12 @@ def handle_montage(request):
     """
     ensure_requested_blend_open(request)
 
-    viewport = find_viewport_context()
-    scene = viewport["scene"]
-
+    # Optional, not required: the orbit and the tiling do not need a viewport,
+    # and a headless Blender has none. Requiring one here is what made a montage
+    # impossible without a window, for a sheet whose only window-dependent part
+    # was an override context.
+    viewport = find_optional_viewport_context()
+    scene = viewport["scene"] if viewport is not None else bpy.context.scene
     view_names = list(request.get("views") or ["front", "three-quarter"])
     if len(view_names) < 1:
         raise RuntimeError("A montage needs at least one view.")
@@ -1661,14 +1694,7 @@ def handle_montage(request):
             scene.camera = camera_object
 
             render_settings.filepath = panel_path
-            with bpy.context.temp_override(
-                window=viewport["window"],
-                screen=viewport["screen"],
-                area=viewport["area"],
-                region=viewport["region"],
-                space_data=viewport["space"],
-                scene=scene,
-            ):
+            with render_override(viewport, scene):
                 bpy.ops.render.render(write_still=True)
 
             panel_image = montage.read_panel(panel_path)
@@ -1742,6 +1768,40 @@ def handle_request(request):
     if request_type == "shutdown":
         return handle_shutdown(request)
     raise RuntimeError(f"Unsupported Blender bridge request type: {request_type}")
+
+
+def serve_once():
+    """Run the request given as the argument and print its result as JSON.
+
+    The same handle_request the windowed bridge uses, so the two paths cannot
+    disagree about what a geometry probe means. `--` marks the payload, the same
+    convention runBlenderProcess uses for every other headless script.
+
+    A handler that raises is reported as a JSON error rather than a traceback on
+    stderr alone: the caller parses stdout for the answer, and Blender exits 0
+    even when a --python script dies, so the error has to arrive in the payload
+    or it is discarded.
+    """
+    raw = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else "{}"
+    try:
+        request = json.loads(raw)
+    except ValueError as error:
+        print("__PI_BLENDER_JSON_START__")
+        print(json.dumps({"ok": False, "error": f"Invalid request payload: {error}"}))
+        print("__PI_BLENDER_JSON_END__")
+        return
+
+    try:
+        result = handle_request(request)
+    except Exception as error:
+        print("__PI_BLENDER_JSON_START__")
+        print(json.dumps({"ok": False, "error": str(error), "traceback": traceback.format_exc()}))
+        print("__PI_BLENDER_JSON_END__")
+        return
+
+    print("__PI_BLENDER_JSON_START__")
+    print(json.dumps({"ok": True, "result": result}))
+    print("__PI_BLENDER_JSON_END__")
 
 
 def process_request_file(request_path):
@@ -1844,6 +1904,19 @@ if not (os.environ.get("PI_BLENDER_BRIDGE_DIR")):
         "The pi extension reads its own per-instance dir and will NOT see this UI, so every blender_* call "
         "will time out. Start Blender through the extension (or set PI_BLENDER_BRIDGE_DIR) instead."
     )
-recover_orphaned_claims()
-if not bpy.app.timers.is_registered(poll_requests):
-    bpy.app.timers.register(poll_requests, first_interval=POLL_INTERVAL_SECONDS, persistent=True)
+
+# --serve is the headless entry point: one request, run through the same
+# dispatch table, print the result as JSON, exit. Polling a queue only makes
+# sense for a long-lived process, and this module is otherwise imported by
+# those handlers so a headless run and a windowed run cannot drift apart.
+#
+# Guarded on the flag rather than on bpy.app.background, because the handlers
+# that need a VIEW_3D call find_viewport_context() and must still refuse when
+# there is none — the flag says why the process has no window, not that window
+# work is impossible.
+if "--serve" in sys.argv:
+    serve_once()
+else:
+    recover_orphaned_claims()
+    if not bpy.app.timers.is_registered(poll_requests):
+        bpy.app.timers.register(poll_requests, first_interval=POLL_INTERVAL_SECONDS, persistent=True)

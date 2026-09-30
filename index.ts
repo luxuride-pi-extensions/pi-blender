@@ -501,7 +501,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_save_view",
 			label: "Blender Save View",
 			description:
-				"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object. source=active-camera NEEDS A WINDOW (run /blender-watch first), because it photographs what the UI currently shows; binding to a named camera object works with no window at all.",
+				"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object. source=active-camera NEEDS A WINDOW (run /blender-watch first), because it photographs what the UI currently shows, including unsaved edits; binding to a named camera object works with no window at all.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -851,7 +851,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_set_mode",
 			label: "Blender Set Mode",
 			description:
-				"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI. NEEDS A WINDOW: this switches what a Blender UI is showing, so with no window open it has nothing to switch; /blender-watch opens one. Authoring itself does not need it — blender_module_run and blender_branch_run work headlessly.",
+				"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI. NEEDS A WINDOW: this switches what a Blender UI is showing, so with no window open it refuses and names /blender-watch rather than pretending to have switched. Authoring does not need a window — blender_module_run and blender_branch_run work headlessly.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1054,7 +1054,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_geometry_probe",
 			label: "Blender Geometry Probe",
 			description:
-				"Measure mesh/transform relationships in the LIVE Blender scene and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. NEEDS A WINDOW (run /blender-watch first): it measures the scene as the live session currently holds it, including unsaved edits.",
+				"Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. Works with no window: it then measures model.blend on disk headlessly. With a window open it measures the live session instead, including unsaved edits, and warns when the two differ.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1195,7 +1195,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_read_only_python",
 			label: "Blender Read-Only Python",
 			description:
-				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with every mutating Blender operation refused by the bridge itself — bpy.ops, bpy.data removal, assigning to an object or its vectors, and saving. Read-only, and it never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. NEEDS A WINDOW (run /blender-watch first) because the script must run against a live session; it cannot be run headlessly, which is the one thing that tool cannot substitute for.",
+				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with every mutating Blender operation refused by the bridge itself — bpy.ops, bpy.data removal, assigning to an object or its vectors, and saving. Read-only, and it never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. Works with no window: the script then runs headlessly against model.blend. With a window open it runs against the live session instead, so it can see unsaved edits.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1237,7 +1237,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_montage",
 			label: "Blender Montage",
 			description:
-				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. NEEDS A WINDOW (run /blender-watch first) for its own camera rig; without one, use blender_render per view and read the panels separately.",
+				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. Works with no window: it then renders each panel headlessly from model.blend.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
