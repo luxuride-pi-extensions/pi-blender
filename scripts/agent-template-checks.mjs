@@ -34,6 +34,10 @@ export const KNOWN_NON_TOOL_WORDS = new Set([
 	// exhaustive, because these are the ones the shipped Blender prompts
 	// actually quote.
 	"rotation_euler",
+	// The field that is NOT a render colour, quoted by every prompt that has to
+	// warn a worker off it. `material.diffuse_color` is namespaced, so the
+	// exemption does not cover the bare word.
+	"diffuse_color",
 	"shade_auto_smooth",
 	"shade_smooth",
 	"shade_flat",

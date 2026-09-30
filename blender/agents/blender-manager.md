@@ -433,6 +433,15 @@ convention is missing from this list it does not exist.
   ordering can change across Blender versions and silently break Material
   Preview or Rendered mode. Brief this to a worker whose material looks wrong
   in a render but fine in a script.
+- **`material.diffuse_color` is not the material's colour.** It is the
+  *viewport display* colour, and it is what Solid mode draws. EEVEE and Cycles
+  both read the node tree, so a material whose only colour is `diffuse_color`
+  renders white or default grey — the object looks correct in the solid-shading
+  viewport the worker is looking at while the render the critic judges is
+  untextured. Set the Principled BSDF `Base Color` node, and set
+  `diffuse_color` to match so the viewport and the render agree. Say this in the
+  brief whenever a brief names a colour, because a worker left to guess picks
+  `diffuse_color`.
 - **Rendering**: you do not hold `blender_render`; the worker renders and the
   critic judges, and you brief them. `blender_render` defaults to
   `renderMethod="live"`, camera-based — have workers use that. `background`

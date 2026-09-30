@@ -114,6 +114,44 @@ critique still decides whether the result is what the brief asked for. If the nu
 are right and the render is still wrong, that is a critic finding about form, not
 placement, and you should not go re-measuring to chase it.
 
+## Colour: `diffuse_color` is not the material's colour
+
+`material.diffuse_color` is the *viewport display* colour — it is what Solid
+shading mode draws, and nothing else. EEVEE and Cycles both read the node tree,
+so a material whose only colour lives in `diffuse_color` renders default grey.
+This fails quietly in the worst possible way: the object looks correctly
+coloured in the solid-shaded viewport you are looking at while the render your
+critic judges is untextured, and the report says the material was set.
+
+```python
+mat = bpy.data.materials.new("CounterTop")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes.get("Principled BSDF")
+bsdf.inputs["Base Color"].default_value = (0.29, 0.17, 0.11, 1.0)   # linear RGBA
+bsdf.inputs["Roughness"].default_value = 0.35
+# Keep the viewport honest with the render, or you debug the wrong image.
+mat.diffuse_color = (0.29, 0.17, 0.11, 1.0)
+```
+
+Three things that bite here:
+
+- **Base Color is LINEAR, not sRGB.** A colour you read off a hex picker is an
+  sRGB value; writing it straight in comes out washed out and desaturated,
+  which reads as "the lighting is wrong" rather than "the colour is wrong".
+  Convert before assigning, or pick a value by eye in the viewport and accept
+  it as approximate.
+- **`nodes.get("Principled BSDF")` can return `None`.** A material created with
+  `use_nodes = True` has it, but one whose node tree was edited may not. Look
+  the node up by type (`next(n for n in tree.nodes if n.type == "BSDF_PRINCIPLED")`)
+  or handle the `None` — an `AttributeError` here reads as a crash, not as a
+  missing node.
+- **Use named sockets, never indices.** `inputs[0]` is `Base Color` on one
+  Blender version and something else on another, and the failure is a wrong
+  colour rather than an error.
+
+If your render looks untextured and you are confident you set a colour, check
+this before you check the lights.
+
 ## Report format (return this, nothing longer)
 
 ```
