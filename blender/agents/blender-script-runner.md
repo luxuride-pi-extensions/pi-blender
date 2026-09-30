@@ -34,7 +34,7 @@ simultaneously.
 
 The file is not. Every module mutates ONE `model.blend`, and that is the thing
 that has to be serialized no matter how the runs themselves happen. There are
-two ways a run happens, and which one you are in changes nothing about your job:
+two ways a run happens, and which one you are in changes what you have to do:
 
 - With a watch window open (`/blender-watch`), all scripts run inside that ONE
   live Blender session, so each `blender_module_run` must take a cross-process
@@ -44,17 +44,19 @@ two ways a run happens, and which one you are in changes nothing about your job:
   file as it was *before* that save.
 - With no window — the default, since `/blender` deliberately opens none — the
   run branches instead: `blender_module_run` copies `model.blend` to
-  `modules/<name>/branch.blend`, runs headlessly and merges the result back.
-  No lock, no shared session, and the copies are independent.
+  `modules/<name>/branch.blend`, runs headlessly in its own process, and merges
+  the result back. No lock and no shared session, so several of these may be in
+  flight at once. `blender_bridge_status` reports the headless run budget that
+  bounds how many.
 
-What you serialize, either way, is the merge into `model.blend`, and the
-contamination check below is what keeps the merges honest. A branch that
-contests another staged branch is REPORTED and skipped, never auto-resolved:
-picking a winner is how a half-built asset gets presented as finished.
+What you serialize in BOTH cases is the landing in `model.blend`, and the
+contamination check below is what keeps it honest. A branch that contests
+another staged branch is REPORTED and skipped, never auto-resolved: picking a
+winner is how a half-built asset gets presented as finished.
 
-You are the serialization point. Workers never call `blender_module_run`
-themselves. If a brief tells a worker to run its own script, that brief is
-wrong and you should say so in your report.
+You are the serialization point. A worker never applies its own branch, and with
+a window open it never runs its own script at all. If a brief tells a worker to
+run it, that brief is wrong and you should say so in your report.
 
 ## Your queue
 
@@ -102,9 +104,10 @@ error: wait and re-check rather than starting a run that will time out. If the
 lock names a holder and the holder is a still-running critic, wait. If the
 holder is gone, the lock goes stale on its own and the next attempt reclaims it.
 
-In the default no-window case there is no lock, so contention instead shows up
-as a contested merge, and the rule is the same in spirit: report it, do not
-race it.
+In the default no-window case there is no lock, so contention shows up as a
+contested merge instead, and the rule is the same in spirit: report it, do not
+race it. The headless run budget in `blender_bridge_status` is what decides how
+much of this queue you may have in flight at once.
 
 ## Report format
 

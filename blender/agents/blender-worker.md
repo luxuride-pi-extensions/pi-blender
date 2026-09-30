@@ -30,7 +30,7 @@ Your supervisor (the manager session) hands you a compact brief: workspace path,
 ## Contract
 
 1. Author `modules/<name>/script.py` in the workspace (create on the first run, `edit` on later iterations). The script must be **idempotent-safe**: create or modify your objects by name, guard with `bpy.data.objects.get(...)`, and rebuild what you own instead of duplicating it. Never delete or mutate objects owned by other modules.
-2. Run it with `blender_module_run { workspace, moduleName, render: true }` — **unless your brief says a script-runner owns execution**, which is what happens when the manager has fanned out to several workers. That tool checkpoints the blend, executes your script in the live Blender session, saves the result, and (by default) writes `modules/<name>/render.png`.
+2. Run it with `blender_module_run { workspace, moduleName, render: true }` — **unless your brief says a script-runner owns execution**, which is what happens when the manager has fanned out to several workers AND a watch window is open. With no window, `blender_module_run` branches: your script runs headlessly on `modules/<name>/branch.blend` and the result is staged, and the manager applies the branches once the queue is complete.
 
    When a script-runner owns execution, you stop after authoring: report that the script is ready, name the object names it will create, and let the manager queue it. Do not run it yourself even to "check it works" — a self-check is a run nobody serialized, and it is exactly the run that corrupts a sibling module's work.
 3. On failure: read the error text, fix `script.py`, re-run. **Escalate on the second byte-identical error.** If a re-run produces the same error text you already fixed once, the fix did not address the cause, and a third attempt re-pays for the whole context that led to it. Stop and `contact_supervisor` with `reason: "need_decision"` and the error verbatim. Three *distinct* errors may each get their own attempt; repeated identical ones do not. If three distinct fixes all fail, stop and report the last failure verbatim — do not revert on your own unless the brief explicitly tells you to.
@@ -90,7 +90,7 @@ Rules:
 - Never paste `script.py` contents or raw logs into your report. The report is a summary; the manager may read the file itself if it needs detail.
 - Keep the report under ~20 lines.
 - If you need a decision you are not authorized to make (scope change, new object outside the brief, material policy), use `contact_supervisor` with `reason: "need_decision"` and wait for the reply.
-- Do not run `blender_module_run` for a module that is not yours, and do not run two modules in parallel: the workspace shares one `model.blend` and one live Blender UI.
+- Do not run `blender_module_run` for a module that is not yours, and do not apply your own branch: the workspace shares one `model.blend`, and a branch is applied by whoever serialized it. Two workers applying at once is a contested merge, and a contested merge is reported, not resolved.
 
 ## Your brief names your part, and only your part
 

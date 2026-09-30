@@ -132,20 +132,35 @@ widen by wanting to.
 
 ## Fan out to several workers at once
 
-**Authoring scales. Executing does not.** Parts are separate modules with
-separate files, so many workers can write at the same time without interfering.
-Their RUNS cannot: everything executes inside one live Blender session behind a
-cross-process lock, so a second `blender_module_run` blocks on the first and
-then fails against a checkpoint that was computed before the first run saved
-`model.blend`.
+**Authoring scales. Execution used not to, and does again in one specific case.**
+Parts are separate modules with separate files, so many workers can write at the
+same time without interfering. What happens when they RUN depends on whether a
+watch window is open:
+
+- **No window — the default, because `/blender` deliberately opens none.** A run
+  branches: `blender_module_run` copies `model.blend` to
+  `modules/<name>/branch.blend`, executes headlessly in its own process, and
+  merges the result back. No shared session, no lock, and the copies are
+  independent. Several modules can be authored AND run at once, bounded by the
+  headless run budget below.
+- **A window open (`/blender-watch`).** Every run executes inside that ONE live
+  Blender session behind a cross-process lock, so a second `blender_module_run`
+  blocks on the first and then usually fails anyway, against a checkpoint
+  computed before the first run saved `model.blend`.
+
+What the window never changes is the MERGE into `model.blend`, and that is
+serialized in both cases: a branch that contests another staged branch is
+REPORTED and skipped, never auto-resolved.
 
 So the shape of a multi-part build is:
 
 1. Spawn **one `blender-worker` per part, all in the same turn**, each with a
    brief scoped to its own part. Concurrent authoring is the whole point — a
    four-part build costs one round trip, not four.
-2. Collect their reports. Each worker authors its script and hands it over; it
-   does not execute (see below).
+2. Collect their reports. Each worker authors its script and hands it over. In
+   the default no-window case it may also have run it, and the manager applies
+   the branches once the queue is complete; with a window open the runner below
+   owns execution instead.
 3. Spawn **one `blender-script-runner`** with the queue of `{module, owns}`
    entries in dependency order. It runs them serially and reports which parts
    actually exist after each run.
@@ -182,12 +197,16 @@ So before fanning out, count honestly and prefer the narrower decomposition:
   only what is genuinely independent.
 
 Then the width is the answer those two questions give you, and there is no
-number to consult instead. In particular, do not treat a wider fan-out as free
-because runs are serialized — that serialization is a property of the BLEND, not
-a licence to add workers. It exists because every run needs the one live
-Blender session, and `blender-script-runner` exists solely to hold that line, so
-a sixth worker is not six times faster than a fourth: it is one more context and
-one more brief, all waiting on the same lock.
+number to consult instead. What caps the width is the budget: with no window,
+authoring and running are both parallel, so fan out up to what
+`blender_bridge_status` reports it will allow; with a window open, the runs
+serialize, and a sixth worker is not six times faster than a fourth — it is one
+more context and one more brief, all waiting on the same lock.
+
+So do not read a wider fan-out as free because the merge is serialized. That
+serialization is a property of the BLEND, not a licence to add workers: it
+exists because every run has to land in one `model.blend`, and
+`blender-script-runner` exists solely to hold that line.
 
 If the honest count is one or two, run one or two. A single worker that owns the
 whole model is not a failure of architecture.
