@@ -153,13 +153,17 @@ for index, (row, column) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1))):
     )
 
 # --- angles ---------------------------------------------------------------
-check(montage.resolve_angle("front") == (0.0, 0.0), "front is azimuth 0 at the horizon")
-check(montage.resolve_angle("Three-Quarter") == (45.0, 20.0), "angle names are case-insensitive")
+front_angle, front_placement = montage.resolve_angle("front")
+check(front_angle == (0.0, 0.0) and front_placement is None, "front is an orbit preset: an angle and no placement")
+check(montage.resolve_angle("Three-Quarter")[0] == (45.0, 20.0), "angle names are case-insensitive")
+corner_angle, corner_placement = montage.resolve_angle("interior-corner")
+check(corner_angle is None and corner_placement is not None, "an interior preset resolves to a placement, not an angle")
 try:
     montage.resolve_angle("hero-angle")
     check(False, "an unknown angle was accepted")
 except ValueError as error:
     check("Known views" in str(error), f"an unknown angle lists the known ones: {error}")
+    check("interior-corner" in str(error), f"the known list includes the interior family: {error}")
 
 # --- the orbit invariant: every preset sits the same distance from the
 # centre, so no preset silently frames the subject tighter than another.
@@ -206,6 +210,44 @@ high = montage.camera_location(centre, distance, 0.0, 89.0)
 check(high[2] > centre[2], f"top looks down from above: {high[2]:.3f}")
 low = montage.camera_location(centre, distance, 0.0, -20.0)
 check(low[2] < centre[2], f"a negative elevation looks up from below: {low[2]:.3f}")
+
+# --- interior placements: a camera INSIDE the room, at a human height ------
+# The orbit invariant above cannot hold here and must not be forced to: a room's
+# bounding-sphere radius puts the camera outside the building. What must hold is
+# that the eye is inside the room's own bounds.
+room_min = (-3.0, -2.0, 0.0)
+room_max = (3.0, 2.0, 2.8)
+for name, preset in montage.INTERIOR_PRESETS.items():
+    location, target, lens_mm = montage.interior_placement(room_min, room_max, preset)
+    inside = all(room_min[axis] - 1e-6 <= location[axis] <= room_max[axis] + 1e-6 for axis in range(3))
+    check(inside, f"{name} puts the eye inside the room's bounds: {[round(v, 2) for v in location]}")
+    check(target != location, f"{name} aims somewhere it is not: {[round(v, 2) for v in target]}")
+    # A 50mm lens standing 300mm from a wall photographs that wall and nothing
+    # else, so the lens is part of the preset rather than a preference.
+    check(lens_mm <= 24.0, f"{name} uses a wide lens: {lens_mm}mm")
+
+eye_location, _, _ = montage.interior_placement(room_min, room_max, montage.INTERIOR_PRESETS["interior-corner"])
+check(
+    abs(eye_location[2] - 1.6) < 1e-6,
+    f"a standing view puts the eye at 1.6m, not at the ceiling: {eye_location[2]:.2f}",
+)
+
+# A room whose ceiling is lower than the eye would otherwise put the camera
+# inside the slab, which renders black rather than reporting the clash.
+low_location, _, _ = montage.interior_placement((0.0, 0.0, 0.0), (0.9, 0.9, 0.15), montage.INTERIOR_PRESETS["interior-corner"])
+check(
+    0.0 <= low_location[2] <= 0.15,
+    f"a crawlspace clamps the eye under its ceiling: {low_location[2]:.3f}",
+)
+
+# The same preset must frame a bathroom and a hall the way a person in each
+# would see it, so the placement is a fraction of the span, not an offset.
+small_location, small_target, _ = montage.interior_placement((0.0, 0.0, 0.0), (2.0, 2.0, 2.4), montage.INTERIOR_PRESETS["interior-corner"])
+large_location, large_target, _ = montage.interior_placement((0.0, 0.0, 0.0), (8.0, 8.0, 6.0), montage.INTERIOR_PRESETS["interior-corner"])
+check(
+    large_location[0] > small_location[0] and large_target[0] > small_target[0],
+    "the inset scales with the room, so the preset means a corner either way",
+)
 
 # --- a label is actually drawn for the requested text ---------------------
 def label_ink_count(text):

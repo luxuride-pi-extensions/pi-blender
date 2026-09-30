@@ -1203,7 +1203,12 @@ export interface MontageOptions {
 	workspace: string;
 	/** Module the sheet is written for. Each panel also lands beside it. */
 	moduleName: string;
-	/** Preset angle names, e.g. ["front", "left", "three-quarter"]. */
+	/**
+	 * Preset view names. Orbit presets (front, three-quarter) frame the subject's
+	 * bounding sphere; interior presets (interior-corner, interior-doorway)
+	 * stand inside it at eye height. A room has no silhouette to orbit, so the
+	 * two families cannot be one formula.
+	 */
 	views: string[];
 	/** Objects to frame. Defaults to every visible mesh. */
 	subject?: string[];
@@ -1213,6 +1218,15 @@ export interface MontageOptions {
 	panelResolution?: { x: number; y: number };
 	timeoutMs?: number;
 	signal?: AbortSignal;
+}
+
+export interface MontagePanelFraming {
+	view: string;
+	mode: "orbit" | "interior";
+	location: number[];
+	target: number[];
+	/** null for orbit panels, which keep the default lens. */
+	lensMm: number | null;
 }
 
 export interface MontageResult {
@@ -1229,6 +1243,13 @@ export interface MontageResult {
 		rows: number;
 	};
 	subject: string[];
-	framing: { center: number[]; radius: number; distance: number };
+	framing: {
+		/** "interior" only when every panel stood inside the subject. */
+		family: "orbit" | "interior";
+		center: number[];
+		radius: number;
+		distance: number;
+		views: MontagePanelFraming[];
+	};
 	note: string;
 }

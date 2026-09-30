@@ -200,6 +200,101 @@ bpy.ops.object.delete()
 	}
 });
 
+test("an interior montage stands inside the room instead of orbiting it", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		// A room, not a prop: six walls with no ceiling in the way, so a camera
+		// that framed the bounding sphere would be outside the building looking
+		// at the outside of a wall.
+		const utils = await load("blender/utils.ts");
+		await utils.runBlenderJson({
+			cwd: ws.root,
+			blendPath: ws.blendPath,
+			scriptSource: `
+import bpy, json
+def slab(name, location, scale):
+    bpy.ops.mesh.primitive_cube_add(size=2, location=location)
+    obj = bpy.context.object
+    obj.name = name
+    obj.scale = scale
+    bpy.ops.object.transform_apply(scale=True)
+    return obj
+slab("Floor", (0, 0, -0.05), (3.0, 2.0, 0.05))
+slab("WallBack", (0, 2.0, 1.4), (3.0, 0.05, 1.4))
+slab("WallLeft", (-3.0, 0, 1.4), (0.05, 2.0, 1.4))
+slab("Counter", (1.6, 1.0, 0.45), (0.9, 0.4, 0.45))
+bpy.ops.wm.save_mainfile()
+print("__PI_BLENDER_JSON_START__" + json.dumps({"ok": True}) + "__PI_BLENDER_JSON_END__")
+`,
+			payload: {},
+			timeoutMs: 120_000,
+		});
+
+		const result = await montage.blenderMontage({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "room",
+			views: ["interior-corner", "interior-corner-left"],
+			subject: ["Floor", "WallBack", "WallLeft", "Counter"],
+		});
+
+		assert.equal(result.framing.family, "interior");
+		assert.equal(result.framing.views.length, 2);
+		for (const panel of result.framing.views) {
+			assert.equal(panel.mode, "interior", `${panel.view} was placed on an orbit`);
+			// The room spans roughly x -3..3, y -2..2, z -0.1..2.8. An eye
+			// outside that box photographs the outside of a wall, so the bounds
+			// are the assertion rather than a look at the images.
+			assert.ok(panel.location[0] >= -3 && panel.location[0] <= 3, `${panel.view} eye x ${panel.location[0]}`);
+			assert.ok(panel.location[1] >= -2 && panel.location[1] <= 2, `${panel.view} eye y ${panel.location[1]}`);
+			assert.ok(panel.location[2] > 0.5 && panel.location[2] < 2.8, `${panel.view} eye z ${panel.location[2]}`);
+		}
+		// Two corners of one room must be two DIFFERENT views, or the sheet is
+		// the same photograph twice.
+		const [a, b] = result.framing.views;
+		assert.notDeepEqual(a.target, b.target, "both corners aim at the same spot");
+
+		for (const panel of result.panelPaths) {
+			assert.ok(existsSync(panel), `no panel at ${panel}`);
+		}
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the two view families place the camera on opposite sides of the subject", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		await addBox(ws, "Subject", 0);
+		const options = {
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "body",
+			subject: ["Subject"],
+		};
+		const orbit = await montage.blenderMontage({ ...options, views: ["front"] });
+		const interior = await montage.blenderMontage({ ...options, views: ["interior-corner"] });
+
+		// A 2m cube has no interior, but the placement is still well defined and
+		// reported. The tool does not decide what counts as a room: it reports
+		// where it put the eye so a caller can see a black panel's cause.
+		assert.equal(interior.framing.family, "interior");
+		assert.equal(interior.framing.views[0].mode, "interior");
+
+		// The real invariant is the one that made interiors unrenderable: an
+		// orbit eye sits OUTSIDE the bounding sphere, an interior eye inside it.
+		const sphereRadius = orbit.framing.radius;
+		const orbitEye = orbit.framing.views[0].location;
+		const interiorEye = interior.framing.views[0].location;
+		const inside = (point) => Math.hypot(...point.map((value, axis) => value - orbit.framing.center[axis])) < sphereRadius;
+		assert.equal(inside(orbitEye), false, "an orbit eye is outside the subject by construction");
+		assert.equal(inside(interiorEye), true, "an interior eye stands inside the subject");
+		assert.ok(interiorEye[2] > 0, "and at a standing height rather than on the floor");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a montage renders its panels headless", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {

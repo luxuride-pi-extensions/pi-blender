@@ -1391,7 +1391,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_montage",
 			label: "Blender Montage",
 			description:
-				"Render several views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. The cameras are placed on a fixed orbit at one distance from the subject's bounding sphere, so every panel frames identically and a difference between panels is the geometry rather than the camera. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a critic that keeps calling something vague. Name the angles; do not ask for angles. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. Works with no window: it then renders each panel headlessly from model.blend.",
+				"Render several preset views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. Two families of preset, chosen per view name. ORBIT presets (front, three-quarter, …) frame the subject's bounding sphere at one fixed distance, so every panel frames identically and a difference between panels is the geometry rather than the camera. INTERIOR presets (interior-corner, interior-doorway, …) stand inside the subject at eye height — a room has no silhouette to orbit, and a 6x4x2.8m room has a bounding-sphere radius of 3.9m, so every orbit panel of it photographs the outside of a wall. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a room that reads as cluttered from one corner and open from another, a critic that keeps calling something vague. Name the views; do not ask for views. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. Works with no window: it then renders each panel headlessly from model.blend.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1403,7 +1403,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					minItems: 1,
 					maxItems: 4,
 					description:
-						"Preset angle names. Known: front, back, left, right, top, bottom, three-quarter, three-quarter-left, three-quarter-high, profile-left, profile-right, front-high. Two to four views make a useful sheet; one view is a render with extra steps.",
+						"Preset view names. Orbit: front, back, left, right, top, bottom, three-quarter, three-quarter-left, three-quarter-high, profile-left, profile-right, front-high. Interior: interior-corner, interior-corner-left, interior-corner-right, interior-elevated, interior-doorway, interior-low. An unknown name is refused with the list rather than approximated. Two to four views make a useful sheet; one view is a render with extra steps.",
 				}),
 				subject: Type.Optional(
 					Type.Array(Type.String(), {

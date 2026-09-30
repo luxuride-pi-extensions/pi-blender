@@ -12,7 +12,6 @@ failure this tool can have.
 """
 
 import math
-import os
 
 import numpy
 
@@ -91,13 +90,76 @@ ANGLE_PRESETS = {
     "front-high": (0.0, 35.0),
 }
 
+# Interior views are PLACEMENTS, not angles: a room has no silhouette to orbit,
+# and the view that shows a room's depth is the one you cannot reach by walking
+# around the outside of it. Each entry is (inset from the near corner as a
+# fraction of the span, eye height above the floor, aim point as a fraction of
+# the span, focal length in mm).
+#
+# The eye height is human rather than derived because a room photographed from
+# its own ceiling reads as a dollhouse, which is a diagram rather than a view.
+# The wide lens is the other half of it: the orbit frames a subject from
+# outside at a distance, so 50mm fills the frame with whatever it is looking
+# at. A camera standing 300mm from a wall at 50mm photographs that wall and
+# nothing else -- the room only opens up when the lens is wide enough to see
+# past it, which is why interiors are shot at 20mm and a mug is not. The aim
+# sits below eye level for the same reason: at 20mm a level camera hands a
+# third of the frame to the ceiling, which is a room's least informative surface.
+INTERIOR_PRESETS = {
+    "interior-corner": (0.22, 1.6, (0.75, 0.75, 0.32), 20.0),
+    "interior-corner-left": (0.22, 1.6, (0.25, 0.75, 0.32), 20.0),
+    "interior-corner-right": (0.22, 1.6, (0.75, 0.25, 0.32), 20.0),
+    "interior-elevated": (0.38, 2.1, (0.5, 0.5, 0.15), 18.0),
+    "interior-doorway": (0.02, 1.55, (0.5, 0.5, 0.42), 24.0),
+    "interior-low": (0.22, 0.75, (0.75, 0.75, 0.28), 20.0),
+}
+
+DEFAULT_INTERIOR_LENS_MM = 20.0
+
+EYE_HEIGHT_METERS = 1.6
+EYE_CLEARANCE_METERS = 0.1
+
 
 def resolve_angle(name):
+    """Resolve a view name to (angle, placement); exactly one of them is None.
+
+    A caller that only understands orbits must reject a placement rather than
+    silently render the orbit of a room, which is the outside of a wall.
+    """
     key = str(name).strip().lower()
-    if key not in ANGLE_PRESETS:
-        known = ", ".join(sorted(ANGLE_PRESETS))
-        raise ValueError(f'Unknown view "{name}". Known views: {known}.')
-    return ANGLE_PRESETS[key]
+    if key in ANGLE_PRESETS:
+        return ANGLE_PRESETS[key], None
+    if key in INTERIOR_PRESETS:
+        return None, INTERIOR_PRESETS[key]
+    known = ", ".join(sorted(ANGLE_PRESETS) + sorted(INTERIOR_PRESETS))
+    raise ValueError(f'Unknown view "{name}". Known views: {known}.')
+
+
+def interior_placement(bounds_min, bounds_max, preset, eye_height_m=EYE_HEIGHT_METERS):
+    """Where a camera sits for one interior preset, what it looks at, and its lens.
+
+    The placement is a fraction of the room's own span rather than a distance
+    from its centre, so one preset frames a small bathroom and a large hall the
+    way a person standing in each would see it. The lens comes back with it
+    because a wide lens is part of standing inside something, not a preference.
+    """
+    inset, eye, aim = preset[0], preset[1], preset[2]
+    lens_mm = preset[3] if len(preset) > 3 else DEFAULT_INTERIOR_LENS_MM
+    span_x = max(bounds_max[0] - bounds_min[0], 1e-6)
+    span_y = max(bounds_max[1] - bounds_min[1], 1e-6)
+    span_z = max(bounds_max[2] - bounds_min[2], 1e-6)
+    floor = bounds_min[2]
+    # The eye is clamped under the ceiling and above the floor: a camera inside
+    # a slab renders black rather than reporting why it was there.
+    height = min(floor + eye, bounds_max[2] - EYE_CLEARANCE_METERS)
+    height = max(height, floor + EYE_CLEARANCE_METERS)
+    location = (bounds_min[0] + inset * span_x, bounds_min[1] + inset * span_y, height)
+    target = (
+        bounds_min[0] + aim[0] * span_x,
+        bounds_min[1] + aim[1] * span_y,
+        floor + aim[2] * span_z,
+    )
+    return location, target, float(lens_mm)
 
 
 # 50mm on a 36mm sensor: a normal-to-slightly-long lens, so a panel does not

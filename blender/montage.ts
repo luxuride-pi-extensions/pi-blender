@@ -68,14 +68,14 @@ export async function blenderMontage(options: MontageOptions): Promise<MontageRe
 }
 
 /**
- * The preset angles, mirrored here so the tool can reject a misspelling before
- * spending a render on the panels that did resolve.
+ * The preset view names, mirrored here so the tool can reject a misspelling
+ * before spending a render on the panels that did resolve.
  *
  * The Python side raises its own ValueError listing the same names; this list
  * exists so the rejection arrives without a cold start and without waiting on
  * a scene that is not the workspace.
  */
-const KNOWN_VIEWS = [
+const KNOWN_ORBIT_VIEWS = [
 	"front",
 	"back",
 	"left",
@@ -89,6 +89,22 @@ const KNOWN_VIEWS = [
 	"profile-right",
 	"front-high",
 ] as const;
+
+/**
+ * Presets that stand inside the subject at eye height rather than orbiting it.
+ * A room has no silhouette to orbit, and a room's bounding-sphere radius puts
+ * the camera outside the building, so the two families cannot be one formula.
+ */
+const KNOWN_INTERIOR_VIEWS = [
+	"interior-corner",
+	"interior-corner-left",
+	"interior-corner-right",
+	"interior-elevated",
+	"interior-doorway",
+	"interior-low",
+] as const;
+
+const KNOWN_VIEWS: readonly string[] = [...KNOWN_ORBIT_VIEWS, ...KNOWN_INTERIOR_VIEWS];
 
 function normalizeViews(views: string[]): string[] {
 	if (views.length === 0) {

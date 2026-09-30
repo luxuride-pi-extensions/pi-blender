@@ -1616,16 +1616,23 @@ def handle_shutdown(request):
 
 
 def handle_montage(request):
-    """Render several fixed-orbit views of one subject and tile them into a sheet.
+    """Render several preset views of one subject and tile them into a sheet.
 
     Read-only with respect to the file it photographs: the resolution, file
     format, filepath and scene camera are snapshotted and restored, and the
     temporary cameras are removed, so asking for a sheet leaves the workspace
     exactly as it was found.
 
-    The camera positions come from fixed preset angles on one orbit. A framing
-    that computed its own angles per subject would put the comparison of two
-    panels at the mercy of the geometry being judged.
+    Two families of preset, chosen per view name. An ORBIT preset (front, left,
+    three-quarter) frames the subject's bounding sphere, which is the right
+    question for an object on a turntable. An INTERIOR preset (interior-corner,
+    interior-doorway) stands inside the subject at eye height, which is the only
+    question a room can be asked: a 6x4x2.8m room has a bounding-sphere radius
+    of 3.9m, so every orbit panel of it photographs the outside of a wall.
+
+    Both families are fixed presets rather than anything computed per subject.
+    A framing that derived its angles from the geometry would put the
+    comparison of two panels at the mercy of the geometry being judged.
     """
     ensure_requested_blend_open(request)
 
@@ -1640,7 +1647,7 @@ def handle_montage(request):
         raise RuntimeError("A montage needs at least one view.")
     # An angle the caller misspelled must not cost a render of the panels that
     # did resolve, so every name is checked before anything is created.
-    angles = [montage.resolve_angle(name) for name in view_names]
+    resolved = [montage.resolve_angle(name) for name in view_names]
 
     subjects = _resolve_probe_objects(request.get("subject") or [])
     if not subjects:
@@ -1655,6 +1662,21 @@ def handle_montage(request):
     centre = tuple((bounds_min + bounds_max) * 0.5)
     radius = max(((bounds_max - bounds_min) * 0.5).length, 0.01)
     distance = montage.framing_distance(radius)
+    # Orbit panels share one distance, so no angle silently frames the subject
+    # tighter than another. Interior panels ignore it entirely: their distance
+    # from the room's centre is a property of the room, not a framing choice.
+    placements = []
+    for angle, placement in resolved:
+        if angle is None:
+            family = "interior"
+            location, target, lens_mm = montage.interior_placement(bounds_min, bounds_max, placement)
+            placements.append((family, location, target, lens_mm))
+        else:
+            family = "orbit"
+            location = montage.camera_location(centre, distance, angle[0], angle[1])
+            # Look at the subject, not at the world origin: the orbit only says
+            # where the camera sits.
+            placements.append((family, location, centre, None))
 
     columns = int(request.get("columns") or (1 if len(view_names) <= 2 else 2))
     columns = max(1, min(4, columns))
@@ -1685,16 +1707,26 @@ def handle_montage(request):
         render_settings.resolution_percentage = 100
         render_settings.image_settings.file_format = "PNG"
 
-        for index, (view_name, (azimuth, elevation)) in enumerate(zip(view_names, angles)):
+        for index, view_name in enumerate(view_names):
             panel_path = os.path.join(output_dir, "panel-%d-%s.png" % (index + 1, view_name))
             camera_data = bpy.data.cameras.new("montage-camera-%d" % (index + 1))
             camera_object = bpy.data.objects.new(camera_data.name, camera_data)
             scene.collection.objects.link(camera_object)
             created_cameras.append(camera_object)
-            camera_object.location = montage.camera_location(centre, distance, azimuth, elevation)
-            # Look at the subject, not at the world origin: the orbit only says
-            # where the camera sits.
-            direction = Vector(centre) - camera_object.location
+            family, location, target, lens_mm = placements[index]
+            camera_object.location = location
+            if lens_mm is not None:
+                # The orbit's 50mm is a whole-subject framing choice; an interior
+                # preset's lens is part of standing inside something. A 50mm at
+                # 300mm from a wall photographs that wall and nothing else.
+                camera_data.lens = lens_mm
+            direction = Vector(target) - camera_object.location
+            if direction.length < 1e-6:
+                raise RuntimeError(
+                    f'View "{view_name}" puts the camera exactly where it is looking. '
+                    "A subject with no extent in one direction has no framing for "
+                    "that preset."
+                )
             camera_object.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
             scene.camera = camera_object
 
@@ -1737,13 +1769,25 @@ def handle_montage(request):
         "layout": layout,
         "subject": [obj.name for obj in subjects],
         "framing": {
+            "family": "interior" if all(f[0] == "interior" for f in placements) else "orbit",
             "center": [_round(value) for value in centre],
             "radius": _round(radius),
             "distance": _round(distance),
+            "views": [
+                {
+                    "view": str(view_name),
+                    "mode": family,
+                    "location": [_round(value) for value in location],
+                    "target": [_round(value) for value in target],
+                    "lensMm": _round(lens_mm) if lens_mm is not None else None,
+                }
+                for view_name, (family, location, target, lens_mm) in zip(view_names, placements, strict=True)
+            ],
         },
         "note": (
-            "Every panel is the same subject from a preset orbit angle at the same "
-            "distance, so a difference between panels is the geometry, not the framing."
+            "Orbit panels share one distance so a difference between them is the "
+            "geometry, not the framing. Interior panels stand inside the subject "
+            "at eye height, which is the only framing a room answers to."
         ),
     }
 
