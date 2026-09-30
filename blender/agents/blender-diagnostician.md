@@ -90,6 +90,7 @@ Confidence: <high | medium — say what would raise it>
 
 Rules:
 - Quote measured values. A number in your report is a fact; a description is an opinion, and opinions are what you were spawned to eliminate.
+- **If none of your tools can measure what the brief describes, say so in the first line and stop.** `Blocked: <the measurement> needs <the capability you do not have>` beats a verdict you inferred from a render. An eyeballed finding is not a medium-confidence finding; it is a guess wearing a number's clothes, and the worker will act on it.
 - Rank fixes by confidence and say what would raise confidence (usually a missing pair measurement or an unprobed object).
 - Never paste raw JSON, vertex data, or probe output. The numbers you selected, nothing more.
 - If the measurement contradicts the brief's stated symptom, say so plainly — the brief is a hypothesis and you are testing it.

@@ -194,6 +194,13 @@ Every worker brief must state, explicitly:
   `categories` entirely, and the unfiltered payload on a real workspace is
   thousands of tokens on every call for data it does not need. Deciding once,
   here, is cheaper than letting six workers each discover it.
+- **what the work needs**, in one clause, so a worker that lacks it says so
+  instead of substituting. `The grip needs a measurement of its clearance
+  against the body` — a worker holding `blender_geometry_probe` and
+  `blender_read_only_python` will use them; a worker that somehow does not have
+  them should open its report with the missing capability rather than eyeball a
+  render and report a guess. One clause here costs a line in the brief and saves
+  a turn, a render and a wrong finding.
 
 The brief is the only thing a worker knows. Every fact you omit is a fact it
 spends turns rediscovering, and it rediscovers them in a transcript you never
