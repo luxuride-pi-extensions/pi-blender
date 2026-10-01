@@ -173,6 +173,20 @@ export interface BlenderBranchRunRecord {
 	removedObjects: string[];
 	/** Everything the apply brings back: touched plus required relatives. */
 	applyObjects: string[];
+	/**
+	 * Everything this module owns after this run: what it applied, plus what it
+	 * owned before, minus what it removed. Carried forward rather than re-derived,
+	 * because the fingerprints are content-based — a script that removes and
+	 * rebuilds its part byte-for-byte applies nothing — so the diff alone cannot
+	 * say what a module is responsible for.
+	 */
+	ownedObjects?: string[];
+	/**
+	 * Content hash of the applied datablocks, so the next iteration can be
+	 * compared against this one without spending a render or a critic on the
+	 * question. Equal digests mean the module wrote the same bytes again.
+	 */
+	stateDigest?: string;
 	status: BranchRunStatus;
 	appliedAt?: string;
 	conflicts?: BranchConflict[];
@@ -212,10 +226,14 @@ export interface BranchRunResult {
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
+	/** Everything this module owns after this run; carried into the next run. */
+	ownedObjects: string[];
 	renderOutputPath: string | null;
 	status: BranchRunStatus;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
 	cameras: BranchCameraFraming[];
+	/** Content hash of the applied datablocks; empty only from a pre-digest Blender. */
+	stateDigest?: string;
 }
 
 export interface BranchApplyOptions {
@@ -877,6 +895,19 @@ export interface ModuleRunResult {
 	 * camera exists at `<module>Cam`.
 	 */
 	cameras?: BranchCameraFraming[];
+	/**
+	 * Content hash of the datablocks this run applied. Comparing it with the
+	 * previous run's is how a caller learns that an iteration changed nothing,
+	 * without rendering the same bytes and paying a critic to look at them.
+	 *
+	 * Absent on a live-session run: `changed` there is derived from the exit
+	 * code, which says only that the script raised nothing.
+	 */
+	stateDigest?: string;
+	/** True when the previous run of this module produced this same digest. */
+	unchangedSinceLastRun?: boolean;
+	/** The earlier run this one was compared against, when there was one. */
+	comparedWithIteration?: number;
 }
 
 export interface ModuleRevertOptions {

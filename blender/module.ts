@@ -136,6 +136,47 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
+		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, branchResult)),
+	};
+}
+
+/**
+ * Compare this run's applied-state digest with the previous run of the same
+ * module's.
+ *
+ * This is what makes "the loop is going in circles" a number instead of an
+ * opinion. An iteration that rewrote the same datablocks byte for byte produced
+ * a re-render identical to the last one, so a fresh critic on that picture has
+ * nothing to find that the previous critic did not already have; the loop was
+ * paying for a context and an image to re-read a verdict. The caller gets
+ * `unchangedSinceLastRun` on the run result and can stop instead.
+ *
+ * Only a digest is compared, never a run count: two runs of an unchanged script
+ * are expected to match, while two runs of a script being edited under a failing
+ * iteration are not. Comparison is against the most recent PRIOR run only, and
+ * it is skipped when either side lacks a digest (a pre-digest workspace) rather
+ * than guessed.
+ */
+async function compareWithPreviousDigest(
+	cwd: string,
+	workspace: string,
+	moduleName: string,
+	result: { iteration: number; stateDigest?: string },
+): Promise<{ stateDigest?: string; unchangedSinceLastRun?: boolean; comparedWithIteration?: number }> {
+	if (!result.stateDigest) return {};
+	const manifest = await loadWorkspaceManifest(cwd, workspace);
+	const previous = (manifest.branchRuns ?? [])
+		.filter((run) => run.module === moduleName && run.iteration < result.iteration && run.stateDigest)
+		.sort((a, b) => a.iteration - b.iteration)
+		.at(-1);
+	// No earlier digest means the comparison is simply unavailable, and saying
+	// "unchanged" about a run nothing was compared against would be a false
+	// all-clear on the one number the loop is about to trust.
+	if (!previous) return { stateDigest: result.stateDigest };
+	return {
+		stateDigest: result.stateDigest,
+		comparedWithIteration: previous.iteration,
+		unchangedSinceLastRun: previous.stateDigest === result.stateDigest,
 	};
 }
 

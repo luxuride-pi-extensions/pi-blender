@@ -700,6 +700,16 @@ diagnostician's numbers are the thing to spend.
    condition your next brief did not change, and a third identical brief buys
    the same picture again. Read the two verdicts side by side: they are the
    cheapest diagnostic you will ever get.
+
+   **Before you spawn the critic, read `unchangedSinceLastRun` on the run
+   result.** A headless module run reports a content digest of the objects that
+   module owns and compares it with its own previous run. `true` means the
+   script produced the geometry it produced last time, so the render is the same
+   picture and a fresh critic on it can only repeat the last verdict — a whole
+   context and an image spent re-reading an answer you already hold. When it is
+   `true`, do not critique: either your fix was never in the script, or it ran
+   and something else put the geometry back. Say which, and fix that instead.
+   `false` is the normal case and needs no comment.
 6. **When every model's parts are present, spawn `blender-merger`** with the
    grouping named: which objects go into which joined model. This is mandatory,
    not a judgement call. A build whose parts landed correctly in `model.blend`

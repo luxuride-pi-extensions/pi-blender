@@ -144,9 +144,29 @@ this before you check the lights.
 Module: <name>
 Outcome: <one line — what was built/changed, with exact object names and key parameters>
 Run: iteration <N>, exit <code>, checkpoint modules/<name>/runs/NN/pre-NN.blend
+Changed: <yes | NO — this run produced the same geometry as iteration <M>>
 Render: modules/<name>/render.png — <one line on what it shows>
 Open questions: <none | concise list>
 ```
+
+`Changed: NO` is the most valuable thing you can report, so make it a fact
+rather than a feeling: a headless run tells you itself, through
+`unchangedSinceLastRun`, when your script produced the same geometry as the run
+before it. When that is true you have learned one of two things, and the
+difference decides what you do next:
+
+- **Your edit is not in the script.** The most common case by far — the fix was
+  written into a report instead of into `script.py`, or into a script the runner
+  did not execute. Read the script, put the change in it, run again.
+- **Something else is overwriting your geometry.** Your script runs correctly
+  against a blend where a sibling's or a leftover's datablock wins — a second
+  object with a similar name, a modifier applied upstream, a parent you did not
+  know about. Probe for the duplicate (`blender_geometry_probe` with `checks:
+  ["bounds"]` on both names) and say which object you found.
+
+Reporting `Changed: NO` and stopping is the right move. Reporting it and
+handing back a re-render of an identical picture costs the manager a critic and
+an image to learn what your report already said.
 
 Rules:
 - Never paste `script.py` contents or raw logs into your report. The report is a summary; the manager may read the file itself if it needs detail.

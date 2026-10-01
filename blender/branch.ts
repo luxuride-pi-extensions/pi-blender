@@ -107,6 +107,7 @@ workspace_path = payload["workspacePath"]
 iteration_path = payload["iterationPath"]
 script_path = payload["scriptPath"]
 module_name = payload["moduleName"]
+owned_objects = set(payload.get("ownedObjects") or [])
 
 
 def _fingerprint_object(obj):
@@ -364,6 +365,47 @@ def frame_module_camera(module):
 camera_framing = frame_module_camera(module_name)
 cameras = [camera_framing] if camera_framing is not None else []
 
+# A digest of the geometry this run left behind, over the datablocks this
+# MODULE owns. It exists to make one question decidable without an image: did
+# this iteration change anything at all? An iteration whose digest equals its
+# predecessor's produced the same bytes in a different runs/NN directory, and no
+# critic reading a re-render of those bytes can return a finding that was not
+# already available from the last one. That is the whole case for computing it
+# here rather than letting the loop discover it by spending two more critiques.
+#
+# It is scoped to the module's OWNED objects, NOT to what this run applied, and
+# that distinction is load-bearing. The fingerprints above are content-based --
+# the name is excluded deliberately, so a rename reads as a remove plus an add --
+# and an idempotent rebuild that removes and recreates a part byte-for-byte is
+# therefore indistinguishable from a run that did nothing: touched is empty,
+# apply_objects is empty, and a digest over the apply set would hash the empty
+# string. Every rebuild would read as a change, which is the one false negative
+# the loop must not have. Ownership is carried forward from the module's earlier
+# runs, so the digest has a stable subject whether or not this run changed it.
+#
+# Two exclusions, both to keep the number about geometry a critic would notice.
+# The camera AND its target empty, which is the pair framing rewrites on every
+# run. The suffix test has to cover both names: filtering on CAMERA_SUFFIX alone
+# leaves the target empty in the digest, and because the after-snapshot is taken
+# BEFORE framing creates the pair, the first run hashes a datablock that does
+# not exist yet as a dash while every later run hashes its real content -- so
+# the very first run would always read as a change and every rebuild after it as
+# a second one.
+FRAMING_DATABLOCK_SUFFIXES = (CAMERA_SUFFIX, CAMERA_SUFFIX + "Target")
+bpy.context.view_layer.update()
+owned_objects |= apply_objects
+owned_objects -= set(removed_objects)
+digest_objects = [
+    name for name in sorted(owned_objects)
+    if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
+]
+state_digest_source = [
+    name + "=" + after["objects"].get(name, "-") for name in digest_objects
+]
+for material_name in sorted(touched_materials):
+    state_digest_source.append(material_name + "=" + after["materials"].get(material_name, "-"))
+state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest()
+
 # The save happens HERE, after the framing and after the apply set is settled --
 # not inside the try above. Saving earlier wrote a branch file without the camera,
 # so the render could not find it, and the apply reported the camera as missing
@@ -386,6 +428,8 @@ print(json.dumps({
     "addedObjects": sorted(after_objects - before_objects),
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
+    "ownedObjects": sorted(owned_objects),
+    "stateDigest": state_digest,
     "cameras": cameras,
 }))
 print("__PI_BLENDER_JSON_END__")
@@ -401,6 +445,17 @@ interface BranchRunPayload {
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
+	/**
+	 * Every object this module owns after this run: what it applied, plus what it
+	 * owned before, minus what it removed. Carried forward because the
+	 * fingerprints are content-based, so an idempotent rebuild applies nothing
+	 * and the apply set alone cannot say what the module is responsible for.
+	 */
+	ownedObjects: string[];
+	/**
+	 * Content hash over those owned objects. Absent only from a pre-digest run.
+	 */
+	stateDigest: string;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
 	cameras: BranchCameraFraming[];
 }
@@ -473,6 +528,17 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				iterationPath: runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
+				// Ownership is CARRIED FORWARD from the module's earlier runs, not
+				// re-derived from the script or from the diff. The fingerprints are
+				// content-based, so a script that removes and rebuilds its part
+				// byte-for-byte applies nothing and looks identical to a script that
+				// did nothing; without a prior record the digest would have an empty
+				// subject on exactly the rebuild iterations it exists to measure.
+				ownedObjects: [
+					...((manifest.branchRuns ?? [])
+						.filter((run) => run.module === moduleName)
+						.flatMap((run) => run.ownedObjects ?? [])),
+				],
 			},
 			signal: options.signal,
 			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
@@ -551,6 +617,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		addedObjects: payload.addedObjects,
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
+		ownedObjects: payload.ownedObjects,
+		stateDigest: payload.stateDigest,
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
@@ -591,8 +659,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		addedObjects: payload.addedObjects,
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
+		ownedObjects: payload.ownedObjects,
 		renderOutputPath,
 		cameras: payload.cameras,
+		stateDigest: payload.stateDigest,
 		status: "staged",
 	};
 }

@@ -120,6 +120,25 @@ obj = bpy.data.objects.get("Mug")
 obj.location.x = 5.0
 `;
 
+/**
+ * An idempotent version of box(): the object is REMOVED before being rebuilt,
+ * so running it twice leaves the same datablocks rather than accumulating
+ * Arm.001. Needed by the digest test, whose whole point is that a re-run of an
+ * unchanged script changes nothing — a script that quietly adds a second box
+ * is not that.
+ */
+function replaceBox(name, sx, sy, sz, x = 0, y = 0, z = 0) {
+	return `
+import bpy
+existing = bpy.data.objects.get("${name}")
+if existing is not None:
+    mesh = existing.data
+    bpy.data.objects.remove(existing, do_unlink=True)
+    if mesh.users == 0:
+        bpy.data.meshes.remove(mesh)
+${box(name, sx, sy, sz, x, y, z).replace(/^import bpy\n/, "")}`;
+}
+
 const ADD_BOX_AT = `
 import bpy
 bpy.ops.mesh.primitive_cube_add(size=1.0)
@@ -596,6 +615,75 @@ ${box("Arm", 10.0, 0.4, 0.4, 8.0, 0, 0).replace(/^import bpy\n/, "")}
 		assert.ok(
 			Math.abs(second.cameras[0].center[0] - 8.0) < 0.2,
 			`the aim must follow the part to where it now is (centre ${JSON.stringify(second.cameras[0].center)})`,
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an unchanged iteration is reported as unchanged, without a render", { skip }, async () => {
+	// The loop's own failure mode: re-brief, re-run, re-render, spawn a fresh
+	// critic, and get the same verdict from the same picture. A digest of what
+	// the run applied makes that decidable BEFORE the render is looked at, which
+	// is the only point at which stopping saves anything.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		const first = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.ok(first.stateDigest, "every headless run reports the digest of what it applied");
+		assert.equal(first.unchangedSinceLastRun, undefined, "the first run has nothing to be unchanged against");
+
+		// The same script again: an idempotent rebuild writes the same bytes.
+		const repeat = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(repeat.unchangedSinceLastRun, true, "re-running the same script must be reported as no change");
+		assert.equal(repeat.comparedWithIteration, first.iteration);
+
+		// Now change the geometry, which must move the digest.
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));
+		const changed = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(changed.unchangedSinceLastRun, false, "a real geometry change must not read as unchanged");
+		assert.notEqual(changed.stateDigest, repeat.stateDigest);
+
+		// A module's digest must not move because a SIBLING's geometry did, or
+		// "unchanged" would report a false all-clear for every module in a
+		// parallel build.
+		writeScript(ws.workspacePath, "other", box("Other", 1.0, 1.0, 1.0, 20, 0, 0));
+		await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "other",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		const afterSibling = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(
+			afterSibling.unchangedSinceLastRun,
+			true,
+			"another module's geometry must not change this module's digest",
 		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
