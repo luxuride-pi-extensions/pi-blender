@@ -872,6 +872,13 @@ export interface ModuleRunResult {
 	stdout: string;
 	exitCode: number;
 	renderOutputPath: string | null;
+	/**
+	 * True when this run changed the blend's object or material content.
+	 *
+	 * From a before/after content fingerprint, not from Blender's `is_dirty`
+	 * flag: that flag is UI-facing and stays false in background mode, so a
+	 * headless run would report every real edit as unchanged.
+	 */
 	changed: boolean;
 	/**
 	 * Where the script actually ran.
@@ -900,8 +907,8 @@ export interface ModuleRunResult {
 	 * previous run's is how a caller learns that an iteration changed nothing,
 	 * without rendering the same bytes and paying a critic to look at them.
 	 *
-	 * Absent on a live-session run: `changed` there is derived from the exit
-	 * code, which says only that the script raised nothing.
+	 * Absent on a live-session run: `changed` there is a yes/no content
+	 * comparison rather than a comparable hash.
 	 */
 	stateDigest?: string;
 	/** True when the previous run of this module produced this same digest. */

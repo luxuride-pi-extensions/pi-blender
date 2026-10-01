@@ -52,6 +52,20 @@ def run(live_bridge, source, blend_path):
     return live_bridge.handle_read_only_python(request)
 
 
+def run_mutating(live_bridge, source, blend_path, save_after=False):
+    """Same plumbing as run(), but through the handler that may change the file."""
+    script_path = os.path.join(live_bridge.BRIDGE_DIR, "mutating-probe-script.py")
+    with open(script_path, "w", encoding="utf-8") as handle:
+        handle.write(source)
+    return live_bridge.handle_execute_python({
+        "blendPath": blend_path,
+        "workspacePath": tempfile.mkdtemp(),
+        "iterationPath": tempfile.mkdtemp(),
+        "userScriptPath": script_path,
+        "saveAfter": save_after,
+    })
+
+
 def expect_refused(live_bridge, blend_path, label, source):
     result = run(live_bridge, source, blend_path)
     refused = result["exitCode"] == 2 and "read-only" in result["stdout"]
@@ -131,6 +145,50 @@ def main():
     check(result["exitCode"] == 1, "an ordinary error is still an error, not a refusal")
     check("ValueError" in result["stderr"], "the traceback survives")
 
+    # --- `changed` is a dirty rising edge, not "the script exited 0" -----
+    result = run_mutating(live_bridge, "print('READ ONLY SCRIPT')\n", blend_path)
+    check(result["exitCode"] == 0, "a no-op mutating-handler run succeeds")
+    check(
+        result["changed"] is False,
+        f"a successful no-op reports changed=False, got {result['changed']!r}",
+    )
+
+    result = run_mutating(
+        live_bridge,
+        "import bpy\nbpy.ops.mesh.primitive_ico_sphere_add()\nprint('MUTATED UNSAVED')\n",
+        blend_path,
+    )
+    check(result["exitCode"] == 0, "an unsaved mutating run succeeds")
+    check(
+        result["changed"] is True,
+        f"an unsaved mutation reports changed=True, got {result['changed']!r}",
+    )
+
+    # Saving clears the dirty flag, so a correct implementation cannot read it
+    # after save_mainfile() -- this is the case that regressed before.
+    result = run_mutating(
+        live_bridge,
+        "import bpy\nbpy.ops.mesh.primitive_ico_sphere_add()\nprint('MUTATED SAVED')\n",
+        blend_path,
+        save_after=True,
+    )
+    check(result["exitCode"] == 0, "a mutating run that saves succeeds")
+    check(
+        result["changed"] is True,
+        f"a mutating run that saves reports changed=True, got {result['changed']!r}",
+    )
+
+    result = run_mutating(
+        live_bridge,
+        "import bpy\nbpy.ops.mesh.primitive_ico_sphere_add()\nraise ValueError('after the edit')\n",
+        blend_path,
+    )
+    check(result["exitCode"] == 1, "a mutating run that raises still fails")
+    check(
+        result["changed"] is True,
+        f"a mutation followed by a raise reports changed=True, got {result['changed']!r}",
+    )
+
     # --- the guard must be gone afterwards -------------------------------
     # Checked through the MUTATING handler: every run above went through the
     # read-only one, which installs the guard every time by design, so this
@@ -148,6 +206,21 @@ def main():
     })
     check(result["exitCode"] == 0, "a MUTATING run works again after the guard is restored")
     check("MUTATED" in result["stdout"], "bpy.ops adds an object again after the guard is restored")
+
+    # The file was left dirty by the raise case above. That is now irrelevant to
+    # `changed`: the handler diffs content, so a run that adds an object is a
+    # change whether or not the file was already dirty on entry.
+    check(
+        result["changed"] is True,
+        f"a mutation against an already-dirty file reports changed=True, got {result['changed']!r}",
+    )
+
+    # The other half of that: prior dirtiness must not make every run report a
+    # change, or `changed` is just `exit_code == 0` wearing a new hat.
+    check(
+        run_mutating(live_bridge, "print('NOTHING TOUCHED')", blend_path)["changed"] is False,
+        "a no-op run against an already-dirty file reports changed=False",
+    )
 
     if failures:
         print(f"FAIL: {len(failures)} case(s)")

@@ -22,6 +22,8 @@ import bpy  # pyright: ignore[reportMissingImports]
 from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
 from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 
+from fingerprint import content_changed, snapshot
+
 # Sits beside this file so a read-only run is refused in the bridge rather than
 # in the prompt that asked for it.
 # pi-lens-ignore: ast-grep:unresolved-import-python
@@ -500,6 +502,21 @@ def handle_execute_python(request):
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     exit_code = 0
+    changed = False
+    before = snapshot(bpy)
+
+    def sample_change():
+        """Record whether this execution changed the scene's content.
+
+        Sampled immediately after exec returns, and again when it raises, so a
+        mutation made before the exception still counts. Content hashes rather
+        than `bpy.data.is_dirty`: that flag is a UI-facing notion of unsaved
+        work, it reads False in background mode, and reading it after the save
+        would report the file clean precisely when the run did the most work.
+        """
+        nonlocal changed
+        if not changed and content_changed(before, snapshot(bpy)):
+            changed = True
 
     previous_cwd = os.getcwd()
     workspace_path = request.get("workspacePath")
@@ -512,9 +529,11 @@ def handle_execute_python(request):
                 code = handle.read()
             # pi-lens-ignore: ast-grep:no-compile-call, S102, eval-exec
             exec(compile(code, request["userScriptPath"], "exec"), globals_dict)
+            sample_change()
             if request.get("saveAfter", True):
                 bpy.ops.wm.save_mainfile()
         except Exception:
+            sample_change()
             exit_code = 1
             traceback.print_exc()
         finally:
@@ -524,7 +543,7 @@ def handle_execute_python(request):
         "stdout": stdout_buffer.getvalue(),
         "stderr": stderr_buffer.getvalue(),
         "exitCode": exit_code,
-        "changed": exit_code == 0,
+        "changed": changed,
     }
 
 

@@ -24,6 +24,7 @@
 
 import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { pidIsRunning, readLockHolderPid } from "./liveness.js";
@@ -91,7 +92,6 @@ export function getBranchBlendPath(workspacePath: string, moduleName: string): s
  */
 function buildBranchRunScript(): string {
 	return `
-import bpy
 import contextlib
 import hashlib
 import io
@@ -100,9 +100,25 @@ import math
 import os
 import sys
 import traceback
-from mathutils import Vector
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
+
+# This run script is handed to Blender as a string rather than executed as a
+# file beside the bridge, so the shared fingerprint module has to be located by
+# the caller and put on the path from here.
+_ASSETS_DIR_ON_PATH = payload.get("assetsDir")
+if _ASSETS_DIR_ON_PATH and _ASSETS_DIR_ON_PATH not in sys.path:
+    sys.path.insert(0, _ASSETS_DIR_ON_PATH)
+
+import bpy  # pyright: ignore[reportMissingImports]
+
+from mathutils import Vector  # pyright: ignore[reportMissingImports]
+
+# One implementation of the fingerprint, shared with the live bridge: two copies
+# of this algorithm are two answers to "did anything change", and the apply side
+# only trusts a run if both paths agree.
+from fingerprint import snapshot
+
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
 iteration_path = payload["iterationPath"]
@@ -111,78 +127,7 @@ module_name = payload["moduleName"]
 owned_objects = set(payload.get("ownedObjects") or [])
 
 
-def _fingerprint_object(obj):
-    """A content hash of one object.
-
-    Content, not identity: the NAME is excluded, because a rename shows up as
-    a remove plus an add and would otherwise double-count as a modification of
-    two objects.
-    """
-    parts = [obj.type]
-    parts.append(obj.parent.name if obj.parent is not None else "")
-    parts.append("|".join("%.6f" % value for row in obj.matrix_world for value in row))
-    parts.append(",".join(mod.type for mod in obj.modifiers))
-    parts.append(str(len(obj.constraints)))
-    parts.append(";".join("%.6f" % value for group in obj.vertex_groups for value in (group.index,)))
-
-    data = getattr(obj, "data", None)
-    if data is not None and hasattr(data, "vertices"):
-        try:
-            parts.append("verts=%d" % len(data.vertices))
-            parts.append("polys=%d" % len(data.polygons))
-            digest = hashlib.md5()
-            for vert in data.vertices:
-                digest.update(("%.6f,%.6f,%.6f\\n" % (vert.co.x, vert.co.y, vert.co.z)).encode())
-            for poly in data.polygons:
-                digest.update(("%d/%d\\n" % (poly.loop_start, poly.loop_total)).encode())
-            parts.append("mesh=" + digest.hexdigest())
-        except (AttributeError, TypeError, RuntimeError):
-            pass
-
-    # Material NAMES, not material content: the material itself is a tracked
-    # datablock in its own right, and hashing it here as well would make every
-    # object that merely references it look touched by a paint module.
-    parts.append("slots=" + "|".join(slot.material.name if slot.material else "" for slot in obj.material_slots))
-    return hashlib.md5("\\x00".join(parts).encode()).hexdigest()
-
-
-def _fingerprint_material(material):
-    """A content hash of one material's node tree, or its flat settings."""
-    if getattr(material, "node_tree", None) is None:
-        return hashlib.md5(
-            ("%s|%s|%.6f" % (material.name, material.diffuse_color[0], material.diffuse_color[3])).encode()
-        ).hexdigest()
-    digest = hashlib.md5()
-    for node in sorted(material.node_tree.nodes, key=lambda n: n.name):
-        digest.update((node.name + "|" + node.type).encode())
-        for socket in node.inputs:
-            try:
-                value = socket.default_value
-            except (AttributeError, TypeError):
-                continue
-            if hasattr(value, "__len__"):
-                digest.update(",".join("%.6f" % float(component) for component in value).encode())
-            else:
-                digest.update(str(value).encode())
-    return digest.hexdigest()
-
-
-def snapshot():
-    # The depsgraph update is what makes the fingerprints below truthful. A script
-    # that sets obj.location has changed matrix_world only lazily, so reading it
-    # without this returns the PREVIOUS transform -- and a moved object then
-    # fingerprints identical to a stationary one, which reports as a module that
-    # touched nothing and silently drops its work at apply time. This used to be
-    # masked by the save that ran before the snapshot; framing moved the save
-    # after it, and the masking went with it.
-    bpy.context.view_layer.update()
-    return {
-        "objects": {obj.name: _fingerprint_object(obj) for obj in bpy.data.objects},
-        "materials": {mat.name: _fingerprint_material(mat) for mat in bpy.data.materials},
-    }
-
-
-before = snapshot()
+before = snapshot(bpy)
 before_objects = set(before["objects"])
 before_materials = set(before["materials"])
 
@@ -211,7 +156,7 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
     finally:
         os.chdir(previous_cwd)
 
-after = snapshot()
+after = snapshot(bpy)
 after_objects = set(after["objects"])
 after_materials = set(after["materials"])
 
@@ -227,6 +172,7 @@ touched_materials = sorted(
 # and a parent without its children strands them. The widening happens HERE and
 # is reported in the record, rather than being discovered at apply time — a
 # widened apply set is exactly what turns into a conflict against a sibling.
+
 # Objects the module DELETED. These are removals on apply, never appends, and
 # the distinction matters: a deleted object is also "touched" in the sense that
 # its fingerprint disappeared, so classifying it by touch alone would put it in
@@ -529,6 +475,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				iterationPath: runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
+				// The generated run script is executed as a string, not as a file
+				// in the assets dir, so nothing about sys.path comes for free and
+				// the shared fingerprint module has to be pointed at explicitly.
+				assetsDir: getBlenderAssetsDir(),
 				// Ownership is CARRIED FORWARD from the module's earlier runs, not
 				// re-derived from the script or from the diff. The fingerprints are
 				// content-based, so a script that removes and rebuilds its part
