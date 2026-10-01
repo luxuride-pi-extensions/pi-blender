@@ -987,7 +987,7 @@ export interface RunBlenderJsonOptions {
 }
 
 /** One of the measurement families `blender_geometry_probe` can run. */
-export type GeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "shape" | "topology";
+export type GeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "shape" | "topology" | "scale";
 
 export interface GeometryProbeBounds {
 	min: number[];
@@ -1103,6 +1103,30 @@ export interface GeometryProbePair {
 	boundingBoxOverlap: { x: number; y: number; z: number };
 }
 
+/**
+ * One axis of a measured object against the dimension a brief named for it.
+ * `measured` and `target` are both metres: a specification's own units are
+ * normalized on the way in, so 900mm and 0.9 compare equal.
+ */
+export interface GeometryProbeScaleAxis {
+	axis: "x" | "y" | "z";
+	/** Which way round the number is, from the object's own point of view. */
+	label: "width" | "depth" | "height";
+	measured: number;
+	target: number;
+	/** measured - target, in metres. Negative means the object is undersized. */
+	delta: number;
+	/** measured / target. 1.0 is exact, 1000.0 is the millimetre/metre trap. */
+	ratio: number | null;
+	withinTolerance: boolean;
+}
+
+export interface GeometryProbeScaleEntry {
+	status: "on-spec" | "off-spec" | "missing" | "not-a-mesh" | "no-axes";
+	detail: string;
+	axes?: Record<string, GeometryProbeScaleAxis>;
+}
+
 export interface GeometryProbeResult {
 	blendPath: string | null;
 	isDirty: boolean;
@@ -1111,6 +1135,23 @@ export interface GeometryProbeResult {
 	unitNote: string;
 	objects: Record<string, GeometryProbeObject>;
 	pairs: Record<string, GeometryProbePair>;
+	/** Present only when a `scale` check was requested; empty otherwise. */
+	scaleContract: Record<string, GeometryProbeScaleEntry>;
+}
+
+/**
+ * Reference dimensions for objects, keyed by the exact object name. Values are
+ * millimetres when written as bare numbers ("900") and parsed as metres when
+ * they carry a unit ("0.9", "2.4m", "3'4\""), because a brief writes a counter
+ * height the way a person does and a harness that guesses wrong between the two
+ * reports a room a thousand times too big without looking wrong.
+ */
+export interface GeometryProbeSpecification {
+	width?: number | string;
+	depth?: number | string;
+	height?: number | string;
+	/** Metres. Defaults to the probe's own tolerance. */
+	tolerance?: number;
 }
 
 export interface GeometryProbeOptions {
@@ -1119,6 +1160,8 @@ export interface GeometryProbeOptions {
 	objects?: string[];
 	pairs?: string[][];
 	checks?: GeometryProbeCheck[];
+	/** Reference dimensions; asking for them implies the `scale` check. */
+	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: "X" | "Y" | "Z";
 	timeoutMs?: number;

@@ -1230,8 +1230,16 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								'Object-name pairs to measure against each other, e.g. [["Mug", "MugHandle"]]. Each pair yields the closest surface distance, penetration depth, per-object vertex-inside counts, bounding-box overlap, and a verdict. Omit to auto-pair when exactly two objects are given.',
 						},
 					),
-				),
-				checks: Type.Optional(
+),
+			specifications: Type.Optional(
+				Type.Record(Type.String(), Type.Object({
+					width: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+					depth: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+					height: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+					tolerance: Type.Optional(Type.Number()),
+				})),
+			),
+			checks: Type.Optional(
 					Type.Array(
 						Type.Union([
 							Type.Literal("transform"),
@@ -1240,10 +1248,11 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("pair"),
 							Type.Literal("shape"),
 							Type.Literal("topology"),
+							Type.Literal("scale"),
 						]),
 						{
 							description:
-								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect.",
+								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
 						},
 					),
 				),

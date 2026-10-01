@@ -8,6 +8,7 @@ import type {
 	BlenderRenderViewSource,
 	BlenderViewportShading,
 	GeometryProbeResult,
+	GeometryProbeSpecification,
 	MontageResult,
 } from "./types.js";
 import {
@@ -539,6 +540,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	objects?: string[];
 	pairs?: string[][];
 	checks?: string[];
+	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: string;
 	signal?: AbortSignal;
@@ -556,6 +558,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			objects: options.objects,
 			pairs: options.pairs,
 			checks: options.checks,
+			specifications: options.specifications,
 			tolerance: options.tolerance,
 			expectedAxis: options.expectedAxis,
 		},

@@ -782,6 +782,7 @@ GEOMETRY_PROBE_CHECKS = (
     "pair",
     "shape",
     "topology",
+    "scale",
 )
 GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT = 4000
 # The shape family is a summary, not a dump: it reports counts, a few scalars
@@ -1430,6 +1431,118 @@ def _probe_shape(obj):
     return entry
 
 
+def _parse_length(value):
+    """Return a length in metres from a number or a dimension string.
+
+    Interiors are specified in millimetres and a brief that writes "900" for a
+    counter height is stating 900 mm, not 900 m. A bare INTEGER is therefore
+    millimetres and a bare DECIMAL is metres, because a rendered scene cannot
+    show a factor of a thousand: a 900 m ceiling looks exactly like a 0.9 m one
+    from inside a 900 m room. Strings carrying an explicit unit are taken at
+    their word.
+    """
+    if isinstance(value, (int, float)):
+        return float(value) / 1000.0
+    text = str(value).strip().lower().replace(" ", "")
+    for suffix, scale in (("mm", 0.001), ("cm", 0.01), ("m", 1.0), ("in", 0.0254), ("'", 0.3048), ('"', 0.6096)):
+        if text.endswith(suffix):
+            head = text[: -len(suffix)]
+            try:
+                return float(head) * scale
+            except ValueError as err:
+                raise RuntimeError(f'Cannot read a length from "{value}". Write it as 900mm, 2.4m or 0.9.') from err
+    try:
+        # A bare DECIMAL is metres and a bare INTEGER is millimetres, which is
+        # how a brief writes them: "900" is a counter height and "0.9" is the
+        # same counter in SI. A unitless integer read as metres would be a
+        # 1000x error that renders plausibly, so it is not an option.
+        number = float(text)
+    except ValueError as err:
+        raise RuntimeError(f'Cannot read a length from "{value}". Write it as 900mm, 2.4m or 0.9.') from err
+    return number if "." in text else number / 1000.0
+
+
+def _probe_scale_contract(specifications, measurements, default_tolerance):
+    """Compare measured objects against the dimensions a brief named.
+
+    An interior is defined by human dimensions — a 900 mm counter, a 2100 mm
+    door, a 2400 mm ceiling — and nothing else in the scene carries scale. A
+    build can be internally consistent and still be wrong by a factor of a
+    thousand, and a render cannot show it: a 900 m ceiling looks exactly like a
+    0.9 m one from inside a 900 m room.
+
+    So the reference has to be stated and then measured against. This is the
+    check that turns "the kitchen looks wrong" into "Counter: 0.94 m against a
+    0.90 m target".
+    """
+    results = {}
+    for name, spec in (specifications or {}).items():
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            results[name] = {
+                "status": "missing",
+                "detail": f'No object named "{name}" exists to measure.',
+            }
+            continue
+        if obj.type != "MESH":
+            results[name] = {
+                "status": "not-a-mesh",
+                "detail": f'"{name}" is a {obj.type}, so it has no measured extent.',
+            }
+            continue
+
+        entry = measurements.get(name) or {}
+        bounds = entry.get("bounds")
+        if bounds is None:
+            minimum, maximum = _world_bounding_box(obj)
+            bounds = {
+                "min": _round_vector(minimum),
+                "max": _round_vector(maximum),
+                "size": _round_vector(maximum - minimum),
+                "center": _round_vector((minimum + maximum) * 0.5),
+            }
+
+        tolerance = float(spec.get("tolerance") or default_tolerance)
+        axes = {}
+        # The spec is keyed by width/depth/height, which are the words a brief
+        # uses; each maps to one measured world axis.
+        for label, axis in (("width", "x"), ("depth", "y"), ("height", "z")):
+            if label not in spec:
+                continue
+            target = _parse_length(spec[label])
+            measured = float(bounds["size"][{"x": 0, "y": 1, "z": 2}[axis]])
+            delta = measured - target
+            axes[label] = {
+                "axis": axis,
+                "label": label,
+                "measured": _round(measured),
+                "target": _round(target),
+                "delta": _round(delta),
+                "ratio": _round(measured / target) if target else None,
+                "withinTolerance": abs(delta) <= tolerance,
+            }
+
+        failed = [label for label, block in axes.items() if not block["withinTolerance"]]
+        if not axes:
+            results[name] = {
+                "status": "no-axes",
+                "detail": f'Specification for "{name}" names no axis. Use width, depth or height.',
+            }
+        elif failed:
+            detail = "; ".join(
+                "{label} {measured} m against {target} m".format(
+                    label=label,
+                    measured=axes[label]["measured"],
+                    target=axes[label]["target"],
+                )
+                for label in failed
+            )
+            results[name] = {"status": "off-spec", "detail": detail, "axes": axes}
+        else:
+            results[name] = {"status": "on-spec", "detail": "within tolerance of every named axis", "axes": axes}
+    return results
+
+
 def handle_geometry_probe(request):
     """Measure mesh/transform relationships in the open scene.
 
@@ -1451,6 +1564,11 @@ def handle_geometry_probe(request):
         )
 
     tolerance = float(request.get("tolerance") or 0.002)
+    specifications = request.get("specifications") or None
+    if specifications is not None and "scale" not in requested:
+        # Naming the dimensions is the request; requiring the caller to also
+        # remember the check name is a way of silently measuring nothing.
+        requested = list(requested) + ["scale"]
     expected_axis = request.get("expectedAxis") or "Z"
     axis_vector = Vector(
         {
@@ -1559,14 +1677,25 @@ def handle_geometry_probe(request):
         elif len(targets) == 2:
             pairs[f"{targets[0].name}|{targets[1].name}"] = _probe_pair_geometry(targets[0], targets[1], tolerance)
 
+    scale_contract = {}
+    if "scale" in requested:
+        if not specifications:
+            raise RuntimeError(
+                'The "scale" check compares objects against reference dimensions, so it needs '
+                '`specifications`: {"Counter": {"height": "900mm"}, "Door": {"height": "2100mm", '
+                '"width": "900mm"}}. Bare numbers in a specification are read as millimetres.'
+            )
+        scale_contract = _probe_scale_contract(specifications, measurements, tolerance)
+
     return {
         "blendPath": bpy.data.filepath if bpy.data.filepath else None,
         "isDirty": bool(bpy.data.is_dirty),
         "checks": requested,
         "tolerance": _round(tolerance),
-        "unitNote": "Blender units; 1.0 = 1 m by default.",
+        "unitNote": "Blender units; 1.0 = 1 m by default. In a specification a bare number is millimetres.",
         "objects": measurements,
         "pairs": pairs,
+        "scaleContract": scale_contract,
     }
 
 

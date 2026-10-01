@@ -95,6 +95,30 @@ print("__PI_BLENDER_JSON_START__" + json.dumps({"ok": True}) + "__PI_BLENDER_JSO
 	});
 }
 
+/** A box with its own dimensions, for the scale contract to measure against. */
+async function addSizedBox(ws, name, sx, sy, sz) {
+	const utils = await load("blender/utils.ts");
+	await utils.runBlenderJson({
+		cwd: ws.root,
+		blendPath: ws.blendPath,
+		scriptSource: `
+import bpy, json, sys
+args = sys.argv[sys.argv.index("--") + 1:]
+# args[0] is the JSON payload every script here shares, so the real arguments
+# start at args[1].
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, float(args[5])))
+bpy.context.object.scale = (float(args[2]), float(args[3]), float(args[4]))
+bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+bpy.context.object.name = args[1]
+bpy.ops.wm.save_mainfile()
+print("__PI_BLENDER_JSON_START__" + json.dumps({"ok": True}) + "__PI_BLENDER_JSON_END__")
+`,
+		payload: {},
+		scriptArgs: [name, String(sx), String(sy), String(sz), String(sz / 2)],
+		timeoutMs: 120_000,
+	});
+}
+
 test("a geometry probe measures the workspace blend with no window", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {
@@ -142,6 +166,98 @@ test("a geometry probe finds a real gap between two objects with no window", { s
 			Math.abs(pair.closestSurfaceDistance - 3) < 0.01,
 			`measured ${pair.closestSurfaceDistance} where the geometry puts 3m between the surfaces`,
 		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the scale contract measures an object against the dimensions a brief named", { skip }, async () => {
+	// A 0.9 x 0.6 x 0.94 m counter against a brief that asked for 900 x 600 x 900.
+	// The height is 40mm over, which is inside nobody's tolerance for a worktop.
+	const ws = await makeWorkspace();
+	try {
+		await addSizedBox(ws, "Counter", 0.9, 0.6, 0.94);
+		const result = await geometryProbe.blenderGeometryProbe({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			objects: ["Counter"],
+			specifications: { Counter: { width: 900, depth: "600mm", height: "0.9m" } },
+			tolerance: 0.01,
+		});
+
+		assert.ok(result.checks.includes("scale"), `asking for specifications must imply the scale check, got ${result.checks}`);
+		const entry = result.scaleContract.Counter;
+		assert.equal(entry.status, "off-spec", `a 0.94m counter is not a 0.90m counter: ${entry.detail}`);
+		assert.equal(entry.axes.width.measured, 0.9);
+		assert.equal(entry.axes.width.withinTolerance, true, "900mm written bare and a 0.9m box are the same size");
+		assert.equal(entry.axes.depth.target, 0.6, "600mm must normalize to 0.6m");
+		assert.equal(entry.axes.height.withinTolerance, false);
+		assert.ok(Math.abs(entry.axes.height.delta - 0.04) < 1e-6, `delta should be +0.04m, got ${entry.axes.height.delta}`);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the scale contract catches a room built 1000x too large", { skip }, async () => {
+	// The failure this check exists for: a scene built at the wrong scale is
+	// internally consistent, so no render and no other measurement reports it.
+	// A brief said "2400mm" ceiling, the build is 2.4m, and a worker that read
+	// 2400 as metres produced a 2.4 KILOMETRE ceiling that still renders.
+	const ws = await makeWorkspace();
+	try {
+		await addSizedBox(ws, "Room", 6000, 4000, 2400);
+		const result = await geometryProbe.blenderGeometryProbe({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			objects: ["Room"],
+			specifications: { Room: { width: 6000, depth: 4000, height: 2400 } },
+		});
+
+		const entry = result.scaleContract.Room;
+		assert.equal(entry.status, "off-spec");
+		assert.equal(entry.axes.height.target, 2.4, "a bare 2400 is 2400mm, which is how a brief writes a ceiling");
+		assert.ok(entry.axes.width.ratio >= 999, `the report should make the 1000x mistake obvious, got ratio ${entry.axes.width.ratio}`);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the scale contract reads a bare integer as millimetres and a bare decimal as metres", { skip }, async () => {
+	// The same ceiling written two ways: "2400" and "2.4m" must compare equal,
+	// or a brief that mixes styles reports a correct build as wrong.
+	const ws = await makeWorkspace();
+	try {
+		await addSizedBox(ws, "Room", 6, 4, 2.4);
+		const result = await geometryProbe.blenderGeometryProbe({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			objects: ["Room"],
+			specifications: { Room: { width: 6000, depth: "4m", height: "2.4" } },
+		});
+
+		const entry = result.scaleContract.Room;
+		assert.equal(entry.status, "on-spec", `2.4m and 2400mm are the same ceiling: ${entry.detail}`);
+		assert.equal(entry.axes.depth.target, 4);
+		assert.equal(entry.axes.height.target, 2.4, "a bare decimal is metres, so 2.4 is not 2.4mm");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the scale contract reports a missing object instead of skipping it", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		await addSizedBox(ws, "Counter", 0.9, 0.6, 0.9);
+		const result = await geometryProbe.blenderGeometryProbe({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			objects: ["Counter"],
+			specifications: { Counter: { height: "900mm" }, Door: { height: "2100mm" } },
+		});
+
+		assert.equal(result.scaleContract.Counter.status, "on-spec", "a 0.9m counter against a 900mm spec is on-spec");
+		assert.equal(result.scaleContract.Door.status, "missing");
+		assert.match(result.scaleContract.Door.detail, /Door/, "the report has to name what it could not find");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
