@@ -19,8 +19,8 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
   agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
                       + blender-finalizer + blender-script-runner
-                      + blender-merger subagent definitions (nine distinct
-                      roles)
+                      + blender-merger + the three blender-composition-*
+                      subagent definitions (twelve distinct roles)
                       TEMPLATES — run `npm run install:agents`, which copies
                       them to ~/.pi/agent/agents/ and substitutes their
                       `extensions:` frontmatter placeholders with absolute
@@ -354,8 +354,15 @@ Start pi in any project dir. The extension:
   it does not export — the deliverable is `model.blend`),
   `blender-script-runner` (serializes module runs and audits them for
   cross-module contamination) and `blender-merger` (one-shot join of the
-  finished parts, which reports "no merge needed" and runs nothing when the
-  parts are already coherent). They are
+  finished parts). Three more run the other pipeline, for briefs that are a
+  SPACE rather than a model: `blender-composition-worker` (builds one concern
+  of a room -- shell, daylight, furniture, dressing -- against a shared
+  coordinate frame, and reports every dimension against the brief's scale
+  contract), `blender-composition-critic` (judges a room from interior-angle
+  montage panels rather than an auto-framed module render, which for a building
+  is a photograph of a wall) and `blender-composition-merger` (assembles the
+  concerns, re-checks the scale contract across the finished room, and never
+  joins a mesh -- a room is an assembly of things, not a model). They are
   **templates** installed by `npm run install:agents`. `blender-manager.md` is
   deliberately NOT one of them: it is a PROMPT, read at runtime by
   `getManagerPrompt()` in `config.ts` and injected as a system-prompt section,
@@ -365,10 +372,11 @@ Start pi in any project dir. The extension:
   The hierarchy is therefore FLAT at the top: the `/blender` session (depth 0,
   the manager) → its subagents (depth 1) → the aligner's own critics (depth 2).
   The manager session is gated so it delegates instead of authoring code, and
-  it is limited by name to the eight agents it may nest: `blender-worker`,
+  it is limited by name to the eleven agents it may nest: `blender-worker`,
   `blender-script-runner`, `blender-merger`, `blender-critic`,
-  `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner` and
-  `blender-reference-describer`. `blender-camera-aligner` is reachable only
+  `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner`,
+  `blender-reference-describer`, `blender-composition-worker`,
+  `blender-composition-critic` and `blender-composition-merger`. `blender-camera-aligner` is reachable only
   because of that flat top: no router sits between the command and the manager,
   so the aligner at depth 1 still has room for the depth-2 critics it nests
   itself. The manager needs `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own
