@@ -1744,6 +1744,154 @@ def handle_shutdown(request):
     return result
 
 
+def _montage_subject_extent(subject_names):
+    """World-space extent of the comparison subject in the OPEN blend.
+
+    Returns (bounds_min, bounds_max) or None when the blend holds none of the
+    named objects. Tolerance rather than strictness is deliberate: the BASELINE
+    of a comparison is the state before a part existed, so an object named in
+    the brief and missing from the older checkpoint is the normal case, not a
+    caller error. It is also why the union below can be smaller than the
+    current subject alone, which the caller is told about rather than left to
+    discover from a cropped panel.
+    """
+    names = [name for name in subject_names if bpy.data.objects.get(name) is not None] if subject_names else []
+    if not names:
+        names = [obj.name for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    if not names:
+        return None
+    corners = []
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is None or obj.type != "MESH":
+            continue
+        minimum, maximum = _world_bounding_box(obj)
+        corners.append(minimum)
+        corners.append(maximum)
+    if not corners:
+        return None
+    bounds_min = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+    bounds_max = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+    return bounds_min, bounds_max
+
+
+def _union_extent(a, b):
+    """The tightest box containing both extents, either of which may be None.
+
+    An extent here is the (bounds_min, bounds_max) PAIR that
+    _montage_subject_extent returns, not a per-axis dict, because that is the
+    shape every caller here already holds.
+    """
+    extents = [extent for extent in (a, b) if extent is not None]
+    if not extents:
+        return None
+    if len(extents) == 1:
+        return extents[0]
+    return (
+        Vector(tuple(min(extent[0][i] for extent in extents) for i in range(3))),
+        Vector(tuple(max(extent[1][i] for extent in extents) for i in range(3))),
+    )
+
+
+def _montage_placements(resolved, bounds_min, bounds_max):
+    """One camera per requested view, all framed from the SAME extent.
+
+    Two families, chosen per view name. An ORBIT preset (front, left,
+    three-quarter) frames the subject's bounding sphere, which is the right
+    question for an object on a turntable. An INTERIOR preset (interior-corner,
+    interior-doorway) stands inside the subject at eye height, which is the only
+    question a room can be asked: a 6x4x2.8m room has a bounding-sphere radius
+    of 3.9m, so every orbit panel of it photographs the outside of a wall.
+
+    Both families are fixed presets rather than anything computed per subject.
+    A framing that derived its angles from the geometry would put the
+    comparison of two panels at the mercy of the geometry being judged.
+    """
+    centre = tuple((bounds_min + bounds_max) * 0.5)
+    radius = max(((bounds_max - bounds_min) * 0.5).length, 0.01)
+    distance = montage.framing_distance(radius)
+    # Orbit panels share one distance, so no angle silently frames the subject
+    # tighter than another. Interior panels ignore it entirely: their distance
+    # from the room's centre is a property of the room, not a framing choice.
+    placements = []
+    for angle, placement in resolved:
+        if angle is None:
+            family = "interior"
+            location, target, lens_mm = montage.interior_placement(bounds_min, bounds_max, placement)
+            placements.append((family, location, target, lens_mm))
+        else:
+            family = "orbit"
+            location = montage.camera_location(centre, distance, angle[0], angle[1])
+            # Look at the subject, not at the world origin: the orbit only says
+            # where the camera sits.
+            placements.append((family, location, centre, None))
+    return placements, centre, radius, distance
+
+
+def _render_montage_panels(scene, viewport, view_names, placements, output_dir, panel_width, panel_height, prefix):
+    """Render one panel per view, returning (panels, panel_paths).
+
+    The caller owns the render settings and restores them; this owns the
+    temporary cameras and removes them even when a render raises, so a failed
+    sheet leaves no camera behind in the session it was asked from.
+    """
+    render_settings = scene.render
+    created_cameras = []
+    panels = []
+    panel_paths = []
+    try:
+        render_settings.resolution_x = panel_width
+        render_settings.resolution_y = panel_height
+        render_settings.resolution_percentage = 100
+        render_settings.image_settings.file_format = "PNG"
+
+        for index, view_name in enumerate(view_names):
+            panel_path = os.path.join(output_dir, f"{prefix}{index + 1}-{view_name}.png")
+            camera_data = bpy.data.cameras.new(f"montage-camera-{index + 1}")
+            camera_object = bpy.data.objects.new(camera_data.name, camera_data)
+            scene.collection.objects.link(camera_object)
+            created_cameras.append(camera_object)
+            family, location, target, lens_mm = placements[index]
+            camera_object.location = location
+            if lens_mm is not None:
+                # The orbit's 50mm is a whole-subject framing choice; an interior
+                # preset's lens is part of standing inside something. A 50mm at
+                # 300mm from a wall photographs that wall and nothing else.
+                camera_data.lens = lens_mm
+            direction = Vector(target) - camera_object.location
+            if direction.length < 1e-6:
+                raise RuntimeError(
+                    f'View "{view_name}" puts the camera exactly where it is looking. '
+                    "A subject with no extent in one direction has no framing for "
+                    "that preset."
+                )
+            camera_object.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+            scene.camera = camera_object
+
+            render_settings.filepath = panel_path
+            with render_override(viewport, scene):
+                bpy.ops.render.render(write_still=True)
+
+            panels.append(montage.read_panel(panel_path))
+            panel_paths.append(panel_path)
+    finally:
+        for camera_data in created_cameras:
+            data = camera_data.data
+            bpy.data.objects.remove(camera_data, do_unlink=True)
+            if data.users == 0:
+                bpy.data.cameras.remove(data)
+    return panels, panel_paths
+
+
+def _montage_view_names(request):
+    view_names = list(request.get("views") or ["front", "three-quarter"])
+    if len(view_names) < 1:
+        raise RuntimeError("A montage needs at least one view.")
+    # An angle the caller misspelled must not cost a render of the panels that
+    # did resolve, so every name is checked before anything is created.
+    return view_names, [montage.resolve_angle(name) for name in view_names]
+
+
 def handle_montage(request):
     """Render several preset views of one subject and tile them into a sheet.
 
@@ -1771,41 +1919,16 @@ def handle_montage(request):
     # was an override context.
     viewport = find_optional_viewport_context()
     scene = viewport["scene"] if viewport is not None else bpy.context.scene
-    view_names = list(request.get("views") or ["front", "three-quarter"])
-    if len(view_names) < 1:
-        raise RuntimeError("A montage needs at least one view.")
-    # An angle the caller misspelled must not cost a render of the panels that
-    # did resolve, so every name is checked before anything is created.
-    resolved = [montage.resolve_angle(name) for name in view_names]
+    view_names, resolved = _montage_view_names(request)
 
     subjects = _resolve_probe_objects(request.get("subject") or [])
     if not subjects:
         raise RuntimeError("No mesh objects to frame. Pass `subject` explicitly if the scene is empty or filtered.")
-    corners = []
-    for obj in subjects:
-        minimum, maximum = _world_bounding_box(obj)
-        corners.append(minimum)
-        corners.append(maximum)
-    bounds_min = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
-    bounds_max = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
-    centre = tuple((bounds_min + bounds_max) * 0.5)
-    radius = max(((bounds_max - bounds_min) * 0.5).length, 0.01)
-    distance = montage.framing_distance(radius)
-    # Orbit panels share one distance, so no angle silently frames the subject
-    # tighter than another. Interior panels ignore it entirely: their distance
-    # from the room's centre is a property of the room, not a framing choice.
-    placements = []
-    for angle, placement in resolved:
-        if angle is None:
-            family = "interior"
-            location, target, lens_mm = montage.interior_placement(bounds_min, bounds_max, placement)
-            placements.append((family, location, target, lens_mm))
-        else:
-            family = "orbit"
-            location = montage.camera_location(centre, distance, angle[0], angle[1])
-            # Look at the subject, not at the world origin: the orbit only says
-            # where the camera sits.
-            placements.append((family, location, centre, None))
+    extent = _montage_subject_extent(request.get("subject") or [])
+    if extent is None:
+        raise RuntimeError("No mesh objects to frame. Pass `subject` explicitly if the scene is empty or filtered.")
+    bounds_min, bounds_max = extent
+    placements, centre, radius, distance = _montage_placements(resolved, bounds_min, bounds_max)
 
     columns = int(request.get("columns") or (1 if len(view_names) <= 2 else 2))
     columns = max(1, min(4, columns))
@@ -1827,54 +1950,11 @@ def handle_montage(request):
     previous_file_format = render_settings.image_settings.file_format
     previous_filepath = render_settings.filepath
 
-    created_cameras = []
-    panels = []
-    panel_paths = []
     try:
-        render_settings.resolution_x = panel_width
-        render_settings.resolution_y = panel_height
-        render_settings.resolution_percentage = 100
-        render_settings.image_settings.file_format = "PNG"
-
-        for index, view_name in enumerate(view_names):
-            panel_path = os.path.join(output_dir, "panel-%d-%s.png" % (index + 1, view_name))
-            camera_data = bpy.data.cameras.new("montage-camera-%d" % (index + 1))
-            camera_object = bpy.data.objects.new(camera_data.name, camera_data)
-            scene.collection.objects.link(camera_object)
-            created_cameras.append(camera_object)
-            family, location, target, lens_mm = placements[index]
-            camera_object.location = location
-            if lens_mm is not None:
-                # The orbit's 50mm is a whole-subject framing choice; an interior
-                # preset's lens is part of standing inside something. A 50mm at
-                # 300mm from a wall photographs that wall and nothing else.
-                camera_data.lens = lens_mm
-            direction = Vector(target) - camera_object.location
-            if direction.length < 1e-6:
-                raise RuntimeError(
-                    f'View "{view_name}" puts the camera exactly where it is looking. '
-                    "A subject with no extent in one direction has no framing for "
-                    "that preset."
-                )
-            camera_object.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-            scene.camera = camera_object
-
-            render_settings.filepath = panel_path
-            with render_override(viewport, scene):
-                bpy.ops.render.render(write_still=True)
-
-            panel_image = montage.read_panel(panel_path)
-            panels.append(panel_image)
-            panel_paths.append(panel_path)
-
-        # The label scale is derived from the sheet width rather than fixed, so
-        # a four-panel sheet labels readably at the default panel size.
-        sheet, layout = montage.tile(
-            panels,
-            [str(name) for name in view_names],
-            columns=columns,
-            label_scale=max(2, min(4, panel_width // (12 * columns))),
+        panels, panel_paths = _render_montage_panels(
+            scene, viewport, view_names, placements, output_dir, panel_width, panel_height, "panel-"
         )
+        sheet, layout = _montage_sheet(panels, view_names, columns, panel_width)
         montage.write_png(sheet_path, sheet)
     finally:
         scene.camera = previous_scene_camera
@@ -1885,11 +1965,6 @@ def handle_montage(request):
         ) = previous_resolution
         render_settings.image_settings.file_format = previous_file_format
         render_settings.filepath = previous_filepath
-        for camera_data in created_cameras:
-            data = camera_data.data
-            bpy.data.objects.remove(camera_data, do_unlink=True)
-            if data.users == 0:
-                bpy.data.cameras.remove(data)
 
     return {
         "montagePath": sheet_path,
@@ -1921,6 +1996,241 @@ def handle_montage(request):
     }
 
 
+def _montage_sheet(panels, labels, columns, panel_width):
+    # The label scale is derived from the sheet width rather than fixed, so
+    # a four-panel sheet labels readably at the default panel size.
+    return montage.tile(panels, labels, columns=columns, label_scale=max(2, min(4, panel_width // (12 * columns))))
+
+
+def handle_compare(request):
+    """Two generations of one subject, framed identically, labelled, on one sheet.
+
+    A regression is invisible in a single render: the previous picture is
+    overwritten by the next one, and "it looks the same as before" is an
+    assertion about a picture nobody is holding. So the baseline is RE-RENDERED
+    from the checkpoint the previous run left on disk, and both land on one
+    sheet with the generation in each panel's label.
+
+    The one framing decision is the whole point: both generations are framed
+    from the UNION of their extents, so the camera is identical and any
+    difference between two panels of the same view is geometry. Framing each
+    generation on its own extent would make a part that grew read as a camera
+    change, which is exactly the confusion this sheet exists to remove.
+
+    The baseline is a checkpoint on disk, never the session's own state: it is
+    opened, rendered, and the requested blend put back before this returns, so a
+    comparison never replaces what the artist is looking at. Nothing in the
+    workspace is mutated either way, and the baseline's panels are kept beside
+    the sheet.
+    """
+    baseline_blend = request.get("baselineBlendPath")
+    if not baseline_blend:
+        raise RuntimeError(
+            "A comparison needs baselineBlendPath: the state to compare AGAINST. "
+            "Without it there is nothing to regress from, and a sheet of one "
+            "generation labelled as if it were a comparison would invite reading "
+            "the current build as an improvement over nothing."
+        )
+    output_dir = request["outputDir"]
+    os.makedirs(output_dir, exist_ok=True)
+    sheet_path = os.path.join(output_dir, request.get("outputName") or "compare.png")
+    baseline_dir = os.path.join(output_dir, "baseline")
+    os.makedirs(baseline_dir, exist_ok=True)
+
+    viewport = find_optional_viewport_context()
+    view_names, resolved = _montage_view_names(request)
+    panel = request.get("panelResolution") or {}
+    panel_width = int(panel.get("x") or 900)
+    panel_height = int(panel.get("y") or 700)
+    subject = request.get("subject") or []
+
+    # The union is measured ACROSS both generations before either is rendered,
+    # which is why the baseline is opened first: framing is the one thing that
+    # must be decided from both sides at once.
+    ensure_requested_blend_open(request)
+    current_extent = _montage_subject_extent(subject)
+    if current_extent is None:
+        raise RuntimeError("No mesh objects to frame. Pass `subject` explicitly if the scene is empty or filtered.")
+
+    with _open_for_baseline(baseline_blend, viewport) as (baseline_scene, baseline_viewport):
+        baseline_extent = _montage_subject_extent(subject)
+        baseline_missing = _subject_names_missing_from_open_blend(subject)
+        union = _union_extent(current_extent, baseline_extent)
+        if union is None:
+            # Unreachable while current_extent is checked above; stated because
+            # the guard below is the only thing making that assumption visible.
+            raise RuntimeError("Neither generation holds a mesh to frame.")
+        placements, centre, radius, distance = _montage_placements(resolved, union[0], union[1])
+
+        baseline_panels, baseline_panel_paths = _render_montage_panels(
+            baseline_scene, baseline_viewport, view_names, placements, baseline_dir, panel_width, panel_height, "panel-"
+        )
+
+    if not baseline_panels:
+        raise RuntimeError(
+            f'The baseline blend "{baseline_blend}" produced no panels. It holds none of the '
+            f"subject objects ({', '.join(subject) if subject else 'any mesh'}), which is what a "
+            "checkpoint from before this part existed looks like. Compare against a run that "
+            "already had it, or montage the current build on its own."
+        )
+
+    # Re-found, not reused: the baseline swap opened and closed a file, which
+    # freed the scene and viewport this handler captured before it.
+    scene = bpy.context.scene
+    current_viewport = find_optional_viewport_context()
+    labels = {
+        "baseline": str(request.get("baselineLabel") or "BEFORE"),
+        "current": str(request.get("currentLabel") or "AFTER"),
+    }
+
+    render_settings = scene.render
+    previous_scene_camera = scene.camera
+    previous_resolution = (
+        render_settings.resolution_x,
+        render_settings.resolution_y,
+        render_settings.resolution_percentage,
+    )
+    previous_file_format = render_settings.image_settings.file_format
+    previous_filepath = render_settings.filepath
+    try:
+        panels, panel_paths = _render_montage_panels(
+            scene, current_viewport, view_names, placements, output_dir, panel_width, panel_height, "panel-"
+        )
+    finally:
+        scene.camera = previous_scene_camera
+        (
+            render_settings.resolution_x,
+            render_settings.resolution_y,
+            render_settings.resolution_percentage,
+        ) = previous_resolution
+        render_settings.image_settings.file_format = previous_file_format
+        render_settings.filepath = previous_filepath
+
+    # Interleaved per view, so the two panels of one view sit side by side and
+    # the eye is not asked to hold one generation in memory while it finds the
+    # other. The reading order IS the comparison.
+    ordered = []
+    ordered_labels = []
+    ordered_paths = []
+    for index, view_name in enumerate(view_names):
+        ordered.append(baseline_panels[index])
+        ordered_labels.append(f'{labels["baseline"]} {view_name}')
+        ordered_paths.append(baseline_panel_paths[index])
+        ordered.append(panels[index])
+        ordered_labels.append(f'{labels["current"]} {view_name}')
+        ordered_paths.append(panel_paths[index])
+
+    columns = int(request.get("columns") or 2)
+    columns = max(1, min(4, columns))
+    sheet, layout = _montage_sheet(ordered, ordered_labels, columns, panel_width)
+    montage.write_png(sheet_path, sheet)
+
+    return {
+        "montagePath": sheet_path,
+        "panelPaths": ordered_paths,
+        "views": [str(name) for name in view_names],
+        "layout": layout,
+        "labels": labels,
+        "subject": [obj.name for obj in _resolve_probe_objects(subject)] if subject else [],
+        "baseline": {
+            "blendPath": os.path.abspath(baseline_blend),
+            "panelPaths": baseline_panel_paths,
+            "missingSubjects": baseline_missing,
+            "usedItsOwnExtent": baseline_extent is not None and tuple(baseline_extent) != tuple(current_extent),
+        },
+        "framing": {
+            "family": "interior" if all(f[0] == "interior" for f in placements) else "orbit",
+            "center": [_round(value) for value in centre],
+            "radius": _round(radius),
+            "distance": _round(distance),
+            "fromUnion": True,
+            "views": [
+                {
+                    "view": str(view_name),
+                    "mode": family,
+                    "location": [_round(value) for value in location],
+                    "target": [_round(value) for value in target],
+                    "lensMm": _round(lens_mm) if lens_mm is not None else None,
+                }
+                for view_name, (family, location, target, lens_mm) in zip(view_names, placements, strict=True)
+            ],
+        },
+        "note": (
+            "Both generations are framed from the union of their extents, so the "
+            "camera is identical and a difference between two panels of the same "
+            "view is geometry rather than framing. Every panel carries the "
+            "generation it is in its label."
+            + (
+                " Subjects missing from the baseline are listed: a BEFORE panel "
+                "without them is a checkpoint from before they existed, not a "
+                "rendering fault."
+                if baseline_missing
+                else ""
+            )
+        ),
+    }
+
+
+def _subject_names_missing_from_open_blend(subject):
+    """Which named subjects the CURRENTLY OPEN blend does not hold.
+
+    Read here rather than guessed, because the answer changes what the sheet
+    means: a baseline missing an object named in the brief is a checkpoint from
+    before the part existed, and a reader who is not told that will call the
+    part absence in the BEFORE panels a rendering fault.
+    """
+    return [name for name in subject if bpy.data.objects.get(name) is None]
+
+
+@contextlib.contextmanager
+def _open_for_baseline(blend_path, viewport):
+    """Swap the session's blend for the baseline and yield the scene to render.
+
+    In this process rather than a second Blender, because the extent maths that
+    frames both generations has to be the SAME code in both: two copies in two
+    processes is two rules, and a baseline framed by one of them is a comparison
+    that proves nothing while looking perfectly legible.
+
+    The live blend is restored afterwards even on failure, because the artist may
+    have unsaved work in it and this request only ever meant to read a file. A
+    session with unsaved changes in a real blend is REFUSED rather than
+    restored-then-resaved, because opening a file discards what is in memory and
+    a flag cannot put it back — the same rule, and for the same reason, as
+    ensure_requested_blend_open.
+    The viewport is RE-FOUND after every open, because bpy.ops.wm.open_mainfile
+    frees the old scene and the old area/region pointers along with it. A
+    viewport captured before the open is a dangling StructRNA, and the failure it
+    produces — a ReferenceError partway through a render — names nothing that
+    caused it.
+    """
+    _refuse_dirty_baseline_swap()
+    if not os.path.exists(blend_path):
+        raise RuntimeError(
+            f'The baseline blend does not exist: "{blend_path}". A comparison needs a checkpoint '
+            "on disk to render the earlier generation from; pass one that exists, or montage the "
+            "current build on its own."
+        )
+    previous_path = os.path.abspath(bpy.data.filepath) if bpy.data.filepath else ""
+    bpy.ops.wm.open_mainfile(filepath=blend_path)
+    try:
+        yield bpy.context.scene, find_optional_viewport_context()
+    finally:
+        if previous_path and os.path.exists(previous_path):
+            bpy.ops.wm.open_mainfile(filepath=previous_path)
+
+
+def _refuse_dirty_baseline_swap():
+    """Block a baseline swap that would discard unsaved work in a real blend."""
+    current_path = os.path.abspath(bpy.data.filepath) if bpy.data.filepath else ""
+    if bpy.data.is_dirty and current_path and not is_discardable_scratch_blend(current_path):
+        current_label = current_path or "the current unsaved Blender scene"
+        raise RuntimeError(
+            f"Blender has unsaved changes in {current_label}, and rendering the baseline means "
+            "opening another file, which would discard them. Save or discard your work, then "
+            "compare. (A scratch blank is fine to discard and is never blocked.)"
+        )
+
+
 def handle_request(request):
     request_type = request.get("type")
     if request_type == "get-session-context":
@@ -1929,6 +2239,8 @@ def handle_request(request):
         return handle_geometry_probe(request)
     if request_type == "montage":
         return handle_montage(request)
+    if request_type == "compare":
+        return handle_compare(request)
     if request_type == "export":
         # The opener is passed in rather than imported: opening the blend belongs
         # to the session this bridge owns, and export_asset is also runnable

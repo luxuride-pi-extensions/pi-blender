@@ -7,6 +7,7 @@ import { isHeartbeatFresh, readHeartbeatBlendPath } from "./liveness.js";
 import type {
 	BlenderRenderViewSource,
 	BlenderViewportShading,
+	CompareResult,
 	GeometryProbeResult,
 	GeometryProbeSpecification,
 	MontageResult,
@@ -43,6 +44,13 @@ const HEARTBEAT_RECHECK_MS = 100;
  * off partway through would leave panels on disk with no sheet to read.
  */
 const DEFAULT_MONTAGE_TIMEOUT_MS = LIVE_BRIDGE_TIMEOUT_MS * 4;
+
+/**
+ * A comparison renders every panel twice, and the baseline set costs an extra
+ * blend open on top. Doubling the montage budget is the panel count; the open is
+ * not a render at all and rides inside that slack.
+ */
+const DEFAULT_COMPARE_TIMEOUT_MS = LIVE_BRIDGE_TIMEOUT_MS * 8;
 
 function getLiveBridgePaths(): {
 	bridgeDir: string;
@@ -532,6 +540,41 @@ export async function requestLiveBlenderMontage(options: {
 		// One render per panel, so the default render timeout would cut a
 		// four-panel sheet off partway through.
 		timeoutMs: options.timeoutMs ?? DEFAULT_MONTAGE_TIMEOUT_MS,
+	});
+}
+
+export async function requestLiveBlenderCompare(options: {
+	baselineBlendPath: string;
+	baselineLabel?: string;
+	currentLabel?: string;
+	views: string[];
+	subject?: string[];
+	columns?: number;
+	panelResolution?: { x: number; y: number };
+	outputDir: string;
+	outputName?: string;
+	blendPath: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<CompareResult> {
+	return await requestBridge<CompareResult>({
+		payload: {
+			type: "compare",
+			baselineBlendPath: options.baselineBlendPath,
+			baselineLabel: options.baselineLabel,
+			currentLabel: options.currentLabel,
+			views: options.views,
+			subject: options.subject,
+			columns: options.columns,
+			panelResolution: options.panelResolution,
+			outputDir: options.outputDir,
+			outputName: options.outputName,
+			blendPath: options.blendPath,
+		},
+		signal: options.signal,
+		// Two generations of panels, and one of them renders after opening a
+		// second blend, so this needs more than a single montage's budget.
+		timeoutMs: options.timeoutMs ?? DEFAULT_COMPARE_TIMEOUT_MS,
 	});
 }
 

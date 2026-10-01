@@ -76,6 +76,7 @@ import {
 } from "./blender/runtime.js";
 import type { AssetExportOptions } from "./blender/types.js";
 import { isLiveBridgeAlive } from "./launch.js";
+import { blenderCompare } from "./blender/compare.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { requestWatchWindowLaunch, restartBridgeSupervisor } from "./launch.js";
 import { getBlenderBridgeDir, getManagerPrompt } from "./config.js";
@@ -1463,6 +1464,107 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								`Framed: ${result.subject.join(", ")}`,
 								result.note,
 							].join("\n"),
+						},
+					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_compare",
+			label: "Blender Compare",
+			description:
+				"Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so a regression is visible. Each panel is labelled with which ITERATION it is (the baseline is the run before this module's latest, the current one is the latest; pass baselineLabel/currentLabel to say otherwise), and the two panels of one view sit side by side, which is what makes the sheet a comparison rather than a pair of pictures. Both generations are framed from the UNION of their extents, so the camera is identical in every panel and a difference between two panels of the same view is geometry — framing each generation on its own extent would make a part that grew read as a camera change. The baseline is rendered again from the checkpoint the earlier run started from (a checkpoint IS that generation's state, so no kept render is needed); pass baselineBlendPath to compare against a named earlier iteration instead. Two runs is the minimum: with only one there is no previous generation, and a sheet of identical pairs would read as proof of stability. Views are the same preset names as blender_montage. The baseline is a file on disk, never the session's own state: it is opened, rendered, and the workspace blend put back, so a comparison never replaces what you are looking at. A baseline missing subjects you named is reported as missingSubjects rather than rendered as an absence. Works with no window: both generations then render headlessly.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				moduleName: Type.String({
+					description:
+						"Module whose two generations are compared. Defaults the baseline from this module's run history, and writes modules/<name>/compare.png.",
+				}),
+				baselineBlendPath: Type.Optional(
+					Type.String({
+						description:
+							"The generation to compare against — normally a checkpoint under modules/<name>/runs/NN/. Defaults to the run immediately before this module's latest one. Refused outright when there is none, because a sheet of one generation wearing a comparison's labels invites reading the build as an improvement over nothing.",
+					}),
+				),
+				baselineLabel: Type.Optional(
+					Type.String({
+						description:
+							"What to call the baseline in every panel label. Default its iteration number when the baseline came from run history, and BEFORE when you named the path yourself.",
+					}),
+				),
+				currentLabel: Type.Optional(
+					Type.String({
+						description: "What to call the current generation. Default AFTER.",
+					}),
+				),
+				views: Type.Array(Type.String(), {
+					minItems: 1,
+					maxItems: 4,
+					description:
+						"Preset view names, same as blender_montage. Two to four make a readable sheet; with columns 2 each view's two generations sit adjacent, so the reading order IS the comparison.",
+				}),
+				subject: Type.Optional(
+					Type.Array(Type.String(), {
+						description:
+							"Objects to frame and compare. Defaults to every visible mesh. Pass names when one module is the subject and the rest of the scene is context.",
+					}),
+				),
+				columns: Type.Optional(
+					Type.Number({
+						description: "Sheet columns. Default 2, so a view's two generations sit side by side.",
+					}),
+				),
+				panelResolution: Type.Optional(
+					Type.Object({
+						x: Type.Number({ description: "Panel width in pixels (default 900)." }),
+						y: Type.Number({ description: "Panel height in pixels (default 700)." }),
+					}),
+				),
+				timeoutMs: Type.Optional(
+					Type.Number({
+						description:
+							"Bridge timeout override in ms. Defaults to eight times the single-render budget: this renders every panel twice and opens a second blend.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderCompare({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					moduleName: params.moduleName,
+					baselineBlendPath: params.baselineBlendPath,
+					baselineLabel: params.baselineLabel,
+					currentLabel: params.currentLabel,
+					views: params.views,
+					subject: params.subject,
+					columns: params.columns,
+					panelResolution: params.panelResolution,
+					timeoutMs: params.timeoutMs,
+					signal: _signal,
+				});
+
+				const missing = result.baseline.missingSubjects;
+				return {
+					content: [
+						{
+							type: "text",
+							text: [
+								`Comparison: ${result.montagePath}`,
+								`Baseline: ${result.labels.baseline} = ${result.baseline.blendPath}`,
+								`Current: ${result.labels.current}`,
+								`Views: ${result.views.join(", ")} (${result.layout.columns}x${result.layout.rows} of ${result.layout.panelWidth}x${result.layout.panelHeight})`,
+								`Framed: ${result.subject.join(", ")}`,
+								missing.length > 0
+									? `Baseline is missing ${missing.join(", ")} — it predates those objects, so their absence in the ${result.labels.baseline} panels is not a render fault.`
+									: undefined,
+								result.note,
+							]
+								.filter((line): line is string => line !== undefined)
+								.join("\n"),
 						},
 					],
 					details: result,

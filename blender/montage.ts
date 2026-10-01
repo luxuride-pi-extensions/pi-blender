@@ -106,7 +106,12 @@ const KNOWN_INTERIOR_VIEWS = [
 
 const KNOWN_VIEWS: readonly string[] = [...KNOWN_ORBIT_VIEWS, ...KNOWN_INTERIOR_VIEWS];
 
-function normalizeViews(views: string[]): string[] {
+/**
+ * Shared with the comparison sheet, which tiles the same preset views twice and
+ * must refuse the same misspellings for the same reason: half its panels would
+ * render and the sheet would read as a result.
+ */
+export function normalizeViews(views: string[]): string[] {
 	if (views.length === 0) {
 		throw new Error(`A montage needs at least one view. Known views: ${KNOWN_VIEWS.join(", ")}.`);
 	}

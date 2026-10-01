@@ -26,6 +26,7 @@ import { loadTs } from "./paths.mjs";
 const branch = await loadTs(`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`);
 const workspace = await loadTs(`${fileURLToPath(new URL("../blender/workspace.ts", import.meta.url))}`);
 const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", import.meta.url))}`);
+const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
 async function blenderAvailable() {
@@ -702,6 +703,155 @@ test("a failed branch run leaves model.blend untouched and reports the traceback
 		);
 		assert.deepEqual(await objectNames(ws.root, ws.blendPath), before, "a failed run must not change model.blend");
 		assert.ok(!existsSync(join(ws.workspacePath, "modules", "broken", "branch.blend")), "a failed branch is removed");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a comparison renders the previous generation beside the current one, labelled", { skip }, async () => {
+	// The failure this exists to catch is silent: render.png is overwritten every
+	// run, so an iteration that breaks a part and one that fixes it produce the
+	// same evidence. Only the baseline's panels are checked for content here --
+	// what the sheet proves is that both generations were rendered from the same
+	// camera, and that is a framing question answered by the reported placements.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		// The second run's checkpoint is the state the second run rendered, so
+		// comparing against it is comparing iteration 1 against iteration 2.
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));
+		const second = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		const sheet = await compare.blenderCompare({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			views: ["front", "three-quarter"],
+			panelResolution: { x: 320, y: 240 },
+			timeoutMs: 600_000,
+		});
+
+		assert.ok(existsSync(sheet.montagePath), "the sheet is written");
+		assert.equal(sheet.views.length, 2, "one panel per generation per view");
+		assert.equal(sheet.panelPaths.length, 4, "two generations times two views");
+		for (const path of sheet.panelPaths) {
+			assert.ok(existsSync(path), `panel is written: ${path}`);
+		}
+		assert.ok(
+			sheet.baseline.blendPath.includes("pre-"),
+			`the baseline is a checkpoint, not the live blend: ${sheet.baseline.blendPath}`,
+		);
+
+		// The whole sheet rests on one camera. Both generations framed on their
+		// own extent would make a part that grew read as a camera change, which
+		// is the confusion the sheet exists to remove -- so the two panels of one
+		// view have to carry the SAME camera, not merely similar ones. One
+		// placement per view is shared by both generations, so there are as many
+		// entries as views, not twice that.
+		const placements = sheet.framing.views;
+		assert.equal(placements.length, sheet.views.length, "one camera per view, shared by both generations");
+		for (const panel of placements) {
+			assert.ok(panel.location.length === 3, "a camera placement is a position");
+		}
+		assert.deepEqual(sheet.baseline.missingSubjects, [], "the baseline holds the subject it was compared against");
+
+		// Labels name the iteration, because a sheet is read after the next run
+		// has overwritten the evidence it was made from.
+		assert.match(sheet.labels.baseline, /ITERATION \d+/, "the baseline is labelled with its iteration");
+		assert.match(sheet.labels.current, /ITERATION \d+/, "the current generation is labelled with its iteration");
+		assert.ok(
+			sheet.labels.baseline !== sheet.labels.current,
+			"the two generations must be distinguishable by label",
+		);
+
+		// The workspace blend is restored, so a comparison never replaces what
+		// the artist is looking at.
+		const stillOpen = await objectNames(ws.root, ws.blendPath);
+		assert.ok(stillOpen.includes("Arm"), "model.blend still holds the current geometry after the comparison");
+		assert.equal(second.iteration > 0, true);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a comparison refuses a baseline that predates the subject", { skip }, async () => {
+	// A checkpoint from before a part existed renders an empty frame where the
+	// part should be. Reporting that as missingSubjects is the difference between
+	// a readable comparison and a bug report.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		const first = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		// The checkpoint is the blend from BEFORE the run, so naming the subject
+		// explicitly is what makes the baseline genuinely hold nothing: left to
+		// the default it would frame every visible mesh in it, and the studio
+		// rig's floor would answer the question instead of the part.
+		const sheet = await compare.blenderCompare({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			baselineBlendPath: first.checkpointPath,
+			subject: ["Arm"],
+			views: ["front"],
+			panelResolution: { x: 320, y: 240 },
+			timeoutMs: 600_000,
+		});
+		assert.deepEqual(
+			sheet.baseline.missingSubjects,
+			["Arm"],
+			"a subject the baseline does not hold is reported, not rendered as an absence",
+		);
+		assert.match(sheet.note, /missing/i, "the note says so in words too");
+		assert.match(sheet.labels.baseline, /BEFORE/, "an explicitly named baseline has no honest iteration to print");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a comparison with only one run is refused rather than self-compared", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		await assert.rejects(
+			() =>
+				compare.blenderCompare({
+					cwd: ws.root,
+					workspace: ws.workspacePath,
+					moduleName: "arm",
+					views: ["front"],
+				}),
+			/no previous generation to compare against/i,
+			"one run has nothing to regress from, and a self-comparison would read as proof of stability",
+		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

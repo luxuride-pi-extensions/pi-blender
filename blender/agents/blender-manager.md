@@ -710,6 +710,17 @@ diagnostician's numbers are the thing to spend.
    `true`, do not critique: either your fix was never in the script, or it ran
    and something else put the geometry back. Say which, and fix that instead.
    `false` is the normal case and needs no comment.
+
+   **When the critic's verdict is a regression, that is not its verdict to
+   reach on its own.** A critic reads one render, and "the silhouette reads
+   clean" cannot tell it a part grew a crack: the part was not in the brief
+   before, so its earlier state is not in the critic's evidence either. If an
+   iteration's feedback was "the render looks fine", call
+   `blender_compare { workspace, moduleName, views: [...] }` — it renders the
+   previous generation beside the current one, labelled with the iteration each
+   panel came from — and spawn a fresh critic on the SHEET. A fix that reads well
+   and quietly moved something else is the common version of this, and the
+   sheet is the only thing that shows it.
 6. **When every model's parts are present, spawn `blender-merger`** with the
    grouping named: which objects go into which joined model. This is mandatory,
    not a judgement call. A build whose parts landed correctly in `model.blend`

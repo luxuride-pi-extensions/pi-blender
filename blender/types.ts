@@ -1336,6 +1336,15 @@ export interface MontagePanelFraming {
 	lensMm: number | null;
 }
 
+export interface MontageFraming {
+	/** "interior" only when every panel stood inside the subject. */
+	family: "orbit" | "interior";
+	center: number[];
+	radius: number;
+	distance: number;
+	views: MontagePanelFraming[];
+}
+
 export interface MontageResult {
 	workspacePath: string;
 	manifestPath: string;
@@ -1350,13 +1359,55 @@ export interface MontageResult {
 		rows: number;
 	};
 	subject: string[];
-	framing: {
-		/** "interior" only when every panel stood inside the subject. */
-		family: "orbit" | "interior";
-		center: number[];
-		radius: number;
-		distance: number;
-		views: MontagePanelFraming[];
-	};
+	framing: MontageFraming;
 	note: string;
+}
+
+export interface CompareOptions {
+	cwd: string;
+	workspace: string;
+	/** Module the sheet is written for, alongside its per-view panels. */
+	moduleName: string;
+	/**
+	 * The generation to compare against. Optional because run history names it:
+	 * omitted, it is this module's previous run. Refused outright when there is
+	 * none, because a sheet of one generation wearing a comparison's labels
+	 * invites reading the build as an improvement over nothing.
+	 */
+	baselineBlendPath?: string;
+	/**
+	 * What to call the baseline in every panel label. Defaults to its iteration
+	 * number when the baseline came from run history, and BEFORE when it was
+	 * named explicitly — a path the history does not describe has no honest
+	 * number to print.
+	 */
+	baselineLabel?: string;
+	/** What to call the current generation. Defaults to AFTER. */
+	currentLabel?: string;
+	/** Preset view names, as for blender_montage. */
+	views?: string[];
+	/** Objects to frame and compare. Defaults to every visible mesh. */
+	subject?: string[];
+	/** Sheet columns. Defaults to 2, so a view's two panels sit side by side. */
+	columns?: number;
+	/** Per-panel pixel size. Defaults to 900x700. */
+	panelResolution?: { x: number; y: number };
+	timeoutMs?: number;
+	signal?: AbortSignal;
+}
+
+export interface CompareResult extends MontageResult {
+	labels: { baseline: string; current: string };
+	baseline: {
+		blendPath: string;
+		panelPaths: string[];
+		/**
+		 * Subjects the baseline does not hold. A BEFORE panel missing them is a
+		 * checkpoint from before they existed, and saying so is the difference
+		 * between a readable comparison and a bug report.
+		 */
+		missingSubjects: string[];
+		usedItsOwnExtent: boolean;
+	};
+	framing: MontageFraming & { fromUnion: true };
 }
