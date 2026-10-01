@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { getBlenderAssetsDir, getBlenderBridgeDir, getBlenderTempDir } from "../config.js";
+import { pidIsRunning, readLockHolderPid } from "./liveness.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
@@ -374,9 +375,10 @@ export function getBundledBlenderAgentsDir(): string {
  * The live Blender UI is a single mutable session: two concurrent requests
  * interleave scene mutations, mode changes and saves with no ordering
  * guarantee. Acquire this before writing a request; release it when the
- * response is read (or the request times out). A lock whose mtime is older
- * than `LIVE_BRIDGE_LOCK_STALE_MS` is force-reclaimed so a dead holder cannot
- * wedge the bridge forever.
+ * response is read (or the request times out). A lock whose holder pid is gone
+ * is force-reclaimed, so a dead holder cannot wedge the bridge forever. Age
+ * reclaims only a lock that predates the pid field, because a live holder is
+ * never displaced no matter how long it has held the lock.
  */
 export async function acquireBridgeLock(options?: {
 	signal?: AbortSignal;
@@ -408,15 +410,25 @@ export async function acquireBridgeLock(options?: {
 				throw error;
 			}
 
-			// Reclaim a stale lock (holder died, or a request outlived its window).
+			// Reclaim a lock whose holder is gone at any age, or a pre-pid lock
+			// that has aged out. A lock with a readable pid is never taken on age
+			// alone: this lock is documented to be held for minutes (a render
+			// alone allows 360s), so an mtime rule would interleave two requests
+			// against the one live UI it exists to serialize.
+			let reclaimable = false;
 			try {
 				const stats = await stat(lockPath);
-				if (Date.now() - stats.mtimeMs > LIVE_BRIDGE_LOCK_STALE_MS) {
-					await rm(lockPath, { force: true });
-					continue;
-				}
+				const holderPid = readLockHolderPid(lockPath);
+				reclaimable =
+					holderPid === null
+						? Date.now() - stats.mtimeMs > LIVE_BRIDGE_LOCK_STALE_MS
+						: !pidIsRunning(holderPid);
 			} catch {
 				// The holder released it between the failed create and this stat.
+				continue;
+			}
+			if (reclaimable) {
+				await rm(lockPath, { force: true });
 				continue;
 			}
 

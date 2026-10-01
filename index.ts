@@ -1231,16 +1231,23 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								'Object-name pairs to measure against each other, e.g. [["Mug", "MugHandle"]]. Each pair yields the closest surface distance, penetration depth, per-object vertex-inside counts, bounding-box overlap, and a verdict. Omit to auto-pair when exactly two objects are given.',
 						},
 					),
-),
-			specifications: Type.Optional(
-				Type.Record(Type.String(), Type.Object({
-					width: Type.Optional(Type.Union([Type.Number(), Type.String()])),
-					depth: Type.Optional(Type.Union([Type.Number(), Type.String()])),
-					height: Type.Optional(Type.Union([Type.Number(), Type.String()])),
-					tolerance: Type.Optional(Type.Number()),
-				})),
-			),
-			checks: Type.Optional(
+				),
+				specifications: Type.Optional(
+					Type.Record(
+						Type.String(),
+						Type.Object({
+							width: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+							depth: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+							height: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+							tolerance: Type.Optional(Type.Number()),
+						}),
+						{
+							description:
+								"Reference dimensions per object name, compared against what the scene actually measures. A bare integer is MILLIMETRES and a bare decimal is METRES, because a brief says `2400` and `2.4m` for the same ceiling; unitless-as-metres is not an option when a 1000x error renders identically. Naming dimensions implies the `scale` check.",
+						},
+					),
+				),
+				checks: Type.Optional(
 					Type.Array(
 						Type.Union([
 							Type.Literal("transform"),
@@ -1283,6 +1290,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					objects: params.objects,
 					pairs: params.pairs,
 					checks: params.checks,
+					specifications: params.specifications,
 					tolerance: params.tolerance,
 					expectedAxis: params.expectedAxis,
 					timeoutMs: params.timeoutMs,

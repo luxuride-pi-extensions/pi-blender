@@ -2,6 +2,7 @@ import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "no
 import { dirname, join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { checkLiveBlenderBlend, requestLiveBlenderOpenBlend } from "./bridge.js";
+import { pidIsRunning, readLockHolderPid } from "./liveness.js";
 import { assertWorkspaceOwnership, buildWorkspaceOwner, classifyWorkspaceOwner, describeLiveOwner } from "./ownership.js";
 import type { BlenderWorkspaceManifest, WorkspaceInitOptions, WorkspaceInitResult } from "./types.js";
 import {
@@ -112,15 +113,27 @@ async function acquireManifestLock(
 				throw error;
 			}
 
-			// Reclaim a lock whose holder died mid-update.
+			// Reclaim only a lock whose holder is CONFIRMED gone. A lock with a
+			// readable pid is never reclaimed on age, however long ago it was
+			// written: a mutate that outlasts MANIFEST_LOCK_STALE_MS would
+			// otherwise have its lock taken by a second writer, and the first
+			// writer's read-modify-write would then overwrite whatever landed in
+			// between. Age reclaims only the pre-pid format, where there is no pid
+			// to ask about.
+			let reclaimable = false;
 			try {
 				const stats = await stat(lockPath);
-				if (Date.now() - stats.mtimeMs > MANIFEST_LOCK_STALE_MS) {
-					await rm(lockPath, { force: true });
-					continue;
-				}
+				const holderPid = readLockHolderPid(lockPath);
+				reclaimable =
+					holderPid === null
+						? Date.now() - stats.mtimeMs > MANIFEST_LOCK_STALE_MS
+						: !pidIsRunning(holderPid);
 			} catch {
 				// Holder released between the failed create and this stat.
+				continue;
+			}
+			if (reclaimable) {
+				await rm(lockPath, { force: true });
 				continue;
 			}
 

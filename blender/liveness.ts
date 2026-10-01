@@ -89,13 +89,59 @@ export function isHeartbeatPidAlive(bridgeDir: string = getBlenderBridgeDir()): 
 	} catch {
 		return true;
 	}
+	return pidIsRunning(pid);
+}
 
+/**
+ * Whether a pid is still running, by signal probe rather than by mtime.
+ *
+ * EPERM counts as alive: the process exists, it just belongs to another user,
+ * which is exactly what a Blender launched outside this session looks like.
+ */
+export function pidIsRunning(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
+
+/**
+ * The pid recorded in a lock file, or null when the file carries no usable one.
+ *
+ * Null is not the same answer as a dead pid and must never be collapsed into
+ * one: it means "this lock predates the pid field, so nobody can say anything
+ * about the holder" -- a reader that treated it as dead would be guessing, and
+ * a reader that treated it as alive would be guessing the other way.
+ */
+export function readLockHolderPid(lockPath: string): number | null {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(lockPath, "utf-8"));
+		if (typeof parsed !== "object" || parsed === null) return null;
+		const candidate = (parsed as { pid?: unknown }).pid;
+		if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate <= 0) return null;
+		return candidate;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Whether a lock file's holder can be positively confirmed dead.
+ *
+ * Only ever true for a lock whose recorded pid is present and gone. A lock file
+ * that cannot be read, or that carries no usable pid, answers false -- so a live
+ * holder is never displaced by a parser that did not understand the file, and
+ * the caller falls back to its age window for exactly that case.
+ *
+ * A pid recycled by an unrelated process answers "not dead" and the lock waits
+ * out its stale window. That is the correct failure: the cost is a delay, and
+ * the alternative is stealing a lock from a holder that is running.
+ */
+export function lockHolderIsDead(lockPath: string): boolean {
+	const pid = readLockHolderPid(lockPath);
+	return pid !== null && !pidIsRunning(pid);
 }
 
 /**

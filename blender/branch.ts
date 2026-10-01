@@ -26,6 +26,7 @@ import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/pr
 import { dirname, join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
+import { pidIsRunning, readLockHolderPid } from "./liveness.js";
 import type {
 	BlenderBranchRunRecord,
 	BlenderModuleRunRecord,
@@ -945,9 +946,19 @@ interface BranchApplyPayload {
 
 const APPLY_LOCK_FILE = ".branch-apply.lock";
 /**
- * Generous enough to outlive a slow apply, because a holder that is reclaimed
- * early would let a second apply write model.blend while the first still has it
- * open — and reclaiming late only costs a stuck workspace the operator can clear.
+ * Enough to outlive a slow apply, because a holder that is reclaimed early
+ * would let a second apply write model.blend while the first still has it
+ * open -- and reclaiming late only costs a stuck workspace the operator can
+ * clear.
+ *
+ * The window is the FALLBACK path, not the rule: a lock whose holder pid is
+ * gone is reclaimed immediately whatever its age. A lock with a readable pid is
+ * NEVER reclaimed on age, because an apply is deliberately held across a
+ * headless Blender run whose duration nobody bounded -- a time-based steal
+ * would hand model.blend to a second apply mid-merge, and the first apply's
+ * save would win with the second one's objects missing. Age reclaims only a
+ * pre-pid lock, which is also the operator's escape hatch for a workspace
+ * wedged by a holder this process cannot see.
  */
 const APPLY_LOCK_STALE_MS = 15 * 60_000;
 const APPLY_LOCK_POLL_MS = 50;
@@ -978,13 +989,19 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
 			};
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			// A dead holder is reclaimed at any age. A live one never is, however
+			// long it has been running: this lock is held across the merge itself.
+			let reclaimable = false;
 			try {
 				const stats = await stat(lockPath);
-				if (Date.now() - stats.mtimeMs > APPLY_LOCK_STALE_MS) {
-					await rm(lockPath, { force: true });
-					continue;
-				}
+				const holderPid = readLockHolderPid(lockPath);
+				reclaimable =
+					holderPid === null ? Date.now() - stats.mtimeMs > APPLY_LOCK_STALE_MS : !pidIsRunning(holderPid);
 			} catch {
+				continue;
+			}
+			if (reclaimable) {
+				await rm(lockPath, { force: true });
 				continue;
 			}
 			if (Date.now() >= deadline) {
