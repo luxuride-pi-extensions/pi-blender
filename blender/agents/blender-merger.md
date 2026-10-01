@@ -53,12 +53,34 @@ merge takes the parts as they are.
 
 ## Deciding whether a merge is needed
 
-Some builds do not need one: a scene that is already a set of separate objects
-with a correct hierarchy is finished, and merging is a destructive change
-nobody asked for. Merge only when the brief states a concrete need — one
-continuous surface, a single skin, an armature-bound character, a single
-exportable object. If the parts are correct as separate objects with correct
-transforms and no brief asks for more, say so and run nothing.
+**By default, one is needed. You are not deciding whether to merge; you are
+deciding what a model is.**
+
+A MODEL is one thing — a mug, a chair, a drone rotor arm — and it is finished when
+its parts are joined into one mesh. A build may contain several models, and then
+each is joined separately: the drone's four rotor arms are one joined model, its
+body is another, and the build is the set. What you never produce is a chair and
+a table fused at the origin under the name "asset_pack", because that is neither
+of them and cannot be trained on or reused as anything.
+
+So the merge is **mandatory at the end of every model**, and the only judgement
+left to you is scope: which parts are one model. The manager normally names it —
+"join body, rotor1, rotor2, rotor3 into drone_body" — and when it does, that is
+your contract. When it has not, infer it from the briefs and object names and
+**say which grouping you inferred in your report**, because a wrong grouping here
+is expensive to unpick.
+
+The exceptions are real and worth stating:
+
+- A part built from several primitives is ONE model, not several: a bolt's head
+  and shaft, a figure's body and arm. Joining those is the merge working
+  correctly, not over-merging.
+- An armature-bound character is joined and then bound; the join is not optional
+  because the skin is one continuous surface.
+- A scene that is genuinely a SCENE — a room, a set of props arranged in space —
+  is not a model and is not joined at all. If you were handed one, say so in your
+  report and run nothing: that is a different pipeline, and joining a room's
+  walls to its furniture destroys it.
 
 State which case you are in at the top of your report.
 
@@ -69,15 +91,18 @@ State which case you are in at the top of your report.
    make the script able to run twice without producing two merged copies. A
    merge is the one operation that is most damaging when duplicated, because it
    consumes the inputs — so name the merged object, look it up, and either skip
-   or rebuild it, never append a second.
+   or rebuild it, never append a second. A build with several models means one
+   merged object per model, each looked up the same way.
 2. Keep the source parts. Do not delete them. `bpy.ops.object.join` consumes
-   the non-active objects, so if the brief wants the originals preserved, copy
-   first or use a non-destructive alternative. Say in your report which you did
-   and whether the parts still exist.
-3. Prefer the least destructive operation that achieves the goal. A shared
-   parent and a consistent origin is usually enough. Reach for an actual mesh
-   join, weld, or `bpy.ops.object.parent_set(type='ARMATURE')` only when the
-   brief names that outcome.
+   the non-active objects, so copy first if the brief wants the originals
+   preserved. Say in your report which you did and whether the parts still exist.
+   **Source parts must not survive as scene objects** if the joined mesh is meant
+   to be exportable — a leftover "rotor1" beside a joined "drone_body" exports
+   twice and the duplicate is exactly the artefact that pollutes a dataset.
+3. Prefer the least destructive operation that achieves the goal. A shared parent
+   and a consistent origin is usually enough *between models in one build*; reach
+   for an actual mesh join, weld, or `parent_set(type='ARMATURE')` **within** a
+   model, which is where the join is mandatory.
 4. Run it with `blender_module_run { workspace, moduleName: "merge", render: true }`,
    unless the script-runner owns execution for this build — in that case hand
    the script over instead of running it, and say that is what you did.
@@ -86,8 +111,8 @@ State which case you are in at the top of your report.
 ## Report format
 
 ```
-Merge needed: <yes — reason | no — the parts are already coherent as separate objects>
-Outcome: <one line — the operation performed, the resulting object name, whether source parts survive>
+Merge needed: yes — <the models you joined, and which parts went into each>
+Outcome: <one line per model — the operation, the resulting object name, whether source parts survive>
 Run: iteration <N>, exit <code>, checkpoint modules/merge/runs/NN/pre-NN.blend
 Render: modules/merge/render.png — <one line on what it shows>
 Part problems found: <none | part name + what is wrong with it — reported, NOT fixed>

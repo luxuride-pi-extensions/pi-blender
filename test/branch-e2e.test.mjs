@@ -120,6 +120,26 @@ obj = bpy.data.objects.get("Mug")
 obj.location.x = 5.0
 `;
 
+const ADD_BOX_AT = `
+import bpy
+bpy.ops.mesh.primitive_cube_add(size=1.0)
+obj = bpy.context.object
+obj.name = "{name}"
+obj.scale = ({sx}, {sy}, {sz})
+obj.location = ({x}, {y}, {z})
+`;
+
+/** A scaled, positioned box, as a module script. */
+function box(name, sx, sy, sz, x = 0, y = 0, z = 0) {
+	return ADD_BOX_AT.replace("{name}", name)
+		.replace("{sx}", String(sx))
+		.replace("{sy}", String(sy))
+		.replace("{sz}", String(sz))
+		.replace("{x}", String(x))
+		.replace("{y}", String(y))
+		.replace("{z}", String(z));
+}
+
 /**
  * A module that builds its own geometry AND its own camera, aimed at the
  * geometry rather than at the world origin. This is the shape the worker prompt
@@ -162,6 +182,37 @@ import bpy, json, sys
 json.loads(sys.argv[sys.argv.index("--") + 1])
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(bpy.context.scene.camera.name if bpy.context.scene.camera else None))
+print("__PI_BLENDER_JSON_END__")
+`,
+		payload: {},
+		timeoutMs: 120_000,
+	});
+}
+
+/** A camera object's transform, its lens, and what its Track To constraint aims at. */
+async function cameraReport(cwd, blendPath, name) {
+	const utils = await loadTs(fileURLToPath(new URL("../blender/utils.ts", import.meta.url)));
+	return await utils.runBlenderJson({
+		cwd,
+		blendPath,
+		scriptSource: `
+import bpy, json, sys
+json.loads(sys.argv[sys.argv.index("--") + 1])
+camera = bpy.data.objects.get(${JSON.stringify(name)})
+if camera is None:
+    print("__PI_BLENDER_JSON_START__")
+    print(json.dumps(None))
+    print("__PI_BLENDER_JSON_END__")
+    raise SystemExit(0)
+constraint = next((c for c in camera.constraints if c.type == "TRACK_TO"), None)
+target = constraint.target if constraint is not None else None
+print("__PI_BLENDER_JSON_START__")
+print(json.dumps({
+    "location": [camera.location.x, camera.location.y, camera.location.z],
+    "lens": camera.data.lens,
+    "target": [target.location.x, target.location.y, target.location.z] if target is not None else None,
+    "distance": (camera.location - target.location).length if target is not None else None,
+}))
 print("__PI_BLENDER_JSON_END__")
 `,
 		payload: {},
@@ -440,6 +491,112 @@ test("a module's own camera survives the apply, and renders from it", { skip }, 
 		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
 		const recorded = manifest.renderOutputs.at(-1);
 		assert.equal(recorded?.view, "MugCam", "the manifest must record which view produced the render, so a later critic is not handed the wrong one");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the harness frames each module's own camera, with no camera in the brief", { skip }, async () => {
+	// Framing is the part of a module's picture that no amount of modelling skill
+	// fixes, and doing it in the worker meant a camera fitted to the shape the
+	// part had LAST iteration. So the framing is solved here, from the objects the
+	// run actually produced -- which is also why the run's render is taken from it
+	// by default: a render from the origin-aimed studio camera is a verdict about
+	// framing on a model that may be perfect.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", box("Arm", 6.0, 0.2, 0.2, 3.0, 0, 1.0));
+		// Deliberately NOT at the origin, and deliberately long and thin: a camera
+		// fitted to the world origin, or fitted to the widest axis alone, frames
+		// either of those wrongly.
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: true,
+			timeoutSeconds: 300,
+		});
+
+		assert.equal(result.exitCode, 0);
+		assert.equal(result.cameras?.length, 1, "a run that produced a mesh must report the framing it solved");
+
+		const framing = result.cameras[0];
+		assert.equal(framing.cameraName, "armCam", "the camera is named for the module, so a render can ask for it by name");
+		assert.deepEqual(framing.subjects, ["Arm"], "the subject is the module's OWN objects: a camera framed on the whole build is the same defect as one framed on the origin");
+		assert.ok(framing.extent[0] >= 5.9, `the measured extent must be the part's, not the camera's (got ${JSON.stringify(framing.extent)})`);
+
+		// The numbers must agree with what is actually in the file, because a
+		// framing report that describes a camera the apply did not carry is worse
+		// than no report: it claims a picture that does not exist.
+		const camera = await cameraReport(ws.root, ws.blendPath, "armCam");
+		assert.ok(camera, "the camera must reach model.blend, or the window cannot be pointed at it");
+		assert.ok(camera.target, "the aim is a Track To constraint on an empty, so re-framing cannot drift out of sync with the aim");
+		assert.ok(
+			Math.abs(camera.target[0] - framing.center[0]) < 1e-4 && Math.abs(camera.target[2] - framing.center[2]) < 1e-4,
+			`the target must sit on the measured centre (target ${JSON.stringify(camera.target)} vs centre ${JSON.stringify(framing.center)})`,
+		);
+		assert.ok(
+			Math.abs(camera.distance - framing.distance) < 1e-4,
+			`the camera's distance must be the solved distance (${camera.distance} vs ${framing.distance})`,
+		);
+		// The eye must be OUTSIDE the part, at a distance the lens can actually
+		// frame: too close and a 50mm lens is inside the geometry.
+		assert.ok(camera.distance > framing.extent.reduce((a, b) => Math.hypot(a, b), 0) / 2, "the eye must be outside the part's bounding sphere");
+
+		// The default render must come from that camera, not the studio one.
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		assert.equal(
+			manifest.renderOutputs.at(-1)?.view,
+			"armCam",
+			"with no view given, the render must use the module's own framed camera -- falling back to scene.camera is the origin-aimed studio camera",
+		);
+		assert.ok(result.renderOutputPath && existsSync(result.renderOutputPath));
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("re-framing follows the part when it changes", { skip }, async () => {
+	// A camera fitted once is the defect this replaced, so the test is that the
+	// SECOND run moves it. Without this the feature is "creates a camera", which
+	// is the behaviour it was meant to remove.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", box("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		const first = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		writeScript(
+			ws.workspacePath,
+			"arm",
+			`
+import bpy
+${box("Arm", 10.0, 0.4, 0.4, 8.0, 0, 0).replace(/^import bpy\n/, "")}
+`,
+		);
+		const second = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		assert.equal(first.cameras?.[0].created, true, "the first run creates the camera");
+		assert.equal(second.cameras?.[0].created, false, "the second run reuses it rather than making a second camera");
+		assert.ok(
+			second.cameras[0].distance > first.cameras[0].distance * 1.5,
+			`a part five times bigger must pull the camera back (${first.cameras[0].distance} then ${second.cameras[0].distance})`,
+		);
+		assert.ok(
+			Math.abs(second.cameras[0].center[0] - 8.0) < 0.2,
+			`the aim must follow the part to where it now is (centre ${JSON.stringify(second.cameras[0].center)})`,
+		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

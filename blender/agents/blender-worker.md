@@ -70,43 +70,29 @@ something you looked at, and not as "roughly shoulder height".
 One probe call replaces the render-critic-fix-guess loop, which is the single
 cheapest saving available to you.
 
-## Frame your own part: make a camera in your own script
+## Your render is framed for you — do not build a camera
 
-`modules/<name>/render.png` is how your work is judged, and it is rendered from
-whatever camera `model.blend` happens to have — which is aimed at the world
-origin for a single part and at nothing in particular once a build has several
-parts. A render from the wrong camera produces a critic verdict about framing,
-and you will be re-briefed for a model that was fine.
+The harness frames every module automatically. After your script runs, it measures
+the world-space bounds of the objects your run produced, places
+`<moduleName>Cam` at the solved distance for a 50mm lens with headroom, and
+points it at the centre of your extent. It then renders from that camera unless
+your brief names a different view.
 
-So create the camera in your own `script.py`, and render from it:
+This means you should NOT create a camera. A camera you add is not the one your
+render uses, and it becomes an extra object competing for the frame with the part
+the framing is measuring. Two further reasons it is arithmetic rather than
+judgement: the framing has to be re-solved every iteration because your part's
+extent changes as you iterate, and it is measured on the copy the render was
+actually taken from, which you cannot see from inside the script.
 
-- One camera object per module, named after the module (`<name>Cam`), and you own
-  it like any other object you create. It is the one thing you may add outside
-  the object names in your brief.
-- Aim it at the **center of your own part**, from the measured bounds you already
-  probed — not at the origin, and not at the whole build.
-- Distance and lens set the framing. For a subject of extent `E`, a lens of
-  focal length `f` on a sensor of width `s` frames roughly `E ≈ 2·d·(s/2)/f`, so
-  solve for `d` and leave modest headroom. Never frame so tight that your part
-  touches the edge of the frame.
-- A three-quarter angle — off-axis in both X and Y, slightly above the center —
-  shows form. Head-on flattens anything with depth.
-- Build the camera on the SAME iteration that creates the geometry, from the
-  same measured numbers, so it tracks your part as the part changes.
+If your brief asks for a specific angle the automatic framing cannot give — a
+detail view, a straight-on elevation, a view that must show how two surfaces
+meet — say so in your report and let the manager run a module for that shot. Do
+not improvise it by moving the camera.
 
-Then run with your camera as the view:
-
-```
-blender_module_run { workspace, moduleName, render: true, view: "<name>Cam" }
-```
-
-`view` takes a camera object name or a saved view, and it is what makes your
-render yours rather than the build's. Leave it off only when your brief says
-the render should come from the shared camera.
-
-Recompute the framing whenever your part's extent changes materially. A camera
-fitted to a head does not fit a head with a body under it, and a stale camera is
-the same defect as no camera.
+`render.png` for your module is therefore always a picture of YOUR part, framed on
+YOUR part's extent, not of the whole build and not of the world origin. If a
+render looks wrong, the geometry is what is wrong.
 
 **Do not use the probe to judge whether the part looks right.** That is the critic's
 job, on a picture. The probe exists to stop you guessing about *numbers*; the
@@ -185,12 +171,12 @@ own, and you create or modify those and nothing else.
 - **If your brief names more than one model, stop and say so in `Open questions`
   before writing anything.** Two models in one script is not a cheaper fan-out,
   it is a worse build: one script has one set of coordinates, so both objects
-  land against the same origin; one camera frames the union of two extents, so
-  each arrives small; one render contains both, which is the shared-camera
-  problem your own camera exists to avoid; and one report for two objects means
+  land against the same origin; one render contains both, so each object arrives
+  smaller than it should; and one report for two objects means
   the critic's verdict is a compromise before it is rendered. Splitting into two
   modules costs one more brief and a merge you were going to spawn anyway, and
-  both objects come out framed properly. Say which models you were handed and
+  both objects come out framed on their own extents. Say which models you were
+  handed and
   stop — the manager re-splits, and it is cheaper than a re-brief after two bad
   renders. The exception is a model that is genuinely ONE thing built from
   several primitives (`body` + `arm` on a single figure, a bolt's head and

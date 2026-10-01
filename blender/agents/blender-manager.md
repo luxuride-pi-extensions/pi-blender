@@ -169,7 +169,7 @@ So the shape of a multi-part build is:
    parts actually exist after each run.
 4. Spawn a **fresh `blender-critic` per part**, against each part's render, as
    each render appears.
-5. If the parts need merging, spawn **one `blender-merger`**; otherwise do not.
+5. **When each MODEL's parts are all present, spawn `blender-merger`** — this is not conditional. Every model is finished when its parts are joined. A build with several models is merged once per model.
 6. For asset creation, the finalizer, once, at the end.
 
 The barrier is the point where a decision needs the WHOLE build: naming the
@@ -220,7 +220,8 @@ idle is wall-clock nobody gets back, and a critic run behind another critic is
 latency the user watches.
 
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
-rendered from its own camera, judged, re-briefed and run again — and each of
+framed automatically and rendered from its own camera, judged, re-briefed and run
+again — and each of
 those runs lands in `model.blend` as it happens, so a watch window shows the
 build accumulating rather than jumping at the end. The critic never sees the
 whole build, and neither does the camera it is judged from.
@@ -300,7 +301,7 @@ decomposition is one worker per thing, not one worker per category. "Furniture"
 is not a model; `chair`, `table`, `lamp` are.
 
 The merge is then a real step, not a formality, and you spawn `blender-merger`
-once at the end as already planned. Nothing is lost by splitting: the parts are
+once per model. Nothing is lost by splitting: the parts are
 independent precisely because they have different object names, which is what
 made the fan-out safe in the first place.
 
@@ -339,12 +340,12 @@ Every worker brief must state, explicitly:
   `categories` entirely, and the unfiltered payload on a real workspace is
   thousands of tokens on every call for data it does not need. Deciding once,
   here, is cheaper than letting six workers each discover it.
-- **that it creates its own camera** for its part and renders from it, naming
-  the camera object the render should use. Do not accept a render from the
-  shared camera: for a multi-part build that camera is aimed at nothing, and
-  the critic will report framing on a module that is fine. See the worker's
-  framing section for the arithmetic; your brief only has to require the camera
-  and name the part it frames.
+- **that it creates no camera** — the harness frames and renders every module
+  automatically, so a brief that asks for a camera gets an extra object
+  competing with the part for the frame. If a specific shot is genuinely needed
+  (a detail view, a straight-on elevation, a surface junction), say which shot
+  in the brief and let the runner render that one module from a named view; do
+  not have the worker place it.
 - **what the work needs**, in one clause, so a worker that lacks it says so
   instead of substituting. `The grip needs a measurement of its clearance
   against the body` — a worker holding `blender_geometry_probe` and
@@ -644,9 +645,12 @@ diagnostician's numbers are the thing to spend.
    condition your next brief did not change, and a third identical brief buys
    the same picture again. Read the two verdicts side by side: they are the
    cheapest diagnostic you will ever get.
-6. If the parts need merging, spawn `blender-merger` once. If they do not, do
-   not spawn it — a merge nobody asked for is a destructive change to a
-   finished build.
+6. **When every model's parts are present, spawn `blender-merger`** with the
+   grouping named: which objects go into which joined model. This is mandatory,
+   not a judgement call. A build whose parts landed correctly in `model.blend`
+   but were never joined is not finished — four agents each making a rotor arm
+   is a build of four rotor arms, not a drone, and it is the single most common
+   way a build reports success and exports nothing usable.
 7. For asset creation, spawn the finalizer once at the end.
 8. Present the result. Report into this conversation, to the user directly:
    what was built, and the open questions you did not resolve. There is no

@@ -32,6 +32,7 @@ import type {
 	BlenderWorkspaceManifest,
 	BranchApplyOptions,
 	BranchApplyResult,
+	BranchCameraFraming,
 	BranchConflict,
 	BranchRunOptions,
 	BranchRunResult,
@@ -94,9 +95,11 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import sys
 import traceback
+from mathutils import Vector
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
 branch_path = payload["branchPath"]
@@ -163,6 +166,14 @@ def _fingerprint_material(material):
 
 
 def snapshot():
+    # The depsgraph update is what makes the fingerprints below truthful. A script
+    # that sets obj.location has changed matrix_world only lazily, so reading it
+    # without this returns the PREVIOUS transform -- and a moved object then
+    # fingerprints identical to a stationary one, which reports as a module that
+    # touched nothing and silently drops its work at apply time. This used to be
+    # masked by the save that ran before the snapshot; framing moved the save
+    # after it, and the masking went with it.
+    bpy.context.view_layer.update()
     return {
         "objects": {obj.name: _fingerprint_object(obj) for obj in bpy.data.objects},
         "materials": {mat.name: _fingerprint_material(mat) for mat in bpy.data.materials},
@@ -192,7 +203,6 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
         with open(script_path, encoding="utf-8") as handle:
             code = handle.read()
         exec(compile(code, script_path, "exec"), globals_dict)
-        bpy.ops.wm.save_mainfile()
     except Exception:
         exit_code = 1
         traceback.print_exc()
@@ -240,6 +250,132 @@ for name in list(apply_objects):
 # module's work. Only objects the module itself removed are applied as removals.
 removed_objects = sorted(deleted - (apply_objects & set(after_objects)))
 
+# ---- auto-framing -----------------------------------------------------------
+# The module's camera is framed HERE, from the bounds of the objects this run
+# actually produced, rather than by the worker. Two reasons, both about timing:
+# the render is taken on this branch, so a camera the worker placed on the
+# previous iteration is the picture THIS iteration gets judged on; and framing is
+# arithmetic over measured numbers, so a worker doing it produced a good picture
+# once and a stale one the moment its part changed, with a report that could not
+# tell a fitted camera from one fitted to an older shape.
+#
+# The subject is this module's OWN applied objects, never the whole scene: a
+# camera framed on the build is the same defect as one framed on the origin.
+CAMERA_SUFFIX = "Cam"
+FRAME_LENS_MM = 50.0
+FRAME_SENSOR_MM = 36.0
+FRAME_MARGIN = 1.35
+FRAME_DIRECTION = (1.0, -1.0, 0.55)
+
+
+def _mesh_world_bounds(names):
+    """World-space AABB over the named MESH objects, or None if there are none.
+
+    The depsgraph update is load-bearing: matrix_world is stale until something
+    asks for it, so reading it right after a script set a scale gives the
+    UNTRANSFORMED bounds -- a 6x0.2x0.2 arm framing as if it were a unit cube,
+    which is a camera cropped to nothing. Verified against real Blender rather
+    than assumed: the same object measures [1,1,1] before the update and
+    [6, 0.2, 0.2] after it.
+    """
+    bpy.context.view_layer.update()
+    corners = []
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is None or obj.type != "MESH":
+            continue
+        for corner in obj.bound_box:
+            corners.append(obj.matrix_world @ Vector(corner))
+    if not corners:
+        return None
+    return (
+        Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners))),
+        Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners))),
+    )
+
+
+def frame_module_camera(module):
+    """Point <module>Cam at this module's own extent. Returns a report, or None."""
+    camera_name = module + CAMERA_SUFFIX
+    subjects = sorted(
+        name for name in apply_objects
+        if not name.endswith(CAMERA_SUFFIX)
+        and bpy.data.objects.get(name) is not None
+        and bpy.data.objects[name].type == "MESH"
+    )
+    bounds = _mesh_world_bounds(subjects)
+    if bounds is None:
+        return None
+
+    bounds_min, bounds_max = bounds
+    center = (bounds_min + bounds_max) * 0.5
+    extent = bounds_max - bounds_min
+    radius = max(extent.length * 0.5, 1e-4)
+
+    # E ~ 2*d*(s/2)/f inverted for distance, plus margin for headroom. The
+    # bounding SPHERE rather than the widest axis is what keeps a long thin part
+    # (a rotor arm) from being cropped by a camera sized to its length.
+    half_angle = math.atan((FRAME_SENSOR_MM * 0.5) / FRAME_LENS_MM)
+    distance = radius / math.sin(half_angle) * FRAME_MARGIN
+    location = center + Vector(FRAME_DIRECTION).normalized() * distance
+
+    camera = bpy.data.objects.get(camera_name)
+    created = camera is None
+    if created:
+        camera = bpy.data.objects.new(camera_name, bpy.data.cameras.new(camera_name))
+        bpy.context.scene.collection.objects.link(camera)
+    camera.data.lens = FRAME_LENS_MM
+    camera.location = location
+
+    # A Track To constraint on an empty rather than a baked rotation: re-framing
+    # is then a location change, and the aim cannot drift out of sync with it.
+    target_name = camera_name + "Target"
+    target = bpy.data.objects.get(target_name)
+    if target is None:
+        target = bpy.data.objects.new(target_name, None)
+        bpy.context.scene.collection.objects.link(target)
+    target.empty_display_size = max(radius * 0.15, 1e-3)
+    target.location = center
+    for constraint in list(camera.constraints):
+        camera.constraints.remove(constraint)
+    track = camera.constraints.new("TRACK_TO")
+    track.target = target
+    track.track_axis = "TRACK_NEGATIVE_Z"
+    track.up_axis = "UP_Y"
+
+    # Both datablocks must join the apply set, or they stay on this branch and
+    # model.blend keeps the previous framing for ever.
+    apply_objects.add(camera_name)
+    apply_objects.add(target_name)
+    removed_objects[:] = [n for n in removed_objects if n not in apply_objects]
+
+    return {
+        "module": module,
+        "cameraName": camera_name,
+        "created": created,
+        "center": [center.x, center.y, center.z],
+        "extent": [extent.x, extent.y, extent.z],
+        "distance": distance,
+        "lensMm": FRAME_LENS_MM,
+        "subjects": subjects,
+    }
+
+
+camera_framing = frame_module_camera(module_name)
+cameras = [camera_framing] if camera_framing is not None else []
+
+# The save happens HERE, after the framing and after the apply set is settled --
+# not inside the try above. Saving earlier wrote a branch file without the camera,
+# so the render could not find it, and the apply reported the camera as missing
+# from its own branch: the framing existed in memory and nowhere else.
+if exit_code == 0:
+    bpy.ops.wm.save_mainfile()
+
+# Framing deliberately does NOT happen again in the apply. This run's render was
+# taken on this branch, so the framing that reaches model.blend is the framing of
+# the geometry the critic judged; re-solving it against the merged scene would
+# silently disagree with that picture.
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
     "stdout": stdout_buffer.getvalue(),
@@ -250,6 +386,7 @@ print(json.dumps({
     "addedObjects": sorted(after_objects - before_objects),
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
+    "cameras": cameras,
 }))
 print("__PI_BLENDER_JSON_END__")
 `;
@@ -264,6 +401,8 @@ interface BranchRunPayload {
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
+	/** Framing solved for this module's camera; empty when it produced no mesh. */
+	cameras: BranchCameraFraming[];
 }
 
 /**
@@ -372,7 +511,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 			// keeps the branch's own camera, same as the live module render.
 			cameraName = options.view;
 		} else {
-			viewLabel = "active-camera";
+			// No explicit view: render from THIS MODULE'S OWN auto-framed camera.
+			// Falling through to scene.camera would render from the studio camera,
+			// which is aimed at the world origin and points at nothing once a build
+			// has parts — the exact defect the framing exists to remove. Falls back
+			// to the scene camera only when the run produced no mesh to frame.
+			cameraName = payload.cameras[0]?.cameraName;
+			viewLabel = cameraName ?? "active-camera";
 		}
 		renderOutputPath = await renderBranch({
 			cwd: options.cwd,
@@ -408,6 +553,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		applyObjects: payload.applyObjects,
 		status: "staged",
 		renderOutputPath,
+		cameras: payload.cameras,
 	};
 
 	await updateManifest(
@@ -446,6 +592,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		renderOutputPath,
+		cameras: payload.cameras,
 		status: "staged",
 	};
 }
@@ -887,6 +1034,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			iteration: record.iteration,
 			appended: payload.appended,
 			removed: payload.removedExisting,
+			cameras: record.cameras ?? [],
 		});
 
 		await updateManifest(manifest.manifestPath, (current) => {

@@ -177,6 +177,8 @@ export interface BlenderBranchRunRecord {
 	appliedAt?: string;
 	conflicts?: BranchConflict[];
 	renderOutputPath?: string | null;
+	/** Framing this run solved for the module's camera. Empty when it produced no mesh. */
+	cameras?: BranchCameraFraming[];
 }
 
 export interface BranchRunOptions {
@@ -212,6 +214,8 @@ export interface BranchRunResult {
 	applyObjects: string[];
 	renderOutputPath: string | null;
 	status: BranchRunStatus;
+	/** Framing solved for the module's camera, and the numbers it was solved from. */
+	cameras: BranchCameraFraming[];
 }
 
 export interface BranchApplyOptions {
@@ -226,12 +230,32 @@ export interface BranchApplyOptions {
 export interface BranchApplyResult {
 	workspacePath: string;
 	blendPath: string;
-	applied: Array<{ module: string; iteration: number; appended: string[]; removed: string[] }>;
+	applied: Array<{ module: string; iteration: number; appended: string[]; removed: string[]; cameras: BranchCameraFraming[] }>;
 	/** Conflicted modules, with the object that stopped each. Their branch blends are untouched. */
 	skipped: Array<{ module: string; conflicts: BranchConflict[] }>;
 	/** Modules whose branch blend had vanished from disk before the apply. */
 	missing: string[];
 	liveBlenderMessage: string;
+}
+
+/**
+ * Where the harness put a module's camera, and on what numbers.
+ *
+ * Framing is arithmetic, so it is done here rather than by a worker: every
+ * applied module's `<name>Cam` is re-solved from the bounds the apply just
+ * measured. A worker that framed its own camera produced a good picture once
+ * and a stale one the moment its part changed, and the report could not tell the
+ * difference.
+ */
+export interface BranchCameraFraming {
+	module: string;
+	cameraName: string;
+	created: boolean;
+	center: [number, number, number];
+	extent: [number, number, number];
+	distance: number;
+	lensMm: number;
+	subjects: string[];
 }
 
 /**
@@ -844,6 +868,15 @@ export interface ModuleRunResult {
 	executionMode: "live-session" | "headless-apply";
 	/** Present when the run was a headless branch apply; what the live session did about it. */
 	liveBlenderMessage?: string;
+	/**
+	 * The framing the harness solved for this module's camera, when it ran headless.
+	 *
+	 * Present rather than assumed because the two execution paths differ: a live
+	 * run does not frame anything, and a worker told to place its own camera there
+	 * still does. A caller reading `cameras` must check it rather than assume a
+	 * camera exists at `<module>Cam`.
+	 */
+	cameras?: BranchCameraFraming[];
 }
 
 export interface ModuleRevertOptions {

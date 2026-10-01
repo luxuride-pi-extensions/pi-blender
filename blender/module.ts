@@ -135,6 +135,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		changed: branchResult.applyObjects.length > 0,
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
+		cameras: branchResult.cameras,
 	};
 }
 
