@@ -406,10 +406,24 @@ camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 scene.camera = camera
 
 # --- Three-point rig, aimed at the origin. ---
-def add_area_light(name, location, energy, size, color):
-    data = bpy.data.lights.new(name, type="AREA")
+#
+# Every light here is a SUN, and that is the load-bearing decision. An AREA light
+# is a fixture at prop scale: irradiance falls with distance squared, so a 900 W
+# key 3.5 m from the origin delivers 1/400 of that at 60 m and a subject
+# modelled at world scale renders black. A template cannot know how big the
+# subject will be, so it cannot size a local fixture for it -- and a rig that is
+# correct only for a mug is worse than one that is correct for everything. SUN
+# irradiance does not depend on distance, so this rig is still the three-point
+# rig at 3 m and at 300 m.
+#
+# Roles are preserved rather than the rig being flattened: the key is the
+# dominant source front-left and high, the fill opens the shadows from the
+# opposite side and is weaker, and the rim separates the subject from the
+# background. Each points the same way it did as an area light, so a critic
+# reading a render sees the same three-source read.
+def add_sun(name, location, energy, color):
+    data = bpy.data.lights.new(name, type="SUN")
     data.energy = energy
-    data.size = size
     data.color = color
     obj = bpy.data.objects.new(name, data)
     collection.objects.link(obj)
@@ -418,11 +432,9 @@ def add_area_light(name, location, energy, size, color):
     obj.rotation_euler = offset.to_track_quat("-Z", "Y").to_euler()
     return obj
 
-# Key is the dominant source and sits front-left, high; fill is weaker and
-# opposite to open the shadows; rim separates the subject from the background.
-add_area_light("StudioKey", (3.5, -4.0, 4.5), 900.0, 4.0, (1.0, 0.96, 0.9))
-add_area_light("StudioFill", (-4.5, -2.5, 1.5), 250.0, 5.0, (0.85, 0.9, 1.0))
-add_area_light("StudioRim", (-1.5, 4.5, 3.0), 600.0, 3.0, (1.0, 1.0, 1.0))
+add_sun("StudioKey", (3.5, -4.0, 4.5), 3.5, (1.0, 0.96, 0.9))
+add_sun("StudioFill", (-4.5, -2.5, 1.5), 1.0, (0.85, 0.9, 1.0))
+add_sun("StudioRim", (-1.5, 4.5, 3.0), 2.0, (1.0, 1.0, 1.0))
 
 bpy.ops.wm.save_as_mainfile(filepath=payload["blendPath"])
 print("__PI_BLENDER_JSON_START__")

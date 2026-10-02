@@ -72,3 +72,30 @@ test("the error text no longer tells the caller to run a command it cannot run",
 	);
 	assert.match(constructor, /do not stop the build/i, "the error must say the build continues, because an agent's only move against a dead end is to stop");
 });
+
+// The studio template's light rig.
+//
+// It used to be three AREA lights sized for a prop: 900 W at 3.5 m from the
+// origin. Area-light irradiance falls with distance squared, so that rig
+// delivered roughly 1/400 of its intended level at 60 m and a subject modelled
+// at world scale rendered black. The geometry was never wrong, which is exactly
+// why it was hard to see: only a build that outgrew the template ever saw it.
+//
+// So the template uses SUNs, whose irradiance does not depend on distance and
+// which therefore are still a three-point rig at 3 m and at 300 m.
+
+test("the studio template ships suns, not fixtures sized for a prop", () => {
+	const source = readFileSync(new URL("../blender/workspace.ts", import.meta.url), "utf8");
+	const rig = source.slice(source.indexOf("# --- Three-point rig"), source.indexOf("bpy.ops.wm.save_as_mainfile", source.indexOf("# --- Three-point rig")));
+
+	assert.doesNotMatch(rig, /type="AREA"/, "an area light is a prop-scale fixture; the template cannot know how big the subject will be");
+	assert.doesNotMatch(rig, /add_area_light/, "the area-light helper must go with its last call, or it reads as an available option");
+	assert.match(rig, /type="SUN"/, "the rig must still be three sources, and they must be distance-independent");
+
+	// Three sources, and the roles still differ: flattening a key/fill/rim into
+	// one value would fix the scale problem and cost the read a critic depends
+	// on.
+	const energies = [...rig.matchAll(/add_sun\("[^"]+", \([^)]*\), ([\d.]+),/g)].map((m) => Number(m[1]));
+	assert.equal(energies.length, 3, "a three-point rig is three sources, not one lamp named three times");
+	assert.equal(new Set(energies).size, 3, "key, fill and rim must differ in strength, or the rig is one light");
+});
