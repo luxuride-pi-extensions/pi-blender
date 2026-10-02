@@ -579,6 +579,7 @@ def handle_read_only_python(request):
             with open(request["userScriptPath"], encoding="utf-8") as handle:
                 code = handle.read()
             with read_only_run(bpy):
+                # pi-lens-ignore: ast-grep:no-compile-call, S102, eval-exec
                 exec(compile(code, request["userScriptPath"], "exec"), globals_dict)
         except ReadOnlyViolation as violation:
             # A refusal is the answer, not a crash: the script asked something
@@ -825,6 +826,34 @@ SHAPE_SYMMETRY_EPSILON = 1e-4
 # Relative slack for the in-contact threshold, so float noise cannot flip the
 # verdict for parts that are exactly at the requested tolerance.
 PAIR_TOLERANCE_EPSILON = 1e-9
+
+
+def _as_int(value, field, default=None):
+    """An int from a JSON field, or a default, naming the field on a bad value.
+
+    Every numeric request field reaches here as whatever the caller sent, so
+    `int()` on it is a ValueError waiting for a typo -- and the raw exception
+    names neither the field nor the tool, which is the one thing a caller needs.
+    A bare default is not an answer either: `tolerance: "0.05"` is a plausible
+    mistake, and silently measuring at the default would report numbers the
+    caller never asked for.
+    """
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"`{field}` must be a whole number, got {value!r}") from None
+
+
+def _as_float(value, field, default=None):
+    """A float from a JSON field, or a default, naming the field on a bad value."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"`{field}` must be a number, got {value!r}") from None
 
 
 def _round(value, digits=5):
@@ -1922,7 +1951,7 @@ def _probe_scale_contract(specifications, measurements, default_tolerance):
                 "center": _round_vector((minimum + maximum) * 0.5),
             }
 
-        tolerance = float(spec.get("tolerance") or default_tolerance)
+        tolerance = _as_float(spec.get("tolerance"), "specifications[...].tolerance", default_tolerance)
         axes = {}
         # The spec is keyed by width/depth/height, which are the words a brief
         # uses; each maps to one measured world axis.
@@ -1983,7 +2012,7 @@ def handle_geometry_probe(request):
             f"Available: {', '.join(GEOMETRY_PROBE_CHECKS)}"
         )
 
-    tolerance = float(request.get("tolerance") or 0.002)
+    tolerance = _as_float(request.get("tolerance"), "tolerance", 0.002)
     specifications = request.get("specifications") or None
     if specifications is not None and "scale" not in requested:
         # Naming the dimensions is the request; requiring the caller to also
@@ -2358,14 +2387,21 @@ def handle_montage(request):
     bounds_min, bounds_max = extent
     placements, centre, radius, distance = _montage_placements(resolved, bounds_min, bounds_max)
 
-    columns = int(request.get("columns") or (1 if len(view_names) <= 2 else 2))
+    columns = _as_int(request.get("columns"), "columns", 1 if len(view_names) <= 2 else 2)
     columns = max(1, min(4, columns))
     panel = request.get("panelResolution") or {}
-    panel_width = int(panel.get("x") or 900)
-    panel_height = int(panel.get("y") or 700)
+    panel_width = _as_int(panel.get("x"), "panelResolution.x", 900)
+    panel_height = _as_int(panel.get("y"), "panelResolution.y", 700)
 
     output_dir = request["outputDir"]
-    os.makedirs(output_dir, exist_ok=True)
+    # exist_ok already covers the only expected failure, a directory that
+    # exists; what is left is a path that cannot become one at all -- a file
+    # in the way, a missing parent, no permission -- and the raw OSError names
+    # a path without saying which request field asked for it.
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as error:
+        raise RuntimeError(f"`outputDir` could not be created at {output_dir}: {error}") from error
     sheet_path = os.path.join(output_dir, request.get("outputName") or "montage.png")
 
     render_settings = scene.render
@@ -2460,10 +2496,16 @@ def handle_compare(request):
             "the current build as an improvement over nothing."
         )
     output_dir = request["outputDir"]
-    os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as error:
+        raise RuntimeError(f"`outputDir` could not be created at {output_dir}: {error}") from error
     sheet_path = os.path.join(output_dir, request.get("outputName") or "compare.png")
     baseline_dir = os.path.join(output_dir, "baseline")
-    os.makedirs(baseline_dir, exist_ok=True)
+    try:
+        os.makedirs(baseline_dir, exist_ok=True)
+    except OSError as error:
+        raise RuntimeError(f"compare's baseline folder could not be created at {baseline_dir}: {error}") from error
 
     viewport = find_optional_viewport_context()
     view_names, resolved = _montage_view_names(request)
@@ -2548,7 +2590,7 @@ def handle_compare(request):
         ordered_labels.append(f'{labels["current"]} {view_name}')
         ordered_paths.append(panel_paths[index])
 
-    columns = int(request.get("columns") or 2)
+    columns = _as_int(request.get("columns"), "columns", 2)
     columns = max(1, min(4, columns))
     sheet, layout = _montage_sheet(ordered, ordered_labels, columns, panel_width)
     montage.write_png(sheet_path, sheet)

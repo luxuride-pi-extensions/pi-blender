@@ -22,7 +22,7 @@ import os
 import sys
 import tempfile
 
-import bpy  # noqa: E402
+import bpy  # pyright: ignore[reportMissingImports]  # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
 
 failures = []
 
@@ -64,6 +64,13 @@ def load_live_bridge():
         os.path.dirname(os.path.abspath(__file__)), "..", "blender", "live-bridge.py"
     )
     spec = importlib.util.spec_from_file_location("live_bridge", os.path.normpath(path))
+    # spec_from_file_location returns None for a path it cannot resolve to a
+    # module. Reaching module_from_spec with None raises inside importlib with a
+    # message that names neither this file nor the path, so it is turned into
+    # one that does -- and the failure then says the probe's own subject is
+    # missing rather than pointing at the dynamic import.
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"no module spec for the live bridge at {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module, os.path.join(bridge_dir, "scratch.blend")
