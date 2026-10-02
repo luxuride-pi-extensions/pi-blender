@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import test, { after } from "node:test";
 
 import { loadTs } from "./paths.mjs";
@@ -53,22 +53,31 @@ test("returns undefined when no ancestor holds a manifest", async () => {
 	const empty = join(root, "a", "b", "c");
 	await mkdir(empty, { recursive: true });
 
-	// The root of the filesystem is outside the scratch tree, so this can
-	// only be decided by there being no manifest anywhere between the two.
-	const found = await findNearestWorkspace(empty);
-	assert.ok(found === undefined || found.startsWith(root + sep), `unexpected match ${found}`);
+	// The root of the filesystem is outside the scratch tree, so a correct
+	// walk reaches it and returns nothing. Asserting `undefined` exactly is
+	// what makes this a real test: a match *under* the root would be the bug.
+	assert.equal(await findNearestWorkspace(empty), undefined);
 });
 
-test("a stray file with the manifest's name is not a workspace", async () => {
+test("a directory with the manifest's name is not a workspace", async () => {
 	const root = await scratchTree();
 	const nested = join(root, "looks-wrong");
 	await mkdir(nested, { recursive: true });
-	// Directories ending in the manifest's name are a plausible accident:
-	// `mkdir foo/blender-workspace.json` passes many file checks.
+	// A directory named after the manifest is a plausible accident, and it
+	// satisfies every existence check that is not asking for a regular file.
 	await mkdir(join(nested, MANIFEST_FILE), { recursive: true });
 
-	const found = await findNearestWorkspace(nested);
-	assert.ok(found === undefined || found.startsWith(root + sep), `unexpected match ${found}`);
+	assert.equal(await findNearestWorkspace(nested), undefined);
+});
+
+test("a real manifest file is preferred over a lookalike directory above it", async () => {
+	const root = await scratchTree();
+	// The decoy sits between the start directory and the genuine workspace,
+	// so accepting it would silently shadow the real one.
+	await mkdir(join(root, MANIFEST_FILE), { recursive: true });
+	const inner = await makeWorkspace(join(root, "rooms", "kitchen"));
+
+	assert.equal(await findNearestWorkspace(inner), inner);
 });
 
 test("accepts a relative start directory by resolving it first", async () => {

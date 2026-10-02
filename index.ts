@@ -1723,40 +1723,41 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					// switches to that workspace's blend, which is still one
 					// window rather than a second one.
 					const alreadyOpen = isLiveBridgeAlive();
-					if (alreadyOpen && !workspace) {
-						const open = readHeartbeatBlendPath(getBlenderBridgeDir());
-						ctx.ui.notify(
-							`Already watching ${open ?? "the open blend"} — this session never has more than one window. Pass a workspace to switch it to another blend.`,
-							"info",
-						);
-						return;
-					}
-					if (!alreadyOpen) await requestWatchWindowLaunch();
 					if (workspace) {
 						await ensureWorkspaceInitialized({ cwd: ctx.cwd, workspace, continueExisting: true });
 					}
 					// With no argument, the nearest workspace above the cwd is
 					// the one that is plainly current. A workspace IS a
 					// directory holding the manifest, so no session state has
-					// to be remembered and the answer survives a reload. If
-					// there is none, say so rather than leaving the user
-					// watching an empty file and guessing which blend it was.
+					// to be remembered and the answer survives a reload.
 					const target = workspace || (await findNearestWorkspace(ctx.cwd));
-					if (!workspace && !target) {
+					if (!target) {
+						// Resolved BEFORE any launch, because a window with
+						// nothing to show is a 1 GB mistake, not a fallback:
+						// an already-open window is left exactly as it is.
 						ctx.ui.notify(
 							`No blender workspace found above ${ctx.cwd}. Pass one: /blender-watch <path>.`,
 							"warning",
 						);
 						return;
 					}
-					const manifest = target ? await loadWorkspaceManifest(ctx.cwd, target) : null;
-					if (manifest) {
-						await requestLiveBlenderOpenBlend({ blendPath: manifest.blendPath, timeoutMs: LIVE_BRIDGE_COLD_START_TIMEOUT_MS });
+					const manifest = await loadWorkspaceManifest(ctx.cwd, target);
+					// The window is switched, never duplicated, so re-running
+					// this is how you return to a workspace after opening
+					// another one.
+					if (alreadyOpen && readHeartbeatBlendPath(getBlenderBridgeDir()) === manifest.blendPath) {
+						ctx.ui.notify(
+							`Already watching ${manifest.blendPath} — this session never has more than one window. Pass a workspace to switch it to another blend.`,
+							"info",
+						);
+						return;
 					}
+					if (!alreadyOpen) await requestWatchWindowLaunch();
+					await requestLiveBlenderOpenBlend({ blendPath: manifest.blendPath, timeoutMs: LIVE_BRIDGE_COLD_START_TIMEOUT_MS });
 					const budget = resolveRunBudget();
 					const { rssBytes } = describeMachineLimits();
 					ctx.ui.notify(
-						`Watching ${manifest ? manifest.blendPath : "the open blend"}. ` +
+						`Watching ${manifest.blendPath}. ` +
 							`A windowed Blender costs roughly ${(WATCH_WINDOW_RSS_BYTES / 1024 ** 3).toFixed(1)} GB resident and sits outside the headless budget; ` +
 							`${budget.effective} concurrent runs add about ${((budget.effective * rssBytes) / 1024 ** 3).toFixed(1)} GB.` +
 							(budget.clamped ? ` ${budget.warning}` : ""),

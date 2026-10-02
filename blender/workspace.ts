@@ -37,12 +37,17 @@ export function getWorkspaceCritiqueLogPath(workspacePath: string): string {
  * filesystem root. A workspace is whatever directory holds the manifest, so
  * this is the only definition that needs no extra bookkeeping — which is why
  * a bare command can find one instead of guessing or remembering.
+ *
+ * The manifest must be a regular FILE. A directory that happens to carry the
+ * manifest's name is not a workspace, and `fileExists` cannot tell the
+ * difference: it is an `access` probe, which a directory passes.
  */
 export async function findNearestWorkspace(startDir: string): Promise<string | undefined> {
 	let dir = resolve(startDir);
 	const { root } = parse(dir);
 	for (;;) {
-		if (await fileExists(getManifestPath(dir))) return dir;
+		const manifest = getManifestPath(dir);
+		if (await fileExists(manifest) && (await stat(manifest)).isFile()) return dir;
 		if (dir === root) return undefined;
 		dir = dirname(dir);
 	}
