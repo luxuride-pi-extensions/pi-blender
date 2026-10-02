@@ -596,7 +596,16 @@ export interface SaveViewOptions {
 export interface SaveViewResult {
 	workspacePath: string;
 	manifestPath: string;
-	savedView: BlenderSavedView;
+	/**
+	 * Null when source="active-camera" and no watch window was open. That source
+	 * photographs the live UI, so with no UI there is nothing to bind to and the
+	 * default headless run reports nothing rather than failing -- binding a view
+	 * to a camera that does not exist would put a broken entry in the manifest,
+	 * and every later render through it would be wrong.
+	 */
+	savedView: BlenderSavedView | null;
+	/** Present only when `savedView` is null, explaining why it was not saved. */
+	reason?: string;
 }
 
 export const BLENDER_VIEWPORT_MODES = [
@@ -626,9 +635,20 @@ export interface SetModeResult {
 	workspacePath: string;
 	blendPath: string;
 	mode: BlenderViewportMode;
-	blenderMode: string;
+	/**
+	 * Whether the viewport actually changed mode. False when no watch window
+	 * was open, which is the DEFAULT run rather than an error: a viewport mode
+	 * is a statement about a UI, and the headless path has no UI. The caller
+	 * still gets `mode` and `objectName` back, so the only thing it loses is the
+	 * thing that could not happen.
+	 */
+	switched: boolean;
+	/** Null when `switched` is false; there is no Blender mode to report. */
+	blenderMode: string | null;
 	objectName: string;
 	uvEditorOverlay: boolean;
+	/** Present only when `switched` is false, explaining why it was not. */
+	reason?: string;
 }
 
 export type BlenderRenderMethod = "live" | "background";export type BlenderRenderViewSource = "camera" | "current-view";

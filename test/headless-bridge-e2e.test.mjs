@@ -543,15 +543,14 @@ test("the ranking keeps the best slice and says why when it cannot", { skip }, a
 });
 
 test("a viewport-only request refuses by name with no window", { skip }, async () => {
-	// Not a fallback: a refusal, carrying the handler's own reason. Silently
-	// returning a plausible-looking number from a headless process that never
-	// had a viewport would be the worst possible outcome, because nothing in the
-	// result would look wrong.
+	// The REFUSAL is still real, and it still carries its own reason: silently
+	// returning a plausible-looking mode from a process that never had a
+	// viewport would be the worst possible outcome, because nothing in the result
+	// would look wrong. requestBridge -- the generic entry point -- still throws.
 	await assert.rejects(
 		() =>
-			bridge.requestLiveBlenderSetMode({
-				blendPath: join(homedir(), "does-not-matter.blend"),
-				mode: "OBJECT",
+			bridge.requestBridge({
+				payload: { type: "set-mode", blendPath: join(homedir(), "does-not-matter.blend"), mode: "OBJECT" },
 			}),
 		(error) => {
 			assert.equal(error.name, "NoWatchWindowError", `expected a window error, got: ${error.message}`);
@@ -559,6 +558,22 @@ test("a viewport-only request refuses by name with no window", { skip }, async (
 			return true;
 		},
 	);
+});
+
+test("set-mode converts the refusal into a reported skip, and only that refusal", { skip }, async () => {
+	// The tool boundary is where the refusal becomes an outcome, because an
+	// agent cannot act on "open a window" -- only the user can. So the same
+	// request returns ok:false here while requestBridge still throws, and a
+	// caller that swallows one has not swallowed the other: a handler error
+	// still propagates, because "the mode did not switch" and "the mode failed"
+	// are different answers.
+	const skipped = await bridge.requestLiveBlenderSetMode({
+		blendPath: join(homedir(), "does-not-matter.blend"),
+		mode: "OBJECT",
+	});
+	assert.equal(skipped.ok, false, "a windowless set-mode must report a skip rather than throw");
+	assert.equal(skipped.mode, "OBJECT", "the requested mode comes back either way, so a caller reading `mode` is never handed undefined");
+	assert.match(skipped.reason, /window/i, "the skip says why, because a silent false is indistinguishable from a mode that was never asked for");
 });
 
 test("the headless bridge reports a handler's own error, not a crash", { skip }, async () => {

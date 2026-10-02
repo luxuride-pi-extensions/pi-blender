@@ -390,7 +390,10 @@ Start pi in any project dir. The extension:
   nudge rather than a boundary: `bash` remains available.
 - `blender_set_mode` switches the live viewport to OBJECT, POSE, EDIT_MESH,
   EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT,
-  FACE_PAINT, or UV (edit mode + viewport UV editor overlay)
+  FACE_PAINT, or UV (edit mode + viewport UV editor overlay). With no watch
+  window open it reports `switched: false` and a reason rather than failing:
+  the mode is a statement about a UI, and the paint underneath it is already
+  applied as bpy data either way
 - `blender_module_run` / `blender_module_revert` support modular multi-part
   builds. `blender_branch_run` / `blender_branch_apply` are the two halves of
   that exposed directly: run a module against a private `branch.blend`
@@ -477,11 +480,15 @@ Start pi in any project dir. The extension:
   supervisor. Most tools need no window at all: with none open they run
   headlessly against `model.blend`, through the same bridge script the window
   serves, so the two paths cannot drift apart. Only two things genuinely
-  require one — `blender_set_mode` and `blender_save_view` with
+  require a window — `blender_set_mode` and `blender_save_view` with
   `source=active-camera` — because both photograph or rearrange what a viewport
-  is showing, which has no meaning in a process with no screen. Those two
-  refuse and name `/blender-watch` instead of opening a window behind the
-  user's back
+  is showing, which has no meaning in a process with no screen. Neither opens
+  one. `blender_set_mode` reports `switched: false` with a reason, and
+  `blender_save_view` reports `savedView: null` and writes nothing, because a
+  viewport mode is a statement about a UI and a view bound to a camera that was
+  never created would make every later render through it wrong. An agent can
+  report that and carry on; only the user can run `/blender-watch`, and a build
+  never waits for one
 - exports the workspace blend to an interchange format with
   `blender_export_asset` (`glb`, `gltf`, `obj`, `stl`), headlessly and
   read-only. USD is deliberately not offered: no exporter is guaranteed in a

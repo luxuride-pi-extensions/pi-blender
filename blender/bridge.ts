@@ -80,9 +80,10 @@ export class NoWatchWindowError extends Error {
 	constructor(requestType: string) {
 		super(
 			`No Blender window is open, so "${requestType}" has nothing to run in. This is a windowed-Blender-only tool: ` +
-				"run /blender-watch to open the one window this session may have, or use the headless path instead " +
-				"(blender_branch_run for module work, blender_render with renderMethod \"background\" for a still, " +
-				"blender_scene_info for what is on disk).",
+				"use the headless path instead (blender_branch_run for module work, blender_render with renderMethod " +
+				'"background" for a still, blender_scene_info for what is on disk). An agent CANNOT open the window ' +
+				"itself -- only the user can run /blender-watch -- so do not stop the build to wait for it. If a " +
+				"window is genuinely wanted, say so in your report and let the user decide.",
 		);
 		this.name = "NoWatchWindowError";
 		this.requestType = requestType;
@@ -501,17 +502,39 @@ export async function requestLiveBlenderSetMode(options: {
 	objectName?: string;
 	signal?: AbortSignal;
 	timeoutMs?: number;
-}): Promise<{ mode: string; blenderMode: string; objectName: string; uvEditorOverlay: boolean }> {
-	return await requestLiveBlenderBridge({
-		payload: {
-			type: "set-mode",
-			blendPath: options.blendPath,
-			mode: options.mode,
-			objectName: options.objectName,
-		},
-		signal: options.signal,
-		timeoutMs: options.timeoutMs,
-	});
+}): Promise<
+	| { ok: true; mode: string; blenderMode: string; objectName: string; uvEditorOverlay: boolean }
+	| { ok: false; mode: string; reason: string }
+> {
+	try {
+		const switched = await requestLiveBlenderBridge<{
+			mode: string;
+			blenderMode: string;
+			objectName: string;
+			uvEditorOverlay: boolean;
+		}>({
+			payload: {
+				type: "set-mode",
+				blendPath: options.blendPath,
+				mode: options.mode,
+				objectName: options.objectName,
+			},
+			signal: options.signal,
+			timeoutMs: options.timeoutMs,
+		});
+		return { ok: true, ...switched };
+	} catch (error) {
+		// A viewport mode is the one result that cannot exist without a window:
+		// it is a statement about a UI, and a headless Blender has no UI to be
+		// in. Everything else the caller was going to do still happens -- the
+		// paint is applied as bpy data either way -- so this reports what did
+		// not happen rather than raising, and the tool result carries it, so
+		// nobody has to notice a missing field to know the mode never switched.
+		if (error instanceof NoWatchWindowError) {
+			return { ok: false, mode: options.mode, reason: error.message };
+		}
+		throw error;
+	}
 }
 
 export async function requestLiveBlenderMontage(options: {

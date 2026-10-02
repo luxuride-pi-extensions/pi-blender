@@ -1,4 +1,4 @@
-import { requestLiveBlenderCapture } from "./bridge.js";
+import { NoWatchWindowError, requestLiveBlenderCapture } from "./bridge.js";
 import { getSceneInfoFromManifest } from "./scene-info.js";
 import type { BlenderSavedView, SaveViewOptions, SaveViewResult } from "./types.js";
 import { getStringRecordValue, nowIso } from "./utils.js";
@@ -11,14 +11,29 @@ export async function blenderSaveView(options: SaveViewOptions): Promise<SaveVie
 
 	if (options.source === "active-camera") {
 		const captureCameraName = options.camera_name?.trim() || options.name;
-		const captureResult = await requestLiveBlenderCapture({
-			blendPath: manifest.blendPath,
-			viewName: options.name,
-			cameraObjectName: captureCameraName,
-			signal: options.signal,
-		});
-		cameraObjectName = captureResult.cameraObjectName;
-		cameraSettingsName = captureResult.cameraSettingsName;
+		try {
+			const captureResult = await requestLiveBlenderCapture({
+				blendPath: manifest.blendPath,
+				viewName: options.name,
+				cameraObjectName: captureCameraName,
+				signal: options.signal,
+			});
+			cameraObjectName = captureResult.cameraObjectName;
+			cameraSettingsName = captureResult.cameraSettingsName;
+		} catch (error) {
+			// "active-camera" photographs the live UI, so with no window open
+			// there is no camera to capture FROM -- not a camera to be searched
+			// for. Reporting nothing beats writing a manifest entry bound to a
+			// camera that was never created, because every later render through
+			// that view would then be silently wrong.
+			if (!(error instanceof NoWatchWindowError)) throw error;
+			return {
+				workspacePath: manifest.workspacePath,
+				manifestPath: manifest.manifestPath,
+				savedView: null,
+				reason: error.message,
+			};
+		}
 	} else {
 		const sceneInfo = await getSceneInfoFromManifest(options.cwd, manifest, {
 			categories: ["cameras"],

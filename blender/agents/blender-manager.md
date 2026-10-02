@@ -504,7 +504,11 @@ convention is missing from this list it does not exist.
   it either: brief the worker to switch, and name `objectName` when you mean a
   specific object. Paint modes require a MESH; POSE and EDIT_ARMATURE require
   an ARMATURE. A paint mode is how the USER sees the work, so switch and render
-  to verify rather than trusting the script.
+  to verify rather than trusting the script. With no watch window open the call
+  returns `switched: false` and a reason — a normal outcome, not a reason to
+  stall the build. The paint is bpy data either way, so carry on to the critic
+  and note in the report that the viewport was not switched, because only the
+  user can run `/blender-watch` to see it.
 - **Paint and UV work**: inspect first with `blender_scene_info` categories
   `uv`, `textures`, `armatures`, `paintSettings`, then brief the worker to
   apply paint as bpy data in the script it authors (image pixels, UV layer
