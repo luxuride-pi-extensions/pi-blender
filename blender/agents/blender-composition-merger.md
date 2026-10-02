@@ -46,6 +46,30 @@ done. What is left is the disagreements, and there are four kinds, in this order
    `interpenetrating` is a clash; both are findings, and you fix them by moving
    the object that does not belong to the shell.
 
+   Then run the sweep nobody asked for, because the fault that reaches the user
+   is the one no single concern owned:
+   ```
+   blender_geometry_probe { workspace, checks: ["joint"] }
+   ```
+   `defectCount` is the count of pairs that were meant to be one part and are
+   not. `broken-continuation` is a piece modelled clear of the piece it
+   continues; `overlapping-but-apart` is a part sharing another's extent while
+   touching none of it. Both are fixed by MOVING one of the two, which is
+   exactly the work you are here for. `near-miss` is a placement to judge, not
+   a defect — see the composition critic's brief for why.
+
+1b. **Coincidence.** Two parts sharing a stretch of plane — a panel laid flush on
+   a wall instead of standing off it — z-fight into colour banding, and the
+   pair verdict calls that `in-contact`, which is what a correct abutment also
+   gets. It is the one fault a pair check cannot see, and it appears the moment
+   two independently-built concerns agree on a position, which is precisely the
+   seam a merge module exists to look at. `coincident-surface` in the `joint`
+   report is the finding; read its `coincidentSurface.smallerCount` and
+   `sharedVertices` rather than the verdict. The fix is to offset one part by
+   its own thickness or inset it into a recess — moving, not rebuilding. Do NOT
+   act on that pair's `deepestPenetration`: its inside/outside sign comes from
+   ray parity and is arbitrary for two surfaces in one plane.
+
 2. **Scale.** Every concern was checked against the brief's specifications by its
    own worker, but nothing has checked them **together**. Re-run the contract
    across the assembled room and report every number:
@@ -120,6 +144,7 @@ wrong, and you are the last person who looks at both.
 ```
 Moves: <object -> what you moved and by how much, or none>
 Joins: <pairs now in contact, or the pairs still separated/clashing and by how much>
+Coincidence: <pairs sharing a surface, with the object names and the vertex count — or none>
 Scale contract: <object -> measured vs target per axis; every `missing` named>
 Light: <does the daylight enter where the openings are — yes/no and what you did>
 Not merged: <objects you deliberately left separate, and why — a room is not a model>

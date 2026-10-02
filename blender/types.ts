@@ -1224,17 +1224,29 @@ export interface GeometryProbeJoint {
 	 * reaches any surface of the other. That is a joint that was meant to be
 	 * made and was missed.
 	 *
+	 * `coincident-surface` is a DEFECT, and the only one guaranteed to be
+	 * VISIBLE in the finished render: two parts sharing a stretch of surface
+	 * z-fight into colour banding. It is reported even though the pair
+	 * verdict says `in-contact`, because that is what a clean flush abutment
+	 * reports too and nothing else tells them apart.
+	 *
 	 * `near-miss` is a placement to JUDGE: the boxes come within `nearMissMax`
 	 * without overlapping on any axis. A chair pulled up to a table is correct
 	 * and reads the same as a detached riser at this resolution. It is reported
 	 * because it is cheap and a render hides it, and marked because treating it
 	 * as a defect is how a measurement becomes noise an analyst learns to skip.
 	 */
-	severity: "overlapping-but-apart" | "near-miss";
+	severity:
+		| "coincident-surface"
+		| "broken-continuation"
+		| "overlapping-but-apart"
+		| "near-miss";
 	/** Why this pair is in the list, in one sentence. */
 	reason: string;
 	/** Closest surface distance between the two, the same measurement `pairs` reports. */
-	gap: number;
+	gap: number | null;
+	/** Present on every entry; carries the counts the `coincident-surface` verdict rests on. */
+	coincidentSurface: GeometryProbeCoincidence;
 	tolerance: number;
 	/** Signed per-axis bounding-box gap; positive is empty space on that axis. */
 	boundingBoxGap: { x: number; y: number; z: number };
@@ -1268,10 +1280,41 @@ export interface GeometryProbeObject {
 	topology?: GeometryProbeTopology;
 }
 
+/**
+ * How much of one object lies ON the other's surface.
+ *
+ * Two objects sharing a stretch of surface render as z-fighting colour
+ * banding, and no verdict catches it: a flush-laid panel is `in-contact`,
+ * which is what a clean abutment also reports. This figure is what separates
+ * them, and it is judged on the SMALLER side so a small part resting flush
+ * against a large surface stays clean — the large mesh has almost no vertices
+ * on the small part.
+ */
+export interface GeometryProbeCoincidence {
+	/** Distance under which a vertex counts as lying on the surface. */
+	epsilon: number;
+	firstVertices: number;
+	secondVertices: number;
+	/** Of each object's SAMPLED vertices, since that is what was measured. */
+	firstShare: number;
+	secondShare: number;
+	/** The smaller of the two counts — coincidence has to be mutual. */
+	smallerCount: number;
+	smallerShare: number;
+	/**
+	 * How many vertices of each object fall inside the two objects' SHARED
+	 * bounding box, which is the denominator `firstShare`/`secondShare` are
+	 * read against. Reported so a ratio is never quoted without its base.
+	 */
+	sharedVertices: Record<string, number>;
+	isCoincident: boolean;
+}
+
 export interface GeometryProbePair {
 	verdict: "interpenetrating" | "in-contact" | "separated" | "unknown";
 	reason?: string;
 	tolerance: number;
+	coincidentSurface: GeometryProbeCoincidence;
 	closestSurfaceDistance: number | null;
 	deepestPenetration: number;
 	verticesInsideTarget: Record<string, number>;

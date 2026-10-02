@@ -121,6 +121,17 @@ most of it, and all are cheaper than being re-briefed:
   geometrically indistinguishable from a detached riser, because the two differ
   in meaning and no measurement recovers meaning. Judge each one against the
   brief, then say which you resolved and why.
+- `coincident-surface` is the other finding in that list, and it is the one a
+  render hides in the WORST way: two panels laid flush in the same plane z-fight
+  into colour banding, so the defect shows up in the final image as noise in the
+  shading rather than as a visible gap. Nothing about the verdict tells you —
+  two parts sharing a surface are in contact, and so are two parts correctly
+  abutted — so read `coincidentSurface.smallerCount` and `sharedVertices` rather
+  than the verdict. If a panel is meant to sit AGAINST a wall, offset it by its
+  own thickness, or inset it into a recess; laying it on the wall's plane is the
+  defect, not a flush fit. Do not read `deepestPenetration` on such a pair: the
+  inside/outside sign behind it comes from ray parity and is meaningless when two
+  surfaces share a plane.
 - `pairs` between anything that meets — counter to wall, window frame to wall,
   door to floor. `separated` is wrong and `interpenetrating` is wrong; a join you
   meant is fine.

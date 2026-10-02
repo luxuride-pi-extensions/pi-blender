@@ -79,10 +79,22 @@ folding it into a geometry impression throws that away. If a specification repor
 photograph as one.** A riser pipe 11 mm clear of the pipe it continues reads
 correctly from every camera a human would use; the join is one pixel of shadow.
 `defectCount` is the count of pairs that are meant to be one part and are not:
+`coincident-surface` (a stretch of the two occupies the same plane), 
 `broken-continuation` (separated on one axis, concentric on the others, by a
 fraction of their own length) and `overlapping-but-apart` (one box swallows the
 other, yet no surface reaches any). Either is a defect and belongs in `issues` with
 its measured gap.
+
+**`coincident-surface` is the one that IS in the render, as noise rather than as
+a gap.** Two panels sharing a plane z-fight into colour banding, so the finished
+image carries a shimmer in the shading over that stretch. It is not a defect you
+can score off a photograph — you cannot tell which of two overlapping panels a
+band of colour belongs to — so report it from the probe's
+`coincidentSurface.smallerCount` and `sharedVertices`, with the two object names
+and what the brief said they should be. Do NOT report a coincident pair's
+`deepestPenetration` as a measurement: the inside/outside sign behind it comes from
+ray parity and is arbitrary when two surfaces lie in one plane, so it reads as a
+large penetration between two panels touching nowhere.
 
 `near-miss` is NOT a finding to write up automatically. It is a placement to
 JUDGE: a chair pulled up to a table is correct and is geometrically

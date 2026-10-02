@@ -253,6 +253,103 @@ def main():
         f"the pair check should also call the riser separated, got {pair_entry['verdict']}",
     )
 
+    # --- a coincident surface: the user's colour banding ------------------
+    # Two panels occupying the SAME plane, which is what a house built from
+    # pieces produces when a panel is laid flush on a wall instead of
+    # abutting it. Both are grids (a subdivided plane, not a cube) so each
+    # carries vertices SPREAD ACROSS the strip they share -- that mutual
+    # spread is what the coincidence measure reads, and a bare cube's eight
+    # corner vertices would fail the share floor for the wrong reason.
+    #
+    # This is the pair that proved the whole defect was invisible: the two
+    # are exactly in contact, so the sweep skipped on the verdict alone, and
+    # `in-contact` is precisely what a CLEAN abutment reports too.
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=8, y_subdivisions=8, size=1.0)
+    wall_panel = bpy.context.active_object
+    wall_panel.name = "WallPanel"
+    wall_panel.location = (12.0, 0.0, 0.0)
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=8, y_subdivisions=8, size=0.4)
+    laid_panel = bpy.context.active_object
+    laid_panel.name = "LaidPanel"
+    # Rotated a full turn about X, so it faces the other way and shares the
+    # wall's plane rather than standing off it.
+    laid_panel.rotation_euler = (3.141592653589793, 0.0, 0.0)
+    laid_panel.location = (12.3, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    coincidence = live_bridge.handle_geometry_probe(
+        {
+            "blendPath": scratch_blend,
+            "objects": ["WallPanel", "LaidPanel"],
+            "checks": ["joint", "pair"],
+        }
+    )
+    coincident_entry = joint_for(coincidence["joints"], "WallPanel", "LaidPanel")
+    check(
+        coincident_entry is not None,
+        "two panels lying in the same plane were not reported at all",
+    )
+    if coincident_entry is not None:
+        check(
+            coincident_entry["severity"] == "coincident-surface",
+            f"coincident panels should be coincident-surface, got {coincident_entry['severity']}",
+        )
+        figure = coincident_entry["coincidentSurface"]
+        check(
+            figure["isCoincident"] is True,
+            f"the coincidence figure should call it coincident, got {figure}",
+        )
+        check(
+            figure["smallerCount"] >= 8 and figure["smallerShare"] >= 0.15,
+            f"a 5x5 grid of vertices on the other's surface should clear both floors, got {figure}",
+        )
+    coincident_pair = coincidence["pairs"]["WallPanel|LaidPanel"]
+    # Which verdict it gets is beside the point, and asserting one would
+    # overstate what the check tells you. Two coincident faces put their
+    # vertices exactly ON the other surface, which the signed-distance test
+    # reads as inside, so this lands on `interpenetrating`; nudging one panel
+    # a hair off its plane would make it `in-contact` or `separated` without
+    # changing a single thing about the banding. What matters is that the
+    # sweep skips on BOTH of those verdicts, which is why coincidence is
+    # measured separately instead of read off one.
+    check(
+        coincident_pair["verdict"] in ("interpenetrating", "in-contact"),
+        f"coincident panels land on a contact-ish verdict, got {coincident_pair['verdict']}",
+    )
+    # What the coincidence figure reports, in full: all 12 of the wall's
+    # vertices inside the SHARED box and all 81 of the panel's, every one of
+    # them on the other surface. The shares are 1.0 because the denominator is
+    # the shared box, which is the point -- measured against the wall's whole
+    # 81 vertices these came to 14.8% and slipped under a 15% floor, so the
+    # cleanest case of this defect was the one that did not report.
+    figure = coincident_pair["coincidentSurface"]
+    check(
+        figure["firstShare"] == 1.0 and figure["secondShare"] == 1.0,
+        f"every shared vertex should lie on the other surface, got {figure}",
+    )
+    check(
+        figure["sharedVertices"] == {"WallPanel": 12, "LaidPanel": 81},
+        f"the shared box should hold the panel's whole grid and the wall's strip, got {figure['sharedVertices']}",
+    )
+    check(
+        coincident_pair["coincidentSurface"]["isCoincident"] is True,
+        f"the pair check's own coincidence figure should also fire, got {coincident_pair['coincidentSurface']}",
+    )
+
+    # The counter-case that decides whether the measure is noise: a small
+    # part resting flush AGAINST a large surface has vertices on it, but the
+    # large surface has almost none on the small part, so the smaller side
+    # never clears the floor. Reported here because the floor is the whole
+    # difference between a measurement and a list of every bolt in the model.
+    make_cube("Bolt", size=0.02, location=(14.0, 0.5, 0.5))
+    make_cube("BoltPlate", size=0.02, location=(14.0, 0.5, 0.51))
+    flush = live_bridge.handle_geometry_probe(
+        {"blendPath": scratch_blend, "objects": ["Bolt", "BoltPlate"], "checks": ["joint", "pair"]}
+    )
+    check(
+        joint_for(flush["joints"], "Bolt", "BoltPlate") is None,
+        "a bolt head resting on a plate was reported as coincident",
+    )
+
     # --- islands ---------------------------------------------------------
     # One mesh that is a body plus a small detached blob: two components, and
     # every OTHER topology number is clean, because each piece is a closed
@@ -300,7 +397,7 @@ def main():
     check(solid_topo["isSplit"] is False, "a cube reported as split")
     check(solid_topo["largestComponentShare"] == 1.0, f"a cube should be one whole mesh, got {solid_topo['largestComponentShare']}")
 
-    # The three severities, in one place, because they mean different things
+    # The severities, in one place, because they mean different things
     # and a reader who finds only one of them in a report cannot tell whether
     # the sweep is broken or the model is.
     severities = {entry["severity"] for entry in joints["joints"]}
@@ -314,6 +411,20 @@ def main():
             for entry in joints["joints"]
         ),
         "every reported joint must be beyond the contact tolerance",
+    )
+
+    # Coincidence ranks ABOVE a detached part in the sweep's ordering, and it
+    # has to: a detached pipe is suspected from a render, while two surfaces
+    # in one plane are guaranteed to show as colour banding in the finished
+    # image. Buried under the other defects it would be read last, which is
+    # the wrong order of worries.
+    # That the list holds exactly ONE entry is the ranking assertion: a second
+    # entry could only rank below this one, so a single-element list is both the
+    # sweep finding nothing else and this pair coming first.
+    ranked = [entry["severity"] for entry in coincidence["joints"]["joints"]]
+    check(
+        ranked == ["coincident-surface"],
+        f"the coincidence probe should hold only its own pair, first, got {ranked}",
     )
 
     if failures:

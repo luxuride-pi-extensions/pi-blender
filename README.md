@@ -249,16 +249,32 @@ Start pi in any project dir. The extension:
   continues looks correct in a render from any useful angle, and nobody pairs
   two pipes of the same object family by instinct. It sweeps every pair in
   scope, filters by bounding box so the sweep stays O(n²) in boxes rather than
-  in BVH builds, and reports three severities. `broken-continuation` and
-  `overlapping-but-apart` are defects — two parts that were meant to be one
-  and are not touching. `near-miss` is a placement to JUDGE and is deliberately
+  in BVH builds, and reports four severities. `coincident-surface` is the
+  defect a pair check cannot see at all: two parts sharing a stretch of
+  geometry render as z-fighting colour banding, and the verdict says
+  `in-contact` — which is what a CLEAN flush abutment also says — so the joint
+  sweep skipped exactly the pairs that needed it. It is measured as the count
+  of each object's vertices lying within 0.1 mm of the other's surface, taken
+  INSIDE the two bounding boxes' shared volume, because that volume is both the
+  right scope and the right denominator. The first version divided by the whole
+  mesh and the cleanest case of the defect failed to report: a panel laid on a
+  wall covers a fraction of the wall, so its 12 touching vertices against the
+  wall's 81 came to 14.8% and slipped under a 15% floor. `broken-continuation`
+  and `overlapping-but-apart` are also defects — two parts that were meant to be
+  one and are not touching. `near-miss` is a placement to JUDGE and is deliberately
   not a failure: a chair pulled up to a table is geometrically indistinguishable
   from a detached riser, because the two differ in MEANING and no measurement
   recovers meaning, so calling it a defect would be the false positive that
   trains an analyst to ignore the list. Pairs that DO meet are skipped, because
-  reporting the healthy case would bury the one that matters. The gap is the
-  same signed BVH measurement the `pair` check reports, so a pair named in both
-  gets identical numbers
+  reporting the healthy case would bury the one that matters — the one
+  exception being a coincident pair, which is in contact and still broken. The
+  gap is the same signed BVH measurement the `pair` check reports, so a pair
+  named in both gets identical numbers
+- **A coincident pair's `deepestPenetration` is not a measurement to trust.**
+  The inside/outside sign behind it comes from ray parity, which is arbitrary
+  when two surfaces lie in one plane: two coincident panels came back reporting
+  a half-metre penetration while touching nowhere. Read `coincidentSurface`
+  instead, which asks the question directly
 - `topology`'s `connectedComponents` is the one topology number that catches a
   mesh split into drifting pieces, and it is there because every other count is
   blind to that case: each piece is a clean closed solid, so a head that has
@@ -270,12 +286,15 @@ Start pi in any project dir. The extension:
   scene whose correct answers are known by construction (an 11 mm gap between a
   1 m riser and the pipe above it, a chair pulled up to a table, a cube
   interpenetrating another, a part floating in a ring's void, a cube embedded
-  in solid material, a mesh in two pieces) and runs the real handler in
-  headless Blender; `test/joint-probe.test.mjs` drives it. The suite is what
+  in solid material, two panels laid in one plane, a bolt head resting flush on
+  a plate, a mesh in two pieces) and runs the real handler in
+  headless Blender; `test/blender-probes.test.mjs` drives it. The suite is what
   caught the two bugs this check shipped with: a bounding-box gap whose sign was
   inverted, so the distance filter rejected nothing and every pair in the scene
   was reported, and a containment test reading the wrong extreme, so a chair
-  under a table counted as one box swallowing the other
+  under a table counted as one box swallowing the other. The coincidence
+  measure was caught the same way — by a fixture whose correct answer is known
+  by construction, not by reading it
 - Every Python probe in `test/` is run against a real Blender by
   `test/blender-probes.test.mjs`, and the runner asserts on the SUMMARY line
   each probe prints rather than the exit code — a Blender script exception is a

@@ -869,6 +869,111 @@ def _world_vertices(obj, limit=GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT):
     return coords
 
 
+# How close a vertex must be to the other object's SURFACE to count as lying
+# on it. Deliberately far tighter than the contact tolerance: "these two are in
+# contact" tolerates a 2mm joint, and this asks the opposite question -- are
+# two surfaces so close they are indistinguishable, which is the z-fighting
+# case. A tolerance borrowed from the contact check would call every flush
+# joint a defect, which is precisely the noise this avoids.
+COINCIDENT_EPSILON = 0.0001
+# How much of one object has to lie on the other before coincidence is even
+# considered: a vertex count floor, and a share of the mesh. The count floor
+# is what separates two panels lying on top of each other from a bolt head
+# resting flush on a wall; the share floor is what separates a coincidence
+# from a handful of stray vertices touching a surface they were fitted to.
+COINCIDENT_MIN_VERTICES = 8
+COINCIDENT_MIN_SHARE = 0.15
+
+
+def _coincident_surface(first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max):
+    """How much of one object lies ON the other's surface.
+
+    Two objects sharing a stretch of surface render with COLOUR BANDING --
+    z-fighting, the depth buffer picking one of them per pixel and the shading
+    flipping between the two. No existing check sees it: the pair check
+    reports a CONTACT verdict, which is what a clean flush abutment reports
+    too, and the joint sweep skips every pair that is in contact precisely so
+    the healthy joints cannot bury a detached one. A flush-laid panel is
+    therefore invisible from both directions, and it is the defect a house
+    built from pieces produces when a panel is laid on a wall instead of
+    abutting it.
+
+    The signed distances behind those verdicts get a coplanar pair wrong too,
+    and it is worth knowing that rather than reading the numbers: the
+    inside/outside sign comes from ray parity, which is arbitrary when two
+    surfaces lie in one plane, so two coincident panels came back reporting a
+    half-metre `deepestPenetration` while touching nowhere. That is a
+    property of the measurement, not a second finding, and this figure is the
+    one to read.
+
+    Every count is taken INSIDE the two objects' shared bounding box, and the
+    share is of the vertices inside that box rather than of the whole mesh.
+    That denominator is the whole design, and the first version got it wrong:
+    a panel laid on a wall covers a fraction of the wall, so measured against
+    the wall's 81 vertices the panel's 12 touching ones came to 14.8% and
+    missed a 15% floor -- the cleanest case of the defect failing to report.
+    What the question actually asks is whether a stretch of ONE surface lies
+    on the other, and every vertex of that stretch is inside the overlap, so
+    the box is both the right scope and the right denominator.
+
+    Symmetric on purpose. A vertex of one object lying on the other's surface
+    is one-sided evidence: a wall has plenty of vertices near any part resting
+    against it, while the part has only a few near the wall's span. The
+    smaller count and the smaller share are judged, so coincidence has to be
+    mutual before it is called one -- and a genuinely coplanar overlap is
+    mutual by construction, since both panels carry vertices spread across the
+    strip they share. The cost is a SMALL coincidence on a large mesh being
+    missed, which is the conservative direction.
+
+    Shares are of the vertices inside the shared box, which are counted first
+    and reported, so a reader can see the denominator instead of trusting a
+    ratio whose base is invisible. An empty or near-empty box cannot report a
+    coincidence however close the surfaces are: two objects that share no
+    space at all have no vertices inside the intersection, and treating a
+    denominator of zero as "everything is coincident" is how a tolerance
+    turns into noise.
+    """
+    epsilon = COINCIDENT_EPSILON
+    first_shared = []
+    for point in first_points:
+        if all(shared_min[axis] - epsilon <= point[axis] <= shared_max[axis] + epsilon for axis in range(3)):
+            first_shared.append(point)
+    second_shared = []
+    for point in second_points:
+        if all(shared_min[axis] - epsilon <= point[axis] <= shared_max[axis] + epsilon for axis in range(3)):
+            second_shared.append(point)
+
+    first_hits = 0
+    for point in first_shared:
+        location, _normal, _index, distance = second_bvh.find_nearest(point)
+        if location is not None and distance <= epsilon:
+            first_hits += 1
+    second_hits = 0
+    for point in second_shared:
+        location, _normal, _index, distance = first_bvh.find_nearest(point)
+        if location is not None and distance <= epsilon:
+            second_hits += 1
+
+    first_total = len(first_shared)
+    second_total = len(second_shared)
+    first_share = (first_hits / first_total) if first_total else 0.0
+    second_share = (second_hits / second_total) if second_total else 0.0
+    smaller_count = min(first_hits, second_hits)
+    smaller_share = min(first_share, second_share)
+    return {
+        "epsilon": _round(epsilon),
+        "firstVertices": first_hits,
+        "secondVertices": second_hits,
+        "firstShare": _round(first_share, 4),
+        "secondShare": _round(second_share, 4),
+        "smallerCount": smaller_count,
+        "smallerShare": _round(smaller_share, 4),
+        "sharedVertices": {first.name: first_total, second.name: second_total},
+        "isCoincident": smaller_count >= COINCIDENT_MIN_VERTICES
+        and smaller_share >= COINCIDENT_MIN_SHARE,
+    }
+
+
 def _world_bounding_box(obj):
     corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
     minimum = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
@@ -1077,21 +1182,36 @@ def _probe_pair_geometry(first, second, tolerance):
     second_to_first = [d for d in (_signed_distance_to_surface(p, first_bvh) for p in second_points) if d is not None]
     both = first_to_second + second_to_first
 
+    first_min, first_max = _world_bounding_box(first)
+    second_min, second_max = _world_bounding_box(second)
+    shared_min = [max(first_min[axis], second_min[axis]) for axis in range(3)]
+    shared_max = [min(first_max[axis], second_max[axis]) for axis in range(3)]
+    overlap = [
+        _round(min(first_max[i], second_max[i]) - max(first_min[i], second_min[i]), 5)
+        for i in range(3)
+    ]
+
     if not both:
-        return {"verdict": "unknown", "reason": "no surface distance samples available"}
+        # The coincidence figure is still computable here: it asks only
+        # whether vertices lie ON a surface, which is what find_nearest
+        # answers, while the signed distances that produced `both` could not
+        # be sampled. Returning the key is the point -- a caller reading
+        # coincidentSurface must not have to know which of two return shapes
+        # it got.
+        return {
+            "verdict": "unknown",
+            "reason": "no surface distance samples available",
+            "tolerance": _round(tolerance),
+            "coincidentSurface": _coincident_surface(
+                first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max
+            ),
+        }
 
     first_inside = sum(1 for d in first_to_second if d < 0.0)
     second_inside = sum(1 for d in second_to_first if d < 0.0)
     inside_count = first_inside + second_inside
     deepest = min(both)
     closest = min(d for d in both if d >= 0.0) if any(d >= 0.0 for d in both) else None
-
-    first_min, first_max = _world_bounding_box(first)
-    second_min, second_max = _world_bounding_box(second)
-    overlap = [
-        _round(min(first_max[i], second_max[i]) - max(first_min[i], second_min[i]), 5)
-        for i in range(3)
-    ]
 
     if inside_count > 0:
         verdict = "interpenetrating"
@@ -1110,6 +1230,9 @@ def _probe_pair_geometry(first, second, tolerance):
     return {
         "verdict": verdict,
         "tolerance": _round(tolerance),
+        "coincidentSurface": _coincident_surface(
+            first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max
+        ),
         "closestSurfaceDistance": _round(closest) if closest is not None else None,
         "deepestPenetration": _round(-deepest) if deepest < 0.0 else 0.0,
         "verticesInsideTarget": {
@@ -1131,7 +1254,8 @@ def _probe_pair_geometry(first, second, tolerance):
 # the list.
 JOINT_NEAR_MISS_MAX = 0.05
 
-# How a broken continuation is told from a placement. Two parts that continue
+# How a broken continuation is told from a placement.
+# Two parts that continue
 # each other are separated by a fraction of their own length along the axis
 # they share: an 11mm gap between a 1m riser and the pipe above it is 1% of
 # the pipe, because the two were meant to be ONE pipe. A chair 25mm below a
@@ -1232,17 +1356,39 @@ def _probe_joints(objects, tolerance):
             separation_axis = distance
 
             measurement = _probe_pair_geometry(first, second, tolerance)
-            if measurement["verdict"] in ("interpenetrating", "in-contact"):
+            # Copied into a plain dict so the access below is total: the pair
+            # measurement returns "unknown" with no coincidence figure at all
+            # when it could not sample any surface distance.
+            coincidence = measurement.get("coincidentSurface") or {}
+            is_coincident = bool(coincidence.get("isCoincident"))
+            if measurement["verdict"] in ("interpenetrating", "in-contact") and not is_coincident:
                 # They DO meet. Nothing to report: this is the healthy case the
                 # sweep exists to distinguish, and reporting it would bury the
-                # one that matters.
+                # one that matters. Coincidence is the ONE exception, because
+                # two surfaces sharing a stretch is still a contact verdict
+                # while rendering as colour banding -- skipping on the verdict
+                # alone is exactly what hid it.
                 continue
 
             surfaces = measurement["closestSurfaceDistance"]
-            if surfaces is None:
+            if surfaces is None and not is_coincident:
                 continue
 
-            if overlapping:
+            if is_coincident:
+                # Ranked above the other defects: it is the only severity that
+                # is guaranteed to be visible in the final render rather than
+                # merely suspected from it, so burying it under a detached
+                # pipe would be the wrong order of worries.
+                severity = "coincident-surface"
+                hits = coincidence["smallerCount"]
+                epsilon = coincidence["epsilon"]
+                share = coincidence["smallerShare"]
+                reason = (
+                    f"{hits} of one object's vertices lie within {epsilon} of the other's surface "
+                    f"(the smaller side is {share} of that mesh), so a stretch of the two occupies "
+                    "the same plane and will render as z-fighting colour banding"
+                )
+            elif overlapping:
                 severity = "overlapping-but-apart"
                 reason = (
                     "one bounding box swallows the other, so the two parts occupy the same place "
@@ -1289,6 +1435,7 @@ def _probe_joints(objects, tolerance):
                     "severity": severity,
                     "reason": reason,
                     "gap": surfaces,
+                    "coincidentSurface": coincidence,
                     "tolerance": measurement["tolerance"],
                     "boundingBoxGap": {"x": _round(gap[0]), "y": _round(gap[1]), "z": _round(gap[2])},
                     "boundingBoxOverlapAxes": ["XYZ"[i] for i in range(3) if gap[i] < 0.0],
@@ -1297,9 +1444,13 @@ def _probe_joints(objects, tolerance):
                 }
             )
 
-    rank = {"broken-continuation": 0, "overlapping-but-apart": 1, "near-miss": 2}
-    candidates.sort(key=lambda entry: (rank[entry["severity"]], entry["gap"]))
-    defects = [entry for entry in candidates if entry["severity"] in ("broken-continuation", "overlapping-but-apart")]
+    rank = {"coincident-surface": 0, "broken-continuation": 1, "overlapping-but-apart": 2, "near-miss": 3}
+    candidates.sort(key=lambda entry: (rank[entry["severity"]], entry["gap"] if entry["gap"] is not None else 0.0))
+    defects = [
+        entry
+        for entry in candidates
+        if entry["severity"] in ("coincident-surface", "broken-continuation", "overlapping-but-apart")
+    ]
     near_misses = [entry for entry in candidates if entry["severity"] == "near-miss"]
     return {
         "tolerance": _round(tolerance),
@@ -1310,7 +1461,9 @@ def _probe_joints(objects, tolerance):
         "note": (
             "A joint is a pair whose bounding boxes overlap or come within "
             f"{JOINT_NEAR_MISS_MAX} of each other while their surfaces are further apart than the "
-            f"tolerance of {_round(tolerance)}. 'broken-continuation' (separated along one axis, "
+            f"tolerance of {_round(tolerance)}. 'coincident-surface' (a stretch of the two lies on "
+            "the same surface, so it renders as z-fighting colour banding), 'broken-continuation' "
+            "(separated along one axis, "
             "concentric on the others, by a fraction of their own length) and 'overlapping-but-apart' "
             "are defects: two parts that were meant to be one and are not touching. 'near-miss' is a "
             "placement to judge -- a chair at a table is correct and is geometrically indistinguishable "
