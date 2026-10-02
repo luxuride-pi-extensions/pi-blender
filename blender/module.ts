@@ -22,6 +22,7 @@ import {
 	MODULE_PREAMBLE_MARKER,
 	MODULE_SCRIPT_FILE,
 	normalizeModuleName,
+	pruneOldModuleRuns,
 	RENDER_FILE,
 } from "./module-paths.js";
 import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from "./workspace.js";
@@ -258,6 +259,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
 	await copyFile(manifest.blendPath, checkpointPath);
+	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const result = await requestLiveBlenderExecutePython({
 		blendPath: manifest.blendPath,

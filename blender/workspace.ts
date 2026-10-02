@@ -1,5 +1,5 @@
 import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { checkLiveBlenderBlend, requestLiveBlenderOpenBlend } from "./bridge.js";
 import { pidIsRunning, readLockHolderPid } from "./liveness.js";
@@ -30,6 +30,22 @@ export function getWorkspaceScriptPath(workspacePath: string): string {
 
 export function getWorkspaceCritiqueLogPath(workspacePath: string): string {
 	return join(workspacePath, CRITIQUE_LOG_FILE);
+}
+
+/**
+ * The nearest workspace at or above `startDir`, by walking up to the
+ * filesystem root. A workspace is whatever directory holds the manifest, so
+ * this is the only definition that needs no extra bookkeeping — which is why
+ * a bare command can find one instead of guessing or remembering.
+ */
+export async function findNearestWorkspace(startDir: string): Promise<string | undefined> {
+	let dir = resolve(startDir);
+	const { root } = parse(dir);
+	for (;;) {
+		if (await fileExists(getManifestPath(dir))) return dir;
+		if (dir === root) return undefined;
+		dir = dirname(dir);
+	}
 }
 
 export async function readManifest(workspacePath: string): Promise<BlenderWorkspaceManifest | undefined> {

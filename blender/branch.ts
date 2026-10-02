@@ -47,6 +47,7 @@ import {
 	getRunDir,
 	MODULE_PREAMBLE_MARKER,
 	normalizeModuleName,
+	pruneOldModuleRuns,
 	RENDER_FILE,
 } from "./module-paths.js";
 import { fileExists, delay, formatBlenderFailure, getSavedViewCameraObjectName, nowIso, runBlenderJson } from "./utils.js";
@@ -554,6 +555,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// point blender_module_revert restores.
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
 	await copyFile(manifest.blendPath, checkpointPath);
+	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const record: BlenderBranchRunRecord = {
 		module: moduleName,
