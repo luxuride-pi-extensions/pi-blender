@@ -331,6 +331,14 @@ export interface BlenderWorkspaceManifest {
 	 * presents, which is what ends that module's instruction.
 	 */
 	critiqueCounts?: Record<string, number>;
+	/**
+	 * Facts a probe or measurement established, keyed by module.
+	 *
+	 * Written into the manifest rather than carried in a manager's context so a
+	 * fresh critic can be handed what is already known instead of spending an
+	 * image and a context rediscovering it.
+	 */
+	iterationNotes?: Record<string, IterationProbeFact[]>;
 }
 
 export interface WorkspaceInitOptions {
@@ -785,8 +793,60 @@ export interface AssetExportResult {
 	objects?: string[];
 }
 
+/**
+ * A measured fact worth carrying into the next critic, kept with the run it was
+ * established against so a later brief can be checked against it.
+ */
+export interface IterationProbeFact {
+	/** What was measured, e.g. "Mug bottom sits 0.4m below the table plane". */
+	statement: string;
+	/** Which measurement produced it, e.g. "geometry-probe scale contract". */
+	source: string;
+	/** The run iteration this was established against, when there was one. */
+	iteration?: number;
+	at: string;
+}
+
+export type IterationWasteGuardKind =
+	| "none"
+	| "budget-exhausted"
+	| "unchanged-digest"
+	| "fix-did-not-land"
+	| "score-stalled";
+
+export interface IterationWasteGuard {
+	kind: IterationWasteGuardKind;
+	/** Why this guard is active, in one sentence, addressed to the manager. */
+	detail: string;
+}
+
+export interface IterationState {
+	workspacePath: string;
+	blendPath: string;
+	module: string;
+	presentThreshold: number;
+	budget: { used: number; max: number; remaining: number; exhausted: boolean };
+	lastRun?: { iteration: number; stateDigest?: string; executionMode: "branch" | "live" };
+	lastVerdict?: {
+		iteration?: number;
+		verdict: CritiqueVerdict;
+		score: number;
+		viewUsable: boolean;
+		rejectReason?: string;
+	};
+	previousScore?: number;
+	/** Whether the last briefed fix actually changed the content. */
+	fixLanded?: boolean;
+	knownFacts: IterationProbeFact[];
+	wasteGuard: IterationWasteGuard;
+}
+
+export interface IterationStateResult extends IterationState {}
+
 export interface CritiqueVerdictRecord {
 	moduleName: string;
+	/** The iteration_NN the critique was claimed against, when the log recorded one. */
+	iteration?: number;
 	verdict: CritiqueVerdict;
 	score: number;
 	validity: number;

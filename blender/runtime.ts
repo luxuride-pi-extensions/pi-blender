@@ -34,6 +34,8 @@ export { ensureWorkspaceInitialized, findNearestWorkspace, loadWorkspaceManifest
 export { blenderExportAsset } from "./export-asset.js";
 
 export { blenderRankAssets, parseCritiqueLog } from "./ranking.js";
+export { blenderIterationState } from "./iteration-state.js";
+export { blenderRecordIterationFact } from "./iteration-note.js";
 export { LIVE_BRIDGE_COLD_START_TIMEOUT_MS } from "./utils.js";
 export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";

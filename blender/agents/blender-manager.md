@@ -701,15 +701,40 @@ diagnostician's numbers are the thing to spend.
    the same picture again. Read the two verdicts side by side: they are the
    cheapest diagnostic you will ever get.
 
-   **Before you spawn the critic, read `unchangedSinceLastRun` on the run
-   result.** A headless module run reports a content digest of the objects that
-   module owns and compares it with its own previous run. `true` means the
-   script produced the geometry it produced last time, so the render is the same
-   picture and a fresh critic on it can only repeat the last verdict — a whole
-   context and an image spent re-reading an answer you already hold. When it is
-   `true`, do not critique: either your fix was never in the script, or it ran
-   and something else put the geometry back. Say which, and fix that instead.
-   `false` is the normal case and needs no comment.
+   **Before you spawn a run or a critic, call
+   `blender_iteration_state { workspace, moduleName }`.** It costs one small
+   tool call and answers, from the files on disk rather than from your memory of
+   this conversation, the four things you would otherwise have to spend a run and
+   a fresh critic to discover:
+   - **budget** — how much of the module's 5-iteration allowance is gone. When
+     it reads exhausted, you do not get a sixth opinion; you report where the
+     module stands.
+   - **wasteGuard** — `unchanged-digest` means the last run produced the same
+     content as the one before it, so the render is the same picture and a fresh
+     critic can only repeat the last verdict: a whole context and an image spent
+     re-reading an answer you already hold. Either your fix was never in the
+     script, or it ran and something else put the geometry back. Say which, and
+     fix that instead. `fix-did-not-land` says the same thing from the digest
+     pair. `score-stalled` means two consecutive `continue` verdicts at the same
+     score: diagnose rather than re-brief. `none` is the normal case and needs
+     no comment.
+   - **lastVerdict** — the score, the blocking axes and the reject reason your
+     previous critic already returned, even if that critic's context is gone.
+   - **knownFacts** — measurements already taken for this module, each with the
+     tool that produced it. A brief that re-asks for a number already in this
+     list is a brief that pays for a probe twice.
+   Treat it as authoritative over your recollection. If you believe you ran
+   something, and this says otherwise, this is right.
+
+   **Record what you measure, with
+   `blender_record_iteration_fact { workspace, moduleName, statement, source }`.**
+   Any probe result you act on — a bounding box, a gap distance, a scale check,
+   a pair verdict — belongs in the module's fact list, with `source` naming the
+   exact tool call that produced it. A fact without a source is an assertion a
+   later critic cannot re-measure, and an assertion is what you were trying to
+   stop repeating. This is the only state that survives a prompt fold, a fresh
+   critic, or a crashed worker, so a fact you fail to record is a fact the next
+   iteration pays to rediscover.
 
    **When the critic's verdict is a regression, that is not its verdict to
    reach on its own.** A critic reads one render, and "the silhouette reads

@@ -52,6 +52,8 @@ import {
 	blenderImageProbe,
 	blenderLogCritique,
 	blenderRankAssets,
+	blenderIterationState,
+	blenderRecordIterationFact,
 	blenderExportAsset,
 	blenderModuleRevert,
 	blenderModuleRun,
@@ -232,6 +234,10 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_bridge_status",
 	"blender_log_critique",
 	"blender_rank_assets",
+	"blender_iteration_state",
+	// Writing a measured fact back is authoring the loop's memory, not the
+	// asset, so the manager may record what its own probes established.
+	"blender_record_iteration_fact",
 	"blender_export_asset",
 ]);
 
@@ -1079,6 +1085,93 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: lines.join("\n") }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_iteration_state",
+			label: "Blender Iteration State",
+			description:
+				"What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict and score, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.",
+			parameters: Type.Object({
+				workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+				moduleName: Type.String({
+					description:
+						"The module to report on. One model's history cannot be summarised for all of them, and the budget, digest and waste guard are all per-module.",
+				}),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderIterationState({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					moduleName: params.moduleName,
+				});
+
+				const lines = [
+					`${result.module}: budget ${result.budget.used}/${result.budget.max} (${result.budget.exhausted ? "exhausted" : `${result.budget.remaining} left`}), present at ${result.presentThreshold}/12`,
+					result.lastRun
+						? `Last run: iteration ${result.lastRun.iteration} (${result.lastRun.executionMode}${result.lastRun.stateDigest ? `, digest ${result.lastRun.stateDigest.slice(0, 8)}` : ", no digest"})`
+						: "Last run: none recorded.",
+					result.lastVerdict
+						? `Last verdict: ${result.lastVerdict.verdict} at ${result.lastVerdict.score}/12${result.lastVerdict.viewUsable ? "" : " (view unusable — the judgement did not gate anything)"}${result.lastVerdict.rejectReason ? ` — ${result.lastVerdict.rejectReason}` : ""}`
+						: "Last verdict: never critiqued.",
+					`Fix landed: ${result.fixLanded === undefined ? "unknown (no paired digests)" : result.fixLanded ? "yes" : "NO — the content did not move"}`,
+					`Waste guard: ${result.wasteGuard.kind} — ${result.wasteGuard.detail}`,
+				];
+				for (const fact of result.knownFacts) {
+					lines.push(`Known: ${fact.statement} (${fact.source}${fact.iteration ? `, iteration ${fact.iteration}` : ""})`);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			name: "blender_record_iteration_fact",
+			label: "Blender Record Iteration Fact",
+			description:
+				"Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold, and a crash. A fact without a record is re-measured by every fresh critic, which is how a loop spends three renders learning that the handle is the wrong thickness. Record what the probe actually returned and the tool that returned it, so the next critic can re-check the number rather than trusting a sentence. Re-recording the same statement updates it rather than duplicating it; the newest 24 facts per module are kept. Read blender_iteration_state to see what is already known before measuring anything.",
+			parameters: Type.Object({
+				workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+				moduleName: Type.String({ description: "The module the fact is about." }),
+				statement: Type.String({
+					description:
+						'The measured finding itself, as a checkable sentence: "The handle is 12mm across, under the 18mm a hand needs". Not "the handle looks thin" -- that is a judgement, and the critic makes those.',
+				}),
+				source: Type.String({
+					description:
+						'Which tool produced it, with the identifying detail: "blender_geometry_probe, Mug vs MugHandle pair distance", "blender_image_probe, modules/mug/render.png". A fact with no source is an assertion.',
+				}),
+				iteration: Type.Optional(
+					Type.Number({ description: "The run the measurement belongs to. Defaults to nothing; supply it when the fact came from a specific run." }),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderRecordIterationFact({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					moduleName: params.moduleName,
+					statement: params.statement,
+					source: params.source,
+					iteration: params.iteration,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: [
+								`Recorded for ${result.module}: ${result.recorded.statement}`,
+								`Source: ${result.recorded.source}${result.recorded.iteration ? ` (iteration ${result.recorded.iteration})` : ""}`,
+								`${result.facts.length} fact(s) now known for this module${result.superseded > 0 ? `; ${result.superseded} earlier statement(s) replaced` : ""}.`,
+							].join("\n"),
+						},
+					],
 					details: result,
 				};
 			},

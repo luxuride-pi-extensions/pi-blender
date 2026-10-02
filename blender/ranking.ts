@@ -78,6 +78,7 @@ export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 		if (current && current.moduleName && current.score !== undefined && current.verdict && sawView) {
 			entries.push({
 				moduleName: current.moduleName,
+				iteration: current.iteration,
 				verdict: current.verdict,
 				score: current.score,
 				validity: current.validity ?? 0,
