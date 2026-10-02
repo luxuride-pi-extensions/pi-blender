@@ -66,14 +66,26 @@ def load_live_bridge():
     spec = importlib.util.spec_from_file_location("live_bridge", os.path.normpath(path))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return module, os.path.join(bridge_dir, "scratch.blend")
+
+
+def probe(live_bridge, blend_path, objects, checks):
+    # handle_geometry_probe calls ensure_requested_blend_open, which reads
+    # request["blendPath"] unconditionally -- the handler is written for a
+    # workspace, not for a raw in-memory scene. Saving the blank and passing
+    # that path back is how the probe is pointed at the scene this script
+    # builds: the early return fires on the path match, so nothing is reloaded.
+    return live_bridge.handle_geometry_probe(
+        {"blendPath": blend_path, "objects": objects, "checks": checks}
+    )
 
 
 def main():
-    live_bridge = load_live_bridge()
+    live_bridge, scratch_blend = load_live_bridge()
+    bpy.ops.wm.save_as_mainfile(filepath=scratch_blend)
 
     sphere = make_sphere("Sphere")
-    result = live_bridge.handle_geometry_probe({"objects": [sphere.name], "checks": ["shape"]})
+    result = probe(live_bridge, scratch_blend, [sphere.name], ["shape"])
     shape = result["objects"][sphere.name]["shape"]
 
     check(shape["vertices"] == len(sphere.data.vertices), "sphere vertex count mismatch")
@@ -96,7 +108,7 @@ def main():
     # A cube off the origin: still symmetric, because the mirror plane is the
     # mesh's own centre, not the world origin.
     cube = make_cube("Cube", size=1.0, location=(3.0, -2.0, 5.0))
-    result = live_bridge.handle_geometry_probe({"objects": [cube.name], "checks": ["shape"]})
+    result = probe(live_bridge, scratch_blend, [cube.name], ["shape"])
     cube_shape = result["objects"][cube.name]["shape"]
     check(cube_shape["selfSymmetry"]["mirrorAxis"] is not None, "offset cube reported as asymmetric")
     check(cube_shape["convexityRatio"] == 1.0, f"cube convexity should be 1.0, got {cube_shape['convexityRatio']}")
@@ -121,7 +133,7 @@ def main():
     dumbbell.name = "Dumbbell"
     dumbbell.location.x = 2.0
     bpy.context.view_layer.update()
-    result = live_bridge.handle_geometry_probe({"objects": [dumbbell.name], "checks": ["shape"]})
+    result = probe(live_bridge, scratch_blend, [dumbbell.name], ["shape"])
     dumbbell_shape = result["objects"][dumbbell.name]["shape"]
     # Two joined spheres have no gap, so they are still mirror-symmetric about
     # the plane between them -- what makes this dumbbell a shape problem is the
@@ -139,7 +151,7 @@ def main():
     # face area rather than link_faces: a zero-area adjacent face is a wire
     # boundary in effect, and a real closed mesh has no such edge.
     plane = make_open_plane("Plane")
-    result = live_bridge.handle_geometry_probe({"objects": [plane.name], "checks": ["shape"]})
+    result = probe(live_bridge, scratch_blend, [plane.name], ["shape"])
     plane_shape = result["objects"][plane.name]["shape"]
     check(plane_shape["openEdges"] > 0, "an open plane reported zero open edges")
 

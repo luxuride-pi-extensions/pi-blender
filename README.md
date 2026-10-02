@@ -184,7 +184,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (21 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (23 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -276,10 +276,14 @@ Start pi in any project dir. The extension:
   inverted, so the distance filter rejected nothing and every pair in the scene
   was reported, and a containment test reading the wrong extreme, so a chair
   under a table counted as one box swallowing the other
-- `test/shape-probe.py`, `test/montage-probe.py` and `test/readonly-probe.py`
-  predate the `blendPath` that `handle_geometry_probe` and the render handlers
-  now require, so they throw before they assert anything. They are not wired
-  into `npm test` and are superseded by the suites that are
+- Every Python probe in `test/` is run against a real Blender by
+  `test/blender-probes.test.mjs`, and the runner asserts on the SUMMARY line
+  each probe prints rather than the exit code — a Blender script exception is a
+  traceback on stderr and Blender still exits 0, so the exit code cannot be the
+  signal. The probes are listed in the runner, which is a real cost: a probe
+  dropped off that list dies quietly, and `test/shape-probe.py` did exactly
+  that, failing silently for as long as it went unrun after the handlers began
+  requiring the `blendPath` they were not passing
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
@@ -330,6 +334,20 @@ Start pi in any project dir. The extension:
   and is put back afterwards, so a comparison never replaces what you are
   looking at. Two runs is the minimum, and with one there is no previous
   generation to compare against
+- `blender_iteration_state` / `blender_record_iteration_fact` carry a module's
+  iteration state and its measured facts across critics. A fact a critic
+  measured is worthless to the NEXT critic unless it is persisted, which is how
+  a loop spends three renders re-learning that the handle is the wrong
+  thickness: `blender_iteration_state` derives the state from the manifest and
+  `critique.log` rather than from anyone's memory, reporting the per-module
+  budget, the last run and its content digest, the last verdict and score,
+  whether the last briefed fix actually changed anything, and a waste guard
+  naming the condition under which another render would tell you nothing new.
+  `blender_record_iteration_fact` persists ONE measured fact per call —
+  what the probe returned and which tool returned it, so the next critic
+  re-checks a number instead of trusting a sentence. Re-recording the same
+  statement updates it rather than duplicating it, and the newest 24 facts per
+  module are kept. Read the state before spending a run or a fresh critic
 - `blender_log_critique` requires the `moduleName` it judged. The iteration
   number alone stops identifying what was reviewed once several modules are
   judged at once, and under parallel runs `latestIteration` is whichever run
