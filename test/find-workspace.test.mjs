@@ -92,3 +92,81 @@ test("accepts a relative start directory by resolving it first", async () => {
 		assert.equal(dirname(workspace), root);
 	}
 });
+
+// The recorded workspace: what this session last opened, which is not where
+// pi was started.
+//
+// The manager brief has every agent pass `workspace` explicitly, so the
+// workspace in use is routinely somewhere with no workspace above it. That is
+// the case a bare /blender-watch has to survive, and the walk alone cannot:
+// it would answer "nothing" and send the user to supply a path the session
+// already knew.
+
+test("a workspace opened with an explicit path is remembered for a bare /blender-watch", async () => {
+	const root = await scratchTree();
+	const bridgeDir = join(root, "bridge");
+	const previousBridge = process.env.PI_BLENDER_BRIDGE_DIR;
+	process.env.PI_BLENDER_BRIDGE_DIR = bridgeDir;
+	try {
+		// Recorded by loadWorkspaceManifest, which every workspace-opening tool
+		// calls -- so this is what any agent's first blender_* call does.
+		const { loadWorkspaceManifest } = await loadTs("../blender/workspace.ts");
+		const workspace = join(root, "elsewhere", "shower");
+		await makeWorkspace(workspace);
+		// A workspace manifest names its own path and blend; the `{}` the other
+		// tests use is enough for a bare directory search but not for opening.
+		await writeFile(
+			join(workspace, MANIFEST_FILE),
+			JSON.stringify({
+				workspacePath: workspace,
+				manifestPath: join(workspace, MANIFEST_FILE),
+				blendPath: join(workspace, "model.blend"),
+			}),
+			"utf-8",
+		);
+		const manifest = await loadWorkspaceManifest(root, workspace);
+
+		const { readRecordedWorkspace } = await loadTs("../blender/workspace.ts");
+		assert.equal(await readRecordedWorkspace(), manifest.workspacePath);
+	} finally {
+		if (previousBridge === undefined) delete process.env.PI_BLENDER_BRIDGE_DIR;
+		else process.env.PI_BLENDER_BRIDGE_DIR = previousBridge;
+	}
+});
+
+test("a record naming a directory that is not a workspace is ignored, not obeyed", async () => {
+	const root = await scratchTree();
+	const bridgeDir = join(root, "bridge");
+	const previousBridge = process.env.PI_BLENDER_BRIDGE_DIR;
+	process.env.PI_BLENDER_BRIDGE_DIR = bridgeDir;
+	try {
+		const { readRecordedWorkspace } = await loadTs("../blender/workspace.ts");
+		// A workspace that was deleted, renamed, or lives on a volume that is
+		// not mounted right now. Handing this to /blender-watch would fail
+		// inside loadWorkspaceManifest with manifest-not-found instead of
+		// falling back to the cwd walk that would have worked.
+		await mkdir(bridgeDir, { recursive: true });
+		await writeFile(
+			join(bridgeDir, "current-workspace.json"),
+			JSON.stringify({ workspacePath: join(root, "deleted") }),
+			"utf-8",
+		);
+		assert.equal(await readRecordedWorkspace(), undefined);
+	} finally {
+		if (previousBridge === undefined) delete process.env.PI_BLENDER_BRIDGE_DIR;
+		else process.env.PI_BLENDER_BRIDGE_DIR = previousBridge;
+	}
+});
+
+test("no record at all reads as absent rather than throwing", async () => {
+	const root = await scratchTree();
+	const previousBridge = process.env.PI_BLENDER_BRIDGE_DIR;
+	process.env.PI_BLENDER_BRIDGE_DIR = join(root, "bridge-never-created");
+	try {
+		const { readRecordedWorkspace } = await loadTs("../blender/workspace.ts");
+		assert.equal(await readRecordedWorkspace(), undefined);
+	} finally {
+		if (previousBridge === undefined) delete process.env.PI_BLENDER_BRIDGE_DIR;
+		else process.env.PI_BLENDER_BRIDGE_DIR = previousBridge;
+	}
+});

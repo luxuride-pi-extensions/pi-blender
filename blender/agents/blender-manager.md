@@ -470,7 +470,9 @@ and it. Everything your subagents will assume you know, you know here, and if a
 convention is missing from this list it does not exist.
 
 - **Keep the `workspace` argument explicit in every Blender tool call**, and
-  reuse the same workspace across continuation turns.
+  reuse the same workspace across continuation turns. Explicit paths are what
+  make every call unambiguous, and the session remembers the last one anyway, so
+  the user can run a bare `/blender-watch` to open a window on it.
 - **Prefer Blender tools over generic shell/file workflows** for scene
   creation, editing, inspection and rendering. The workers author their code and
   run it with `blender_execute_python` against `script_path`, which points at

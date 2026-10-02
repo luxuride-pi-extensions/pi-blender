@@ -68,6 +68,7 @@ import {
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
 	findNearestWorkspace,
+	readRecordedWorkspace,
 	formatCompactSessionContextPrompt,
 	getBundledBlenderSkillsDir,
 	loadWorkspaceManifest,
@@ -1808,7 +1809,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		// discipline. Other pi instances' windows are deliberately NOT
 		// inspected or counted: this session's invariant is about this session.
 		pi.registerCommand("blender-watch", {
-			description: "Open the one windowed Blender for this session. No argument: the nearest workspace above the cwd.",
+			description: "Open the one windowed Blender for this session. No argument: the workspace this session has been working in, else the nearest one above the cwd.",
 			handler: async (args, ctx) => {
 				const workspace = args.trim();
 				try {
@@ -1820,22 +1821,36 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					if (workspace) {
 						await ensureWorkspaceInitialized({ cwd: ctx.cwd, workspace, continueExisting: true });
 					}
-					// With no argument, the nearest workspace above the cwd is
-					// the one that is plainly current. A workspace IS a
-					// directory holding the manifest, so no session state has
-					// to be remembered and the answer survives a reload.
-					const target = workspace || (await findNearestWorkspace(ctx.cwd));
-					if (!target) {
-						// Resolved BEFORE any launch, because a window with
-						// nothing to show is a 1 GB mistake, not a fallback:
-						// an already-open window is left exactly as it is.
-						ctx.ui.notify(
-							`No blender workspace found above ${ctx.cwd}. Pass one: /blender-watch <path>.`,
-							"warning",
-						);
-						return;
-					}
-					const manifest = await loadWorkspaceManifest(ctx.cwd, target);
+// With no argument, the workspace this session is actually
+				// working in is plainly current — which is usually NOT above
+				// the cwd, because the manager brief has every agent pass
+				// `workspace` explicitly. The recorded workspace is preferred
+				// for that reason; the cwd walk is the fallback, and it is the
+				// whole answer in a session that only ever opened a workspace by
+				// running a tool with an explicit path.
+				const recorded = workspace ? undefined : await readRecordedWorkspace();
+				const target = workspace || recorded || (await findNearestWorkspace(ctx.cwd));
+				if (!target) {
+					// Resolved BEFORE any launch, because a window with
+					// nothing to show is a 1 GB mistake, not a fallback:
+					// an already-open window is left exactly as it is.
+					ctx.ui.notify(
+						`No blender workspace for this session: none above ${ctx.cwd}, and this session has not opened one. ` +
+							`Pass one: /blender-watch <path>.`,
+						"warning",
+					);
+					return;
+				}
+				const manifest = await loadWorkspaceManifest(ctx.cwd, target);
+				if (recorded && !workspace) {
+					// Says WHICH rule chose it, because a window that opened the
+					// wrong blend is otherwise indistinguishable from a window
+					// that opened the right one by accident.
+					ctx.ui.notify(
+						`Using the workspace this session has been working in: ${manifest.blendPath}`,
+						"info",
+					);
+				}
 					// The window is switched, never duplicated, so re-running
 					// this is how you return to a workspace after opening
 					// another one.

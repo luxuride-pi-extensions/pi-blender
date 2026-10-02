@@ -1,5 +1,6 @@
 import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
+import { getBlenderBridgeDir, getBlenderInstanceId } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { checkLiveBlenderBlend, requestLiveBlenderOpenBlend } from "./bridge.js";
 import { pidIsRunning, readLockHolderPid } from "./liveness.js";
@@ -50,6 +51,71 @@ export async function findNearestWorkspace(startDir: string): Promise<string | u
 		if (await fileExists(manifest) && (await stat(manifest)).isFile()) return dir;
 		if (dir === root) return undefined;
 		dir = dirname(dir);
+	}
+}
+
+/**
+ * The workspace this session last opened, recorded in the bridge dir.
+ *
+ * `findNearestWorkspace` answers "which workspace is above the cwd", and for a
+ * bare command that is usually the wrong question: the manager brief has every
+ * agent pass `workspace` explicitly, so the workspace in use is wherever the
+ * agent was told to work rather than anywhere near where pi was started. The
+ * cwd walk then finds nothing, and the command tells the user to pass a path —
+ * the one piece of information the session already had.
+ *
+ * This is that missing memory. It lives in the bridge dir, which is per-INSTANCE
+ * unless PI_BLENDER_BRIDGE_DIR pins it, so one session's workspace is never
+ * handed to another: a stale or absent record degrades to the cwd walk, which
+ * is what happened before.
+ *
+ * Written at `loadWorkspaceManifest`, the one function every workspace-opening
+ * tool already calls, so no caller has to remember to record anything.
+ */
+const CURRENT_WORKSPACE_FILE = "current-workspace.json";
+
+async function recordCurrentWorkspace(workspacePath: string): Promise<void> {
+	// Best effort by construction. The record makes a bare `/blender-watch`
+	// smarter; failing to write it must never fail the tool call that was doing
+	// real work, so this swallows everything rather than propagating.
+	try {
+		const bridgeDir = getBlenderBridgeDir();
+		await mkdir(bridgeDir, { recursive: true });
+		const path = join(bridgeDir, CURRENT_WORKSPACE_FILE);
+		const temp = join(bridgeDir, `current-workspace.${process.pid}.tmp`);
+		// Atomic for the same reason instance.json is: a half-written record
+		// would parse as a path that does not exist, and the caller would report
+		// a workspace it then cannot open.
+		await writeFile(
+			temp,
+			JSON.stringify({ workspacePath, pid: process.pid, instanceId: getBlenderInstanceId(), updatedAt: nowIso() }),
+			"utf-8",
+		);
+		await rename(temp, path);
+	} catch {
+		// No record. The next call writes another.
+	}
+}
+
+/**
+ * The recorded workspace, if it still is one.
+ *
+ * Verified rather than trusted: a record can outlive its workspace (deleted, or
+ * renamed), and handing `/blender-watch` a stale path would fail inside
+ * loadWorkspaceManifest with a manifest-not-found error instead of falling back
+ * to the cwd walk that would have worked.
+ */
+export async function readRecordedWorkspace(): Promise<string | undefined> {
+	try {
+		const path = join(getBlenderBridgeDir(), CURRENT_WORKSPACE_FILE);
+		if (!(await fileExists(path))) return undefined;
+		const parsed = JSON.parse(await readFile(path, "utf-8")) as { workspacePath?: unknown };
+		const workspacePath = typeof parsed.workspacePath === "string" ? parsed.workspacePath : undefined;
+		if (!workspacePath) return undefined;
+		const manifest = getManifestPath(workspacePath);
+		return (await fileExists(manifest)) && (await stat(manifest)).isFile() ? workspacePath : undefined;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -398,6 +464,7 @@ export async function ensureWorkspaceInitialized(options: WorkspaceInitOptions):
 		}
 		await ensureWorkspaceScriptExists(workspacePath);
 		await ensureWorkspaceCritiqueLogExists(workspacePath);
+		await recordCurrentWorkspace(workspacePath);
 		return {
 			workspacePath,
 			blendPath: existingManifest.blendPath,
@@ -500,6 +567,7 @@ export async function loadWorkspaceManifest(cwd: string, workspace: string): Pro
 	if (liveness === "dead" || liveness === "unknown") {
 		await claimWorkspace(manifest.manifestPath, manifest.blendPath);
 	}
+	await recordCurrentWorkspace(workspacePath);
 	return manifest;
 }
 

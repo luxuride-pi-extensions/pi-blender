@@ -29,7 +29,7 @@ export { blenderRender } from "./render.js";
 export { describeMachineLimits, resolveRunBudget, WATCH_WINDOW_RSS_BYTES } from "./concurrency.js";
 export { readHeartbeatBlendPath } from "./liveness.js";
 export { requestLiveBlenderOpenBlend } from "./bridge.js";
-export { ensureWorkspaceInitialized, findNearestWorkspace, loadWorkspaceManifest } from "./workspace.js";
+export { ensureWorkspaceInitialized, findNearestWorkspace, loadWorkspaceManifest, readRecordedWorkspace } from "./workspace.js";
 
 export { blenderExportAsset } from "./export-asset.js";
 
