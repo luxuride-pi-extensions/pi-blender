@@ -65,6 +65,7 @@ import {
 	blenderWorkspaceInit,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
+	findNearestWorkspace,
 	formatCompactSessionContextPrompt,
 	getBundledBlenderSkillsDir,
 	loadWorkspaceManifest,
@@ -152,6 +153,15 @@ const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-script-runner",
 	"blender-merger",
 	"blender-camera-aligner",
+	// The composition trio. A room is decomposed into CONCERNS (shell,
+	// daylight, furniture set) rather than models, so this manager needs an
+	// assembler and a room-aware critic as well as the per-model agents. They
+	// were advertised in this prompt's allowedAgents and absent from the Set,
+	// so the gate refused a delegation pi itself offered and the manager
+	// stalled on the exact work these exist for.
+	"blender-composition-worker",
+	"blender-composition-critic",
+	"blender-composition-merger",
 ]);
 
 /**
@@ -1704,7 +1714,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		// discipline. Other pi instances' windows are deliberately NOT
 		// inspected or counted: this session's invariant is about this session.
 		pi.registerCommand("blender-watch", {
-			description: "Open the one windowed Blender for this session, on a workspace's model.blend",
+			description: "Open the one windowed Blender for this session. No argument: the nearest workspace above the cwd.",
 			handler: async (args, ctx) => {
 				const workspace = args.trim();
 				try {
@@ -1725,7 +1735,21 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					if (workspace) {
 						await ensureWorkspaceInitialized({ cwd: ctx.cwd, workspace, continueExisting: true });
 					}
-					const manifest = workspace ? await loadWorkspaceManifest(ctx.cwd, workspace) : null;
+					// With no argument, the nearest workspace above the cwd is
+					// the one that is plainly current. A workspace IS a
+					// directory holding the manifest, so no session state has
+					// to be remembered and the answer survives a reload. If
+					// there is none, say so rather than leaving the user
+					// watching an empty file and guessing which blend it was.
+					const target = workspace || (await findNearestWorkspace(ctx.cwd));
+					if (!workspace && !target) {
+						ctx.ui.notify(
+							`No blender workspace found above ${ctx.cwd}. Pass one: /blender-watch <path>.`,
+							"warning",
+						);
+						return;
+					}
+					const manifest = target ? await loadWorkspaceManifest(ctx.cwd, target) : null;
 					if (manifest) {
 						await requestLiveBlenderOpenBlend({ blendPath: manifest.blendPath, timeoutMs: LIVE_BRIDGE_COLD_START_TIMEOUT_MS });
 					}

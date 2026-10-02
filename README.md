@@ -184,7 +184,7 @@ verifies can never report the fault it exists to find.
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (20 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (21 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point area-light rig (key/fill/rim, all aimed at the origin), a
@@ -280,6 +280,19 @@ Start pi in any project dir. The extension:
   symmetric from the front and wrong from three-quarter — and because a sheet
   costs the same transcript weight as one render: images persist in a
   conversation and are re-sent every request
+- `blender_compare` renders the PREVIOUS generation of a subject beside the
+  current one on one labelled sheet at `modules/<name>/compare.png`, the two
+  panels of a view side by side. It exists because a critic judging the current
+  render cannot see a REGRESSION: a brief covers what should be there, and a
+  part that was fine last iteration and has grown a crack now is not mentioned
+  anywhere in the brief. Both generations are framed from the UNION of their
+  extents, so the camera is identical in every panel and a difference between
+  two panels is geometry — framing each generation on its own extent would make
+  a part that grew read as a camera change. The baseline is the checkpoint the
+  earlier run started from, so no kept render is needed; it is a file on disk
+  and is put back afterwards, so a comparison never replaces what you are
+  looking at. Two runs is the minimum, and with one there is no previous
+  generation to compare against
 - `blender_log_critique` requires the `moduleName` it judged. The iteration
   number alone stops identifying what was reviewed once several modules are
   judged at once, and under parallel runs `latestIteration` is whichever run
