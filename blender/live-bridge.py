@@ -798,6 +798,7 @@ GEOMETRY_PROBE_CHECKS = (
     "transform",
     "bounds",
     "axis",
+    "joint",
     "pair",
     "shape",
     "topology",
@@ -1123,13 +1124,217 @@ def _probe_pair_geometry(first, second, tolerance):
     }
 
 
+# How close two bounding boxes must come before a separated pair is worth
+# reporting at all. Past this the two objects are simply PLACED near each
+# other -- a chair pulled up to a table, a step beside a plinth -- and
+# reporting them is the false positive that would train an analyst to ignore
+# the list.
+JOINT_NEAR_MISS_MAX = 0.05
+
+# How a broken continuation is told from a placement. Two parts that continue
+# each other are separated by a fraction of their own length along the axis
+# they share: an 11mm gap between a 1m riser and the pipe above it is 1% of
+# the pipe, because the two were meant to be ONE pipe. A chair 25mm below a
+# table top is 125% of the seat's own thickness, which is the arithmetic of
+# two separate things that happen to be stacked.
+JOINT_CONTINUATION_RATIO = 0.1
+
+# How far one part's cross-section may sit outside the other's, as a fraction
+# of the larger, before the two stop looking like a continuation of each
+# other. A pipe meeting a slightly wider collar is still a joint; a leg beside
+# a step is not.
+JOINT_CONCENTRIC_SLACK = 0.25
+
+
+def _box_gap(first_min, first_max, second_min, second_max):
+    """Per-axis gap and overlap between two axis-aligned world boxes.
+
+    One expression, because the sign is the whole answer: `lower - upper` is
+    NEGATIVE when the two slabs overlap (by how much) and POSITIVE when they
+    are apart (by how much). Writing it as two branches with the subtraction
+    reversed between them is the bug this docstring exists to prevent -- both
+    branches return a negative number, so every gap is an overlap, the largest
+    one is read as the distance between the two, and the distance filter can
+    never reject anything.
+
+    The distance between two boxes is the largest entry, NOT only when every
+    axis is positive. Two objects a floor apart overlap on both horizontal
+    axes, so "distance = 0 when any axis overlaps" filters out nothing and
+    reports every pair in the scene. For the same reason one box swallows
+    another when the largest entry is <= 0, NOT when the smallest is negative:
+    a chair under a table overlaps on X and Y and is apart on Z, which is the
+    opposite of being swallowed.
+    """
+    gap = []
+    for axis in range(3):
+        lower = max(first_min[axis], second_min[axis])
+        upper = min(first_max[axis], second_max[axis])
+        gap.append(lower - upper)
+    return gap
+
+
+def _probe_joints(objects, tolerance):
+    """Pairs that ought to meet and do not, found without being asked for.
+
+    The pair check answers "how far apart are these two" for the two someone
+    thought to name. It cannot answer "is anything in this scene detached",
+    which is the defect that actually reaches a user: a shower riser modelled
+    clear of the pipe it continues looks correct in a render from any useful
+    angle, and nobody pairs two pipes of the same family by instinct.
+
+    So this sweeps every candidate pair and reports the ones whose BOUNDING
+    BOXES say they should be touching while the SURFACES say they are not.
+    Severity comes from the geometry of the separation, and the three classes
+    are what a real scene actually contains:
+
+      * overlapping-but-apart -- one box swallows the other, so the two parts
+        occupy the same place in the model, yet no surface of one reaches any
+        surface of the other. A part buried inside another's extent with no
+        contact. A defect.
+      * broken-continuation -- the two parts are separated along ONE axis,
+        and on the other two their cross-sections are concentric: a pipe
+        meeting the pipe above it, a leg meeting its foot, a collar on a post.
+        The gap is also a small fraction of their own length along that axis.
+        That is a joint that was meant to be made and was missed, and it is
+        the user's shower. A defect.
+      * near-miss -- everything else within JOINT_NEAR_MISS_MAX. A placement
+        to JUDGE. A chair under a table is correct and reads the same as a
+        detached riser at this resolution, because the two differ in MEANING
+        and no measurement recovers meaning. It is reported because it is
+        cheap and a render hides it, and marked because treating it as a
+        defect is how a measurement turns into noise an analyst learns to skip.
+
+    The box test is a filter, never a verdict. The distance that settles each
+    candidate is the same signed BVH measurement the pair check uses, so a
+    pair the caller ALSO asked for gets identical numbers here and in `pairs`.
+    """
+    candidates = []
+    boxes = {}
+    for obj in objects:
+        minimum, maximum = _world_bounding_box(obj)
+        boxes[obj.name] = (minimum, maximum)
+
+    for first_index, first in enumerate(objects):
+        first_min, first_max = boxes[first.name]
+        for second in objects[first_index + 1 :]:
+            second_min, second_max = boxes[second.name]
+            gap = _box_gap(first_min, first_max, second_min, second_max)
+            # One box swallows the other only when NO axis separates them, so
+            # the test is the LARGEST gap being zero or negative -- not the
+            # smallest. Read it the other way round and every pair that shares
+            # space on its perpendicular axes is "overlapping", which is a
+            # stacked chair under a table and a pipe below a pipe, both of
+            # which are apart on the axis that matters.
+            distance = max(0.0, max(gap))
+            overlapping = max(gap) <= 0.0
+            if distance > JOINT_NEAR_MISS_MAX:
+                continue
+            separation_axis = distance
+
+            measurement = _probe_pair_geometry(first, second, tolerance)
+            if measurement["verdict"] in ("interpenetrating", "in-contact"):
+                # They DO meet. Nothing to report: this is the healthy case the
+                # sweep exists to distinguish, and reporting it would bury the
+                # one that matters.
+                continue
+
+            surfaces = measurement["closestSurfaceDistance"]
+            if surfaces is None:
+                continue
+
+            if overlapping:
+                severity = "overlapping-but-apart"
+                reason = (
+                    "one bounding box swallows the other, so the two parts occupy the same place "
+                    "in the model, but no surface of one reaches any surface of the other"
+                )
+            else:
+                axis = gap.index(separation_axis)
+                length_a = first_max[axis] - first_min[axis]
+                length_b = second_max[axis] - second_min[axis]
+                shorter = min(length_a, length_b)
+                # Concentric on the two axes they are NOT separated along: a
+                # continuation is a pipe inside a pipe's footprint, not a
+                # diagonal neighbour that happens to be close.
+                concentric = True
+                for other in range(3):
+                    if other == axis:
+                        continue
+                    span_a = first_max[other] - first_min[other]
+                    span_b = second_max[other] - second_min[other]
+                    slack = JOINT_CONCENTRIC_SLACK * max(span_a, span_b)
+                    if (
+                        first_min[other] < second_min[other] - slack
+                        or first_max[other] > second_max[other] + slack
+                    ):
+                        concentric = False
+                if concentric and shorter > 0.0 and separation_axis < JOINT_CONTINUATION_RATIO * shorter:
+                    severity = "broken-continuation"
+                    reason = (
+                        f"separated along {'XYZ'[axis]} by {round(separation_axis, 5)} with concentric "
+                        f"cross-sections, which is a fraction of the parts' own length along that axis "
+                        f"({round(shorter, 5)}) -- the two look like one part split in two"
+                    )
+                else:
+                    severity = "near-miss"
+                    reason = (
+                        f"bounding boxes come within {round(distance, 5)} of each other without "
+                        "overlapping on any axis, so the two may or may not be meant to meet -- judge this one"
+                    )
+
+            candidates.append(
+                {
+                    "a": first.name,
+                    "b": second.name,
+                    "severity": severity,
+                    "reason": reason,
+                    "gap": surfaces,
+                    "tolerance": measurement["tolerance"],
+                    "boundingBoxGap": {"x": _round(gap[0]), "y": _round(gap[1]), "z": _round(gap[2])},
+                    "boundingBoxOverlapAxes": ["XYZ"[i] for i in range(3) if gap[i] < 0.0],
+                    "overlapping": overlapping,
+                    "boundingBoxDistance": _round(distance),
+                }
+            )
+
+    rank = {"broken-continuation": 0, "overlapping-but-apart": 1, "near-miss": 2}
+    candidates.sort(key=lambda entry: (rank[entry["severity"]], entry["gap"]))
+    defects = [entry for entry in candidates if entry["severity"] in ("broken-continuation", "overlapping-but-apart")]
+    near_misses = [entry for entry in candidates if entry["severity"] == "near-miss"]
+    return {
+        "tolerance": _round(tolerance),
+        "nearMissMax": JOINT_NEAR_MISS_MAX,
+        "defectCount": len(defects),
+        "nearMissCount": len(near_misses),
+        "joints": candidates,
+        "note": (
+            "A joint is a pair whose bounding boxes overlap or come within "
+            f"{JOINT_NEAR_MISS_MAX} of each other while their surfaces are further apart than the "
+            f"tolerance of {_round(tolerance)}. 'broken-continuation' (separated along one axis, "
+            "concentric on the others, by a fraction of their own length) and 'overlapping-but-apart' "
+            "are defects: two parts that were meant to be one and are not touching. 'near-miss' is a "
+            "placement to judge -- a chair at a table is correct and is geometrically indistinguishable "
+            "from a detached riser, because the two differ in meaning. The box test only selects "
+            "candidates; the gap is a signed BVH measurement, the same one the pair check reports."
+        ),
+    }
+
+
 def _probe_topology(obj):
-    """Non-manifold / loose / duplicate geometry counts for one mesh.
+    """Non-manifold / loose / duplicate geometry counts, and mesh islands.
 
     Counts only: the analyst needs to know a defect exists and how bad it is,
     and full mesh data would swamp its context. A duplicate-face or
     non-manifold-edge count is the reliable signal that a shape is not the
     solid the analyst thinks it is.
+
+    The component count is the one number here that catches a defect the others
+    cannot see, because a mesh split into drifting pieces can be perfectly
+    clean by every other measure: each piece is a closed solid, so there are no
+    boundary edges, no non-manifold edges, no loose vertices and no duplicate
+    vertices. A shower head modelled as ONE object whose head has drifted off
+    its own pipe reports all zeros here and looks correct in a render. Only
+    the connectivity of the mesh says otherwise.
     """
     try:
         # pi-lens-ignore: ast-grep:unresolved-import-python
@@ -1159,10 +1364,39 @@ def _probe_topology(obj):
         else:
             seen.add(key)
 
+    # Connected components over the mesh's own edges, by BFS from each
+    # unvisited vertex. Vertices are reached through link_edges rather than the
+    # index table so a mesh whose indices are not contiguous still resolves.
+    unvisited = set(bm.verts)
+    component_sizes = []
+    while unvisited:
+        seed = unvisited.pop()
+        component = 1
+        frontier = [seed]
+        while frontier:
+            current = frontier.pop()
+            for edge in current.link_edges:
+                other = edge.other_vert(current)
+                if other in unvisited:
+                    unvisited.discard(other)
+                    component += 1
+                    frontier.append(other)
+        component_sizes.append(component)
+    component_sizes.sort(reverse=True)
+    total_verts = len(bm.verts)
+    largest_share = (component_sizes[0] / total_verts) if component_sizes and total_verts else 0.0
+    # Island detail, capped: a mesh fragmented into hundreds of pieces needs the
+    # COUNT and the share far more than the whole list, and a 400-vertex cube
+    # in boolean-trash mode should not put 200 entries in an analyst's context.
+    island_samples = [
+        {"vertices": size, "share": _round(size / total_verts, 4) if total_verts else 0.0}
+        for size in component_sizes[1:6]
+    ]
+
     bm.free()
     return {
         "available": True,
-        "vertices": len(mesh.vertices),
+        "vertices": total_verts,
         "edges": len(mesh.edges),
         "faces": len(mesh.polygons),
         "nonManifoldEdges": non_manifold,
@@ -1171,6 +1405,17 @@ def _probe_topology(obj):
         "looseEdges": loose_edges,
         "degenerateFaces": degenerate,
         "duplicateVertices": duplicates,
+        "connectedComponents": len(component_sizes),
+        "largestComponentShare": _round(largest_share, 4),
+        "islandSizes": island_samples,
+        # One component is the healthy case for every closed solid and for every
+        # surface with a single shell. A mesh with more is either several pieces
+        # that should be one object, or one object split by a modelling slip --
+        # and a surface that is a shell PLUS a base, or a shape with a separate
+        # inset piece, is legitimate, so this is a finding to judge, not a
+        # defect count. `largestComponentShare` says how much of the mesh the
+        # main body is, which separates "one small extra piece" from "in pieces".
+        "isSplit": len(component_sizes) > 1,
     }
 
 
@@ -1312,7 +1557,10 @@ def _shape_radius_profile(points, minimum, maximum):
     if len(samples) < 2:
         return None, axis_name
 
-    shrinking = sum(1 for a, b in zip(samples, samples[1:]) if b["radius"] <= a["radius"])
+    # strict=False is the intent, not an omission: the sample list is paired
+    # with itself shifted by one, so the two sequences differ in length by
+    # exactly one and strict=True would raise on every call.
+    shrinking = sum(1 for a, b in zip(samples, samples[1:], strict=False) if b["radius"] <= a["radius"])
     first = samples[0]["radius"]
     taper = (first - samples[-1]["radius"]) / first if first > 0.0 else 0.0
     return (
@@ -1696,6 +1944,13 @@ def handle_geometry_probe(request):
         elif len(targets) == 2:
             pairs[f"{targets[0].name}|{targets[1].name}"] = _probe_pair_geometry(targets[0], targets[1], tolerance)
 
+    joints = None
+    if "joint" in requested:
+        # Swept over the resolved targets, not over `pairs`: the whole point is
+        # the pair nobody thought of. `objects` still scopes the sweep, so a
+        # probe of one part still costs one sweep rather than the whole scene.
+        joints = _probe_joints([obj for obj in targets if obj.type == "MESH"], tolerance)
+
     scale_contract = {}
     if "scale" in requested:
         if not specifications:
@@ -1714,6 +1969,7 @@ def handle_geometry_probe(request):
         "unitNote": "Blender units; 1.0 = 1 m by default. In a specification a bare number is millimetres.",
         "objects": measurements,
         "pairs": pairs,
+        "joints": joints,
         "scaleContract": scale_contract,
     }
 

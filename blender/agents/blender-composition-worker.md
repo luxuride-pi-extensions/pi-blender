@@ -107,16 +107,36 @@ will be dark until someone owns it.
 
 ## Containment is part of correctness
 
-A room is objects that must not intersect and must be flush. Two checks catch
-most of it, and both are cheaper than being re-briefed:
+A room is objects that must not intersect and must be flush. Three checks catch
+most of it, and all are cheaper than being re-briefed:
 
 - `checks: ["bounds"]` on every object, to confirm each one is where you think.
+- `checks: ["joint"]` on the whole module. This is the one that finds what a
+  render hides. A riser pipe modelled 11 mm clear of the pipe it continues looks
+  correct from every camera a human would use, and nobody pairs two pipes of the
+  same object family by instinct — the `pairs` check only measures the two you
+  thought of. Read `defectCount` first. `broken-continuation` means the two parts
+  look like one part split in two, and it is always a defect. `near-miss` is a
+  placement to JUDGE: a chair pulled up to a table is correct and is
+  geometrically indistinguishable from a detached riser, because the two differ
+  in meaning and no measurement recovers meaning. Judge each one against the
+  brief, then say which you resolved and why.
 - `pairs` between anything that meets — counter to wall, window frame to wall,
   door to floor. `separated` is wrong and `interpenetrating` is wrong; a join you
   meant is fine.
 
 Self-intersections inside one object need `checks: ["topology"]`, which is the
-expensive one. Use it on the shell, where a bad wall costs everything.
+expensive one. Use it on the shell, where a bad wall costs everything. Its
+`connectedComponents` is the other number a render cannot show: a mesh that has
+drifted into two or more pieces reads as `nonManifoldEdges: 0` and
+`boundaryEdges: 0`, because each piece is a clean closed solid. One object split
+in two is a defect; several components can also be legitimate, so read it with
+`largestComponentShare` to tell a small extra piece from a mesh in pieces.
+
+A part you intend to be CONTINUOUS with another — a pipe running into a pipe, a
+post into its foot, a collar onto a shaft — is better modelled as one mesh than
+as two objects that merely touch. The sweep is the safety net for when you did
+not, not the plan.
 
 ## Rendering: you are not framed by the harness
 

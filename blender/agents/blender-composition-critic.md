@@ -75,6 +75,31 @@ an issue with a number in it, which is the most useful kind of issue there is;
 folding it into a geometry impression throws that away. If a specification reports
 `missing`, that is the finding — say which object was never built.
 
+**Run `checks: ["joint"]` and read the numbers, because a detached part does not
+photograph as one.** A riser pipe 11 mm clear of the pipe it continues reads
+correctly from every camera a human would use; the join is one pixel of shadow.
+`defectCount` is the count of pairs that are meant to be one part and are not:
+`broken-continuation` (separated on one axis, concentric on the others, by a
+fraction of their own length) and `overlapping-but-apart` (one box swallows the
+other, yet no surface reaches any). Either is a defect and belongs in `issues` with
+its measured gap.
+
+`near-miss` is NOT a finding to write up automatically. It is a placement to
+JUDGE: a chair pulled up to a table is correct and is geometrically
+indistinguishable from a detached riser, because the two differ in meaning and no
+measurement recovers meaning. Read it against the brief — a chair beside the table
+it belongs to is correct, a chair with nothing it belongs to is a defect — and say
+which you concluded. Writing up every near-miss is how a critic's list stops
+being read.
+
+One object split into drifting pieces is the other thing a render cannot show.
+`checks: ["topology"]` reports `connectedComponents` for exactly that, and it
+reads as `nonManifoldEdges: 0` and `boundaryEdges: 0` because each piece is a
+clean closed solid. `isSplit` is a finding to judge, not an automatic failure: a
+shell with a base and a surface with an inset piece are legitimately more than
+one component. `largestComponentShare` is what tells them apart — near 1 is one
+part plus a few strays, near 0.5 is a model in pieces.
+
 ## The two failures that are not modelling
 
 Say plainly which of these you are looking at, because they get mis-scored as

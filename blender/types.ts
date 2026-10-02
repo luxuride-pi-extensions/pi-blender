@@ -1085,7 +1085,15 @@ export interface RunBlenderJsonOptions {
 }
 
 /** One of the measurement families `blender_geometry_probe` can run. */
-export type GeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "shape" | "topology" | "scale";
+export type GeometryProbeCheck =
+	| "transform"
+	| "bounds"
+	| "axis"
+	| "pair"
+	| "joint"
+	| "shape"
+	| "topology"
+	| "scale";
 
 export interface GeometryProbeBounds {
 	min: number[];
@@ -1178,6 +1186,77 @@ export interface GeometryProbeTopology {
 	looseEdges: number;
 	degenerateFaces: number;
 	duplicateVertices: number;
+	/**
+	 * Connected components of the mesh, over its own edges. More than one means
+	 * the object is several separate pieces, which every OTHER number here can
+	 * miss entirely: a mesh split by a modelling slip is a set of closed solids,
+	 * so it has no boundary edges, no non-manifold edges, no loose vertices and
+	 * no duplicate vertices. A shower head whose head has drifted off its own
+	 * pipe reports all zeros on those and one on this.
+	 *
+	 * Not a defect on its own: a surface with a shell and a base, or a shape
+	 * with a separate inset piece, is legitimately more than one. Read it with
+	 * `largestComponentShare` to tell a small extra piece from a mesh in pieces.
+	 */
+	connectedComponents: number;
+	/** The main body's share of the mesh, 0..1. Near 1 means one piece plus a few strays. */
+	largestComponentShare: number;
+	/** The next few components by size, capped at five. */
+	islandSizes: { vertices: number; share: number }[];
+	/** True when `connectedComponents > 1`. A finding to judge, not a failure. */
+	isSplit: boolean;
+}
+
+/**
+ * One pair that ought to meet and does not, found without being asked for.
+ *
+ * The `pair` check measures the two objects someone named. This is the sweep
+ * that finds the pair nobody thought of, which is the defect that actually
+ * reaches a user: two pipes of the same family, one modelled a centimetre clear
+ * of the other, look correct in a render from any useful angle.
+ */
+export interface GeometryProbeJoint {
+	a: string;
+	b: string;
+	/**
+	 * `overlapping-but-apart` is a DEFECT: the two parts' bounding boxes share
+	 * space, so they occupy the same place in the model, yet no surface of one
+	 * reaches any surface of the other. That is a joint that was meant to be
+	 * made and was missed.
+	 *
+	 * `near-miss` is a placement to JUDGE: the boxes come within `nearMissMax`
+	 * without overlapping on any axis. A chair pulled up to a table is correct
+	 * and reads the same as a detached riser at this resolution. It is reported
+	 * because it is cheap and a render hides it, and marked because treating it
+	 * as a defect is how a measurement becomes noise an analyst learns to skip.
+	 */
+	severity: "overlapping-but-apart" | "near-miss";
+	/** Why this pair is in the list, in one sentence. */
+	reason: string;
+	/** Closest surface distance between the two, the same measurement `pairs` reports. */
+	gap: number;
+	tolerance: number;
+	/** Signed per-axis bounding-box gap; positive is empty space on that axis. */
+	boundingBoxGap: { x: number; y: number; z: number };
+	/** Which axes the two boxes overlap on. Empty for a near-miss. */
+	boundingBoxOverlapAxes: string[];
+	/** True when the two boxes share space on at least one axis. */
+	overlapping: boolean;
+	/** Distance between the boxes: 0 when they overlap, else the widest axis gap. */
+	boundingBoxDistance: number;
+}
+
+export interface GeometryProbeJoints {
+	tolerance: number;
+	/** Beyond this gap a pair is simply placed near each other and is not reported. */
+	nearMissMax: number;
+	/** How many are `overlapping-but-apart`. The number to act on. */
+	defectCount: number;
+	/** How many are `near-miss`. The number to judge. */
+	nearMissCount: number;
+	/** Worst first: defects before near-misses, then by gap. */
+	joints: GeometryProbeJoint[];
+	note: string;
 }
 
 export interface GeometryProbeObject {
@@ -1233,6 +1312,8 @@ export interface GeometryProbeResult {
 	unitNote: string;
 	objects: Record<string, GeometryProbeObject>;
 	pairs: Record<string, GeometryProbePair>;
+	/** Present only when a `joint` check was requested; null otherwise. */
+	joints?: GeometryProbeJoints | null;
 	/** Present only when a `scale` check was requested; empty otherwise. */
 	scaleContract: Record<string, GeometryProbeScaleEntry>;
 }

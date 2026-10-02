@@ -235,7 +235,7 @@ Start pi in any project dir. The extension:
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
   `textures`, and `paintSettings` for paint/UV/rig planning
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
-  `bounds`, `axis`, `pair`, and `topology`. `shape` measures the mesh rather
+  `bounds`, `axis`, `pair`, `joint`, and `topology`. `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
   (mean, spread, monotonic, taper), self-symmetry about the mesh's own
   bounding-box centre (not the world origin), convexity as the fraction of
@@ -243,6 +243,43 @@ Start pi in any project dir. The extension:
   loose-vertex counts. A render is a projection, so it cannot show a saddle
   facing away, distinguish an asymmetric form from a symmetric one, or see the
   inside of a hollow shell
+- `blender_geometry_probe`'s `joint` check finds the parts that are detached
+  WITHOUT being asked, which is the only way the defect reaches the user rather
+  than the analyst: a shower riser modelled 11 mm clear of the pipe it
+  continues looks correct in a render from any useful angle, and nobody pairs
+  two pipes of the same object family by instinct. It sweeps every pair in
+  scope, filters by bounding box so the sweep stays O(n²) in boxes rather than
+  in BVH builds, and reports three severities. `broken-continuation` and
+  `overlapping-but-apart` are defects — two parts that were meant to be one
+  and are not touching. `near-miss` is a placement to JUDGE and is deliberately
+  not a failure: a chair pulled up to a table is geometrically indistinguishable
+  from a detached riser, because the two differ in MEANING and no measurement
+  recovers meaning, so calling it a defect would be the false positive that
+  trains an analyst to ignore the list. Pairs that DO meet are skipped, because
+  reporting the healthy case would bury the one that matters. The gap is the
+  same signed BVH measurement the `pair` check reports, so a pair named in both
+  gets identical numbers
+- `topology`'s `connectedComponents` is the one topology number that catches a
+  mesh split into drifting pieces, and it is there because every other count is
+  blind to that case: each piece is a clean closed solid, so a head that has
+  drifted off its own pipe reports `nonManifoldEdges: 0`, `boundaryEdges: 0`,
+  `looseVertices: 0` and `duplicateVertices: 0`. `largestComponentShare` is what
+  separates "one part plus a few strays" from "a model in pieces", because more
+  than one component is not automatically wrong
+- Both of these are measured, not asserted. `test/joint-probe.py` builds a
+  scene whose correct answers are known by construction (an 11 mm gap between a
+  1 m riser and the pipe above it, a chair pulled up to a table, a cube
+  interpenetrating another, a part floating in a ring's void, a cube embedded
+  in solid material, a mesh in two pieces) and runs the real handler in
+  headless Blender; `test/joint-probe.test.mjs` drives it. The suite is what
+  caught the two bugs this check shipped with: a bounding-box gap whose sign was
+  inverted, so the distance filter rejected nothing and every pair in the scene
+  was reported, and a containment test reading the wrong extreme, so a chair
+  under a table counted as one box swallowing the other
+- `test/shape-probe.py`, `test/montage-probe.py` and `test/readonly-probe.py`
+  predate the `blendPath` that `handle_geometry_probe` and the render handlers
+  now require, so they throw before they assert anything. They are not wired
+  into `npm test` and are superseded by the suites that are
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
