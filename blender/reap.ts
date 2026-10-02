@@ -31,6 +31,8 @@ import {
 	getBlenderBridgeDir,
 	getBlenderBridgeRootDir,
 	getBlenderInstanceId,
+	getBlankBlendDir,
+	hasBlankBlendPathOverride,
 	hasBridgeDirOverride,
 } from "../config.js";
 import { isHeartbeatFresh, isHeartbeatPidAlive, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS } from "./liveness.js";
@@ -289,6 +291,81 @@ async function looksLikeAbandonedBridgeDir(dir: string): Promise<boolean> {
 	return pid === null || !pidIsRunning(pid);
 }
 
+/** Filename stem of a bootstrap blend: the instance id that wrote it. */
+const BLANK_STEM_PATTERN = /^([A-Za-z0-9._-]{1,64})\.blend1?$/;
+
+/**
+ * Whether this blank blend's owning session is provably gone.
+ *
+ * The file itself is disposable -- blank-bootstrap.py recreates it on every
+ * launch -- so age alone would be enough to make it safe to delete. What is NOT
+ * safe is deleting the one a Blender is currently sitting in: that instance's
+ * UI has the path open, and a Blender that loses its file underneath itself
+ * reports errors for every later save. So the owning bridge dir is what
+ * decides, using the same liveness evidence the reaper already trusts.
+ */
+async function isBlankBlendAbandoned(stem: string, ageMs: number): Promise<boolean> {
+	if (ageMs < UNOWNED_DIR_STALE_MS) return false;
+	if (stem === getBlenderInstanceId()) return false;
+	if (hasBridgeDirOverride()) return false;
+	return (await classifyBridgeDir(join(getBlenderBridgeRootDir(), stem))) === "remove";
+}
+
+/**
+ * Reap bootstrap blends left behind by sessions that are gone.
+ *
+ * One per Blender launch, ~90KB each, and never cleaned: nothing in a dying
+ * process runs, and unlike the bridge dir there is no sibling-sweep to notice.
+ * A session that is still live is left strictly alone -- see
+ * isBlankBlendAbandoned, which refuses on anything but positive evidence.
+ */
+export async function reapStaleBlankBlends(): Promise<ReapResult> {
+	const result: ReapResult = { removed: [], adopted: [], skipped: [] };
+	if (hasBlankBlendPathOverride()) {
+		result.skipped.push({
+			dir: getBlankBlendDir(),
+			reason: "PI_BLENDER_BLANK_BLEND_PATH is set; its contents are user-owned, not instances",
+		});
+		return result;
+	}
+	const dir = getBlankBlendDir();
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch {
+		return result;
+	}
+	for (const entry of entries) {
+		const stem = BLANK_STEM_PATTERN.exec(entry)?.[1];
+		if (stem === undefined) continue;
+		const file = join(dir, entry);
+		let info: Awaited<ReturnType<typeof stat>>;
+		try {
+			info = await stat(file);
+		} catch {
+			continue;
+		}
+		if (!info.isFile()) continue;
+		if (await isBlankBlendAbandoned(stem, Date.now() - info.mtimeMs)) {
+			try {
+				await rm(file, { force: true });
+				result.removed.push(file);
+				continue;
+			} catch {
+				// A file the sweep is sure about but cannot delete is a fault
+				// worth reporting, not a survivor the user asked about.
+				result.skipped.push({
+					dir: file,
+					reason: "an abandoned session, but the file could not be removed",
+				});
+				continue;
+			}
+		}
+		result.adopted.push(file);
+	}
+	return result;
+}
+
 async function readInstanceFile(path: string): Promise<InstanceFile | null> {
 	try {
 		return JSON.parse(await readFile(path, "utf-8")) as InstanceFile;
@@ -317,6 +394,23 @@ export function formatReapResult(result: ReapResult): string | undefined {
 	}
 	if (result.skipped.length > 0) {
 		parts.push(`left ${result.skipped.length} dir(s) alone: ${result.skipped[0]?.reason ?? "unclassified"}`);
+	}
+	return parts.length > 0 ? `[pi-blender] ${parts.join("; ")} (this instance: ${getBlenderInstanceId()}).` : undefined;
+}
+
+/**
+ * A one-line summary of the blank-blend sweep, or undefined when nothing was
+ * removed. Kept apart from formatReapResult because the two sweeps count
+ * different things -- files against directories -- and a shared line would
+ * describe whichever ran first.
+ */
+export function formatBlankReapResult(result: ReapResult): string | undefined {
+	const parts: string[] = [];
+	if (result.removed.length > 0) {
+		parts.push(`removed ${result.removed.length} stale bootstrap blend(s) from dead sessions`);
+	}
+	if (result.skipped.length > 0) {
+		parts.push(`left ${result.skipped.length} bootstrap blend path(s) alone: ${result.skipped[0]?.reason ?? "unclassified"}`);
 	}
 	return parts.length > 0 ? `[pi-blender] ${parts.join("; ")} (this instance: ${getBlenderInstanceId()}).` : undefined;
 }

@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 // import from blender/reap.ts and blender/liveness.ts, which depend only on
 // config.js.
 import { getBlankBlendPath, getBlenderBridgeDir, getBlenderInstanceId, getBundledBlankBootstrapPath, getBundledBlenderBridgePath, writeInstanceFile } from "./config.js";
-import { formatReapResult, reapOrphanedBridgeDirs } from "./blender/reap.js";
+import { formatBlankReapResult, formatReapResult, reapOrphanedBridgeDirs, reapStaleBlankBlends } from "./blender/reap.js";
 // isHeartbeatFresh is aliased on import because launch.ts has a local
 // no-argument wrapper of the same name below; the module version takes a dir.
 import { isBridgeAlive, isHeartbeatFresh as isHeartbeatFreshIn, LIVE_BRIDGE_LAUNCH_WATCHDOG_MS } from "./blender/liveness.js";
@@ -253,9 +253,10 @@ let instanceClaimed = false;
  * to do once there are instance dirs to compare against.
  *
  * Sweep first, then claim, so this process never appears in its own sweep
- * output. The instance id is fresh per process, so there is no stale dir of
- * ours to protect — a previous process's dir is a sibling by definition, and
- * that is exactly the dir this sweep is for.
+ * output. Every OTHER instance id is a sibling by definition, and that is
+ * exactly what this sweep is for: the id is inherited through the environment
+ * across a delegation tree, so a worker reuses the root session's dir rather
+ * than minting a new one.
  */
 async function ensureInstanceClaimed(): Promise<void> {
 	if (instanceClaimed) return;
@@ -270,6 +271,17 @@ async function ensureInstanceClaimed(): Promise<void> {
 		// stop this process from launching its own UI.
 		console.error(
 			`[pi-blender] could not sweep stale Blender instance dirs: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	try {
+		// After the bridge sweep, because a bootstrap blend is judged abandoned
+		// by the liveness of the bridge dir its instance id names.
+		const blanks = await reapStaleBlankBlends();
+		const blankSummary = formatBlankReapResult(blanks);
+		if (blankSummary) console.error(blankSummary);
+	} catch (error) {
+		console.error(
+			`[pi-blender] could not sweep stale bootstrap blends: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 	try {

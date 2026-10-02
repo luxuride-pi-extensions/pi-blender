@@ -212,13 +212,31 @@ function readExchangeContract(): string {
  * class the request-claim in live-bridge.py exists to prevent.
  */
 export function getBlankBlendPath(): string {
-	const envPath = process.env.PI_BLENDER_BLANK_BLEND_PATH?.trim();
+	const envPath = process.env[ENV_BLANK_BLEND_PATH]?.trim();
 	if (envPath) {
 		if (envPath === "~") return homedir();
 		if (envPath.startsWith("~/")) return homedir() + envPath.slice(1);
 		return isAbsolute(envPath) ? envPath : resolve(process.cwd(), envPath);
 	}
 	return join(xdgCacheHome(), "pi-blender", "blank", `${getBlenderInstanceId()}.blend`);
+}
+
+export const ENV_BLANK_BLEND_PATH = "PI_BLENDER_BLANK_BLEND_PATH";
+
+/**
+ * Whether the user named the bootstrap blend themselves.
+ *
+ * Same reasoning as the bridge-dir override: the per-instance sweep deletes by
+ * filename pattern under a directory it assumes it owns, and an explicitly
+ * pinned path means this dir is the user's, not the scheme's.
+ */
+export function hasBlankBlendPathOverride(): boolean {
+	return Boolean(process.env[ENV_BLANK_BLEND_PATH]?.trim());
+}
+
+/** Directory holding the per-instance bootstrap blends. */
+export function getBlankBlendDir(): string {
+	return dirname(getBlankBlendPath());
 }
 
 export const ENV_BLENDER_BRIDGE_DIR = "PI_BLENDER_BRIDGE_DIR";

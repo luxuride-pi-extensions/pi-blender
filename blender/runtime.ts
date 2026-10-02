@@ -1,6 +1,6 @@
 export { blenderAddReference, getReferencesDir } from "./reference.js";
 export { blenderLogCritique } from "./critique.js";
-export { formatReapResult, reapOrphanedBridgeDirs } from "./reap.js";
+export { formatBlankReapResult, formatReapResult, reapOrphanedBridgeDirs, reapStaleBlankBlends } from "./reap.js";
 export {
 	assertWorkspaceOwnership,
 	buildWorkspaceOwner,
