@@ -165,6 +165,12 @@ const BLENDER_MANAGER_ROSTER = new Set([
 	"blender-composition-worker",
 	"blender-composition-critic",
 	"blender-composition-merger",
+	// Read-only, and it runs BEFORE the workers rather than after them. Every
+	// other composition agent reacts to geometry that already exists; the three
+	// faults this one exists to prevent — a room you cannot enter, furniture
+	// blocking the only path, a room that does not do its job — are cheapest to
+	// answer on paper and expensive to answer after four modules are built.
+	"blender-composition-planner",
 ]);
 
 /**
@@ -1359,13 +1365,14 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("axis"),
 							Type.Literal("pair"),
 							Type.Literal("joint"),
+							Type.Literal("clearance"),
 							Type.Literal("shape"),
 							Type.Literal("topology"),
 							Type.Literal("scale"),
 						]),
 						{
 							description:
-								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `pair` measures only the pairs you NAME; `joint` sweeps the whole scope for pairs nobody named — bounding boxes that overlap or come within 50mm while the surfaces are further apart than the tolerance — and is the check that finds a riser pipe modelled clear of the pipe it continues; it also reports `coincident-surface`, the two parts sharing a stretch of geometry that renders as z-fighting colour banding, which no verdict can see because a flush-laid panel is in contact and so is a clean one; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect, and its island count is what catches a mesh split into drifting pieces; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
+								"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `pair` measures only the pairs you NAME; `joint` sweeps the whole scope for pairs nobody named — bounding boxes that overlap or come within 50mm while the surfaces are further apart than the tolerance — and is the check that finds a riser pipe modelled clear of the pipe it continues; it also reports `coincident-surface`, the two parts sharing a stretch of geometry that renders as z-fighting colour banding, which no verdict can see because a flush-laid panel is in contact and so is a clean one, and `buried`, a part swallowed whole by another, which is a correct render of a wrong model; `clearance` answers whether the room is USABLE — it samples the floor with a person-sized body, dilates every obstruction by that reach, and reports `islandCount` (free floor cut into pieces nobody can walk between) and `unreachableArea` (floor that reaches no edge at all), which is what catches a sofa laid wall to wall; it takes its room from the same `objects` you scope it to, so measure one room rather than the house; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect, and its island count is what catches a mesh split into drifting pieces; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
 						},
 					),
 				),
@@ -1379,6 +1386,18 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					Type.Union([Type.Literal("X"), Type.Literal("Y"), Type.Literal("Z")], {
 						description:
 							"The axis a part's thin direction should align with — `Z` for a mug handle's ring axis, `Z` for a vertical stem. Omit to skip the alignment comparison.",
+					}),
+				),
+				body: Type.Optional(
+					Type.Number({
+						description:
+							"`clearance` only. Metres a person reaches — a sample is blocked when an obstruction comes within this. Default 0.25, which is what makes a 50 mm gap read as blocked and a 500 mm one as a doorway. Widen it to ask whether a wheelchair gets through, narrow it to ask whether anything does. Only needs passing alongside `checks: [\"clearance\"]`; any other check ignores it.",
+					}),
+				),
+				cell: Type.Optional(
+					Type.Number({
+						description:
+							"`clearance` only. Metres, the sampling granularity, default 0.05. The effective stride is this widened to cover `body`, because a sample is stamped with a dilated box spanning `2 * body` — so `cell` alone does not set the resolution. Lower it for a fine question, and expect a proportionally larger sample count.",
 					}),
 				),
 				timeoutMs: Type.Optional(
@@ -1398,6 +1417,8 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					specifications: params.specifications,
 					tolerance: params.tolerance,
 					expectedAxis: params.expectedAxis,
+					body: params.body,
+					cell: params.cell,
 					timeoutMs: params.timeoutMs,
 					signal: _signal,
 				});

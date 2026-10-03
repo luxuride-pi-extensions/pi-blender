@@ -800,6 +800,7 @@ GEOMETRY_PROBE_CHECKS = (
     "bounds",
     "axis",
     "joint",
+    "clearance",
     "pair",
     "shape",
     "topology",
@@ -1388,6 +1389,300 @@ def _probe_pair_geometry(first, second, tolerance):
 # reporting them is the false positive that would train an analyst to ignore
 # the list.
 JOINT_NEAR_MISS_MAX = 0.05
+
+# ---------------------------------------------------------------- clearance --
+#
+# The free-floor measure. Everything else this module reports is a fault in
+# the JOIN: two things that should meet and do not, or do too much. This one
+# is about the space BETWEEN things -- furniture standing in the only route
+# across a room -- and it is the fault class a render cannot show, because a
+# room with a sofa across the foot of a window photographs exactly like a room
+# without one.
+#
+# The measure is deliberately the SIMPLEST one that can be computed from the
+# scene alone: a 2D occupancy raster of the floor, one cell per CLEARANCE_CELL
+# metres, with each object stamped as a footprint. It cannot know what a person
+# intends to walk, so it does not claim to. What it can do is state the two
+# numbers a room is judged on -- how much floor is free, and how wide the
+# biggest connected free space is -- which are exactly the numbers that
+# collapse when furniture is placed first and circulation second.
+#
+# Connected-component labelling rather than a distance transform, because the
+# question is "can you get from here to there", and that is a question about
+# connectivity rather than about width. The WIDTH of the narrowest link in the
+# path is not reported, because computing it needs a distance transform over
+# every cell and the honest failure mode there is a number nobody trusts.
+CLEARANCE_CELL = 0.05
+# Below this, an object is not furniture and does not block anything: dust,
+# a ceiling fitting seen in plan, a wall's own skirting. Reported, so the caller
+# can see what was ignored rather than discovering it in the difference.
+CLEARANCE_IGNORE_MAX_EXTENT = 0.05
+# A footprint is its object's world bounding box. That is generous for a
+# diagonal object -- a round table reads as a square, so a person could walk
+# through its corner and the raster would call it blocked -- which biases
+# toward REPORTING a blockage, the safe direction for a number a human is
+# about to act on.
+#
+# Standing height, because a rug and a ceiling rose are on the floor in a
+# top-down projection and neither is an obstruction. A room's own walls,
+# ceiling and floor are excluded by name shape rather than by height, because
+# a shell wall is 2.4 m tall and belongs to the room's BOUNDS, not to its
+# contents; the room is measured by its own extent, so a shell object's
+# footprint would otherwise fill the entire floor with "furniture".
+CLEARANCE_OBSTRUCTION_HEIGHT = 1.9
+CLEARANCE_SHELL_HINTS = ("wall", "floor", "ceiling", "roof", "slab", "shell", "room")
+# The radius of a person, and the one number the whole measure turns on. A
+# gap narrower than this is inside the reach of a shoulder, so it is not a way
+# through; a gap wider than it is. 0.25 m is a person's half-width including a
+# held arm, which is the width that has to fit past a door and round a corner.
+CLEARANCE_BODY_RADIUS = 0.25
+# 4 million cells is 64 MB of bytearrays, which is fine, and is also 20 m square
+# at 1 cm -- finer than the raster's own quantisation is worth. Past this the
+# answer is "pass fewer objects", not a coarser guess presented as a number.
+CLEARANCE_MAX_SAMPLES = 4_000_000
+
+
+def _probe_clearance(objects, cell=None, body=None):
+    """Free floor area, and the widest single free region in it.
+
+    Everything here is derived, never asked for: the room's bounds are the
+    union of the objects probed, and the obstructions are the ones standing on
+    the floor. A caller that wants a different notion of "the room" passes the
+    objects that define it, which is why the measure takes the same `objects`
+    argument the rest of the probe does.
+
+    The core of the measure is a BODY RADIUS, not a grid. Every sample point
+    stands for a person, and each is blocked if any obstruction comes within
+    `body` of it, so a sample is free only where somebody could actually
+    stand.
+
+    That radius is the whole design, and it came from a fixture that caught the
+    obvious version failing. A plain occupancy raster -- cells blocked by
+    whatever covers them -- reports a room cut in two by a sofa with a 50 mm
+    gap at each end as ONE free region, because a flood fill walks through a
+    one-cell gap as readily as through a metre. Measured: a sofa spanning
+    5.9 m of a 6 m room, gaps of 50 mm, read `islandCount: 1` and
+    `unreachableArea: 0.0`, which is precisely the fault this measure exists
+    to report and precisely the answer it gave. The same sofa with 500 mm
+    either side also read 1, so the number could not tell a blocked room from a
+    clear one. Dilating the obstructions by the radius of a person fixes both,
+    because 50 mm is inside the reach of a shoulder and 500 mm is not.
+
+    Dilating a box means stamping it into the sample grid as a box GREATER
+    than the box, and that is why this returns an honest area rather than an
+    exact one: a sample represents the square of ground around it, so the
+    reported free area is a count of samples and over-counts the open edge of
+    the room by up to one stride. The isolation figures -- which regions exist,
+    which are unreachable, how big each is -- are the ones to act on, because
+    they answer a question about points rather than about square metres.
+
+    Returns None when there is no room to measure, and a refusal with a reason
+    when the sample would be too coarse to mean anything -- a 40 m hall is
+    7k samples, but a garden is four million -- rather than quietly reporting a
+    number nobody can act on.
+    """
+    cell = CLEARANCE_CELL if cell is None else cell
+    if cell <= 0.0:
+        raise ValueError(f"`cell` must be greater than zero, got {cell!r}")
+    radius = CLEARANCE_BODY_RADIUS if body is None else body
+    if radius < 0.0:
+        raise ValueError(f"`body` must be zero or greater, got {radius!r}")
+
+    meshes = [obj for obj in objects if obj.type == "MESH"]
+    if not meshes:
+        return None
+
+    minima = []
+    maxima = []
+    for obj in meshes:
+        minimum, maximum = _world_bounding_box(obj)
+        minima.append(minimum)
+        maxima.append(maximum)
+    room_min = Vector((min(v.x for v in minima), min(v.y for v in minima), 0.0))
+    room_max = Vector((max(v.x for v in maxima), max(v.y for v in maxima), 0.0))
+
+    span_x = room_max.x - room_min.x
+    span_y = room_max.y - room_min.y
+
+    # Samples go on a stride rather than at every grid cell, because each one
+    # is stamped with a dilated box spanning 2R and a dense grid would spend
+    # the whole budget re-blocking the same patch. The stride is the sample's
+    # own extent, so neighbouring samples do not overlap and coverage is
+    # uniform across the room.
+    reach = max(1, int(math.ceil(radius / cell)))
+    stride = reach * 2 + 1
+    step = stride * cell
+
+    # The first sample is one body-radius in from the room's edge: a person
+    # standing against the wall is still standing in the room, and sampling the
+    # wall line itself would report every room as blocked along its perimeter.
+    usable_x = span_x - 2.0 * radius
+    usable_y = span_y - 2.0 * radius
+    if usable_x < 0.0 or usable_y < 0.0:
+        return {
+            "sampled": False,
+            "reason": (
+                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which is narrower than the "
+                f"{_round(radius * 2.0)} m a body of radius {_round(radius)} m needs. Pass a smaller `body`."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+
+    origin = Vector((room_min.x + radius, room_min.y + radius, 0.0))
+    columns = int(math.floor(usable_x / step)) + 1
+    rows = int(math.floor(usable_y / step)) + 1
+    if columns < 1 or rows < 1:
+        return {
+            "sampled": False,
+            "reason": (
+                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which holds no sample point at "
+                f"a {step:.2f} m stride. Pass a smaller `body`."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+    if columns * rows > CLEARANCE_MAX_SAMPLES:
+        return {
+            "sampled": False,
+            "reason": (
+                f"the probed extent is {span_x:.1f} x {span_y:.1f} m, which is {columns * rows} "
+                f"samples, over the {CLEARANCE_MAX_SAMPLES} ceiling. Pass fewer objects -- one room "
+                "at a time is usually the right scope, since the measure cannot tell a room from "
+                "the house around it."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+
+    blocked = bytearray(columns * rows)
+    ignored = []
+    for obj, minimum, maximum in zip(meshes, minima, maxima, strict=True):
+        if maximum.z - minimum.z > CLEARANCE_OBSTRUCTION_HEIGHT:
+            # Above head height: a ceiling rose, a hanging lamp, a beam. Not an
+            # obstruction to somebody walking, and including it would shrink the
+            # free floor for a room that is entirely clear.
+            continue
+        extent = maximum - minimum
+        if max(extent.x, extent.y) <= CLEARANCE_IGNORE_MAX_EXTENT:
+            ignored.append(obj.name)
+            continue
+        lowered = obj.name.lower()
+        if any(hint in lowered for hint in CLEARANCE_SHELL_HINTS):
+            # A shell wall defines the room's boundary; stamping it as
+            # furniture would report every room as blocked along its perimeter
+            # and then again by the dilation. The room is measured by its own
+            # extent, so a shell object's footprint must not count.
+            continue
+        # Dilate: a sample is blocked when an obstruction is within a body's
+        # reach, so the stamped region grows by the radius in every direction.
+        x0 = int(math.ceil((minimum.x - radius - origin.x) / step))
+        x1 = int(math.floor((maximum.x + radius - origin.x) / step))
+        y0 = int(math.ceil((minimum.y - radius - origin.y) / step))
+        y1 = int(math.floor((maximum.y + radius - origin.y) / step))
+        for ix in range(max(0, x0), min(columns - 1, x1) + 1):
+            for iy in range(max(0, y0), min(rows - 1, y1) + 1):
+                blocked[ix * rows + iy] = 1
+
+    # Flood fill the free samples from the sampled grid's own edge, so
+    # "reachable" is measured from where a person can actually enter -- the
+    # boundary -- rather than from an arbitrary corner that a wall may enclose.
+    reachable = bytearray(columns * rows)
+    free_total = sum(1 for index in range(columns * rows) if not blocked[index])
+    component_sizes = []
+    queue = []
+    for ix in range(columns):
+        for iy in (0, rows - 1):
+            index = ix * rows + iy
+            if not blocked[index]:
+                queue.append(index)
+    for iy in range(rows):
+        for ix in (0, columns - 1):
+            index = ix * rows + iy
+            if not blocked[index]:
+                queue.append(index)
+
+    while queue:
+        start = queue.pop()
+        if reachable[start]:
+            continue
+        size = 0
+        stack = [start]
+        reachable[start] = 1
+        while stack:
+            index = stack.pop()
+            size += 1
+            ix, iy = index // rows, index % rows
+            for neighbour in ((ix + 1, iy), (ix - 1, iy), (ix, iy + 1), (ix, iy - 1)):
+                nx, ny = neighbour
+                if not (0 <= nx < columns and 0 <= ny < rows):
+                    continue
+                other = nx * rows + ny
+                if blocked[other] or reachable[other]:
+                    continue
+                reachable[other] = 1
+                stack.append(other)
+        component_sizes.append(size)
+
+    # Two different faults live in these two figures, and conflating them would
+    # make both useless. `islandCount` above 1 is reachable free floor in more
+    # than one piece: a sofa across a room splits it, and each half may still
+    # touch the boundary, so both are reachable and neither is connected to the
+    # other -- that is the commonest placement fault and it is measured by the
+    # count. `unreachableArea` is the narrower one: a pocket cut off from EVERY
+    # edge by a closed ring of furniture, so somebody standing at the door
+    # cannot walk to it at all. A cut room has an islandCount above 1 and an
+    # unreachableArea of zero; a ringed room has an islandCount of 1 and a
+    # positive unreachableArea. Both are worth saying, and neither subsumes
+    # the other.
+    unreachable = free_total - sum(component_sizes)
+    largest = max(component_sizes) if component_sizes else 0
+    sample_area = step * step
+    floor_area = span_x * span_y
+
+    return {
+        "sampled": True,
+        "cellSize": _round(cell),
+        "bodyRadius": _round(radius),
+        "stride": _round(step),
+        "extent": {"x": _round(span_x), "y": _round(span_y)},
+        "floorArea": _round(floor_area, 4),
+        "sampleArea": _round(sample_area, 6),
+        "sampleCount": columns * rows,
+        "freeArea": _round(free_total * sample_area, 4),
+        "freeShare": _round((free_total * sample_area) / floor_area, 4) if floor_area > 0 else 0.0,
+        "largestFreeArea": _round(largest * sample_area, 4),
+        "largestFreeShare": _round((largest * sample_area) / floor_area, 4) if floor_area > 0 else 0.0,
+        "islandCount": len(component_sizes),
+        "unreachableArea": _round(unreachable * sample_area, 4),
+        "ignoredObjects": sorted(ignored),
+        "note": (
+            "Each sample stands for a person of radius "
+            f"{_round(radius)} m and is blocked when an obstruction comes within that reach, which is "
+            "why a 50 mm gap reads as blocked and a 500 mm one does not: the difference between them "
+            "is the difference between a shoulder and a doorway. An area is therefore a count of "
+            f"samples x {_round(sample_area)} m2, so it quantises and over-counts the open edge of "
+            "the room by up to one stride; the isolation figures -- which regions exist, which are "
+            "unreachable, how large each is -- are the ones to act on. Footprints are bounding boxes, "
+            "so a round table reads as the square that bounds it and the free area is understated: "
+            "the error is toward calling a room more blocked than it is. Objects above "
+            f"{CLEARANCE_OBSTRUCTION_HEIGHT} m are excluded, as are those under "
+            f"{CLEARANCE_IGNORE_MAX_EXTENT} m across and any whose name contains "
+            f"{', '.join(CLEARANCE_SHELL_HINTS)} (a shell wall bounds the room, it does not furnish "
+            "it). 'islandCount' counts the connected pieces of REACHABLE free floor, so more "
+            "than one means furniture has cut the floor into pieces nobody can walk between, "
+            "whether or not each piece touches the boundary; "
+            "'unreachableArea' is free floor that reaches NO edge at all -- a pocket a person at the "
+            "door cannot walk to -- and it is measured as the difference, so a ringed room reports "
+            "islandCount 1 and a positive unreachableArea. The measure does NOT know where a door is, "
+            "so a room with no door at all reads as one reachable island -- that is judgement, not "
+            "geometry."
+        ),
+    }
+
 
 # How a broken continuation is told from a placement.
 # Two parts that continue
@@ -2482,6 +2777,17 @@ def handle_geometry_probe(request):
         # probe of one part still costs one sweep rather than the whole scene.
         joints = _probe_joints([obj for obj in targets if obj.type == "MESH"], tolerance)
 
+    clearance = None
+    if "clearance" in requested:
+        # Over the same targets, for the same reason as the sweep: `objects`
+        # scopes the room, so a caller measuring one room of a house pays for
+        # one room.
+        clearance = _probe_clearance(
+            [obj for obj in targets if obj.type == "MESH"],
+            _as_float(request.get("cell"), "cell", None),
+            _as_float(request.get("body"), "body", None),
+        )
+
     scale_contract = {}
     if "scale" in requested:
         if not specifications:
@@ -2501,6 +2807,7 @@ def handle_geometry_probe(request):
         "objects": measurements,
         "pairs": pairs,
         "joints": joints,
+        "clearance": clearance,
         "scaleContract": scale_contract,
     }
 

@@ -43,10 +43,11 @@ function detectBlender() {
  * without a test is a probe that runs in no one else's lifetime, and the
  * failure mode is invisible rather than loud.
  */
-const PROBES = ["joint-probe.py", "montage-probe.py", "readonly-probe.py", "shape-probe.py"];
+const PROBES = ["clearance-probe.py", "joint-probe.py", "montage-probe.py", "readonly-probe.py", "shape-probe.py"];
 
 /** The line each probe prints on success. A missing one is the failure signal. */
 const SUMMARIES = {
+	"clearance-probe.py": "PASS: clearance agrees with known floor plans",
 	"joint-probe.py": "PASS: joint sweep and island count agree with known geometry",
 	"montage-probe.py": "PASS: a montage frames the subject, restores the scene, and writes the sheet",
 	"readonly-probe.py": "PASS: the read-only guard refuses mutation and restores cleanly",

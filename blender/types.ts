@@ -1111,6 +1111,7 @@ export type GeometryProbeCheck =
 	| "axis"
 	| "pair"
 	| "joint"
+	| "clearance"
 	| "shape"
 	| "topology"
 	| "scale";
@@ -1496,8 +1497,73 @@ export interface GeometryProbeResult {
 	pairs: Record<string, GeometryProbePair>;
 	/** Present only when a `joint` check was requested; null otherwise. */
 	joints?: GeometryProbeJoints | null;
+	/** Present only when a `clearance` check was requested; null otherwise. */
+	clearance?: GeometryProbeClearance | null;
 	/** Present only when a `scale` check was requested; empty otherwise. */
 	scaleContract: Record<string, GeometryProbeScaleEntry>;
+}
+
+/**
+ * Whether the room you measured is a room somebody can USE.
+ *
+ * Two faults, and they are not the same fault:
+ *
+ * - `islandCount` above 1 — reachable free floor in more than one piece. A
+ *   sofa laid wall to wall splits a room in two; both halves are reachable, and
+ *   nothing connects them. This is the commonest placement error and it renders
+ *   perfectly, because a furnished room photographs as a furnished room.
+ * - `unreachableArea` above 0 — free floor reaching NO edge at all, cut off by
+ *   a closed ring of furniture. Narrower, and a different shape: a ringed room
+ *   reports `islandCount` 1 and a positive `unreachableArea`.
+ *
+ * The measure knows nothing about doors. A room with no door at all reads as
+ * one reachable island, so a zero here is not a room that works.
+ */
+export interface GeometryProbeClearance {
+	/** False when the room could not be sampled; `reason` says why and how to get an answer. */
+	sampled: boolean;
+	/** Present only on a refusal. */
+	reason?: string;
+	/** Metres. The sampling granularity requested, default 0.05. */
+	cellSize?: number;
+	/**
+	 * Metres. The reach of a person: a sample is blocked when an obstruction
+	 * comes within this. Default 0.25, which is why a 50 mm gap reads as
+	 * blocked and a 500 mm one does not.
+	 */
+	bodyRadius?: number;
+	/**
+	 * Metres. Distance between samples, which is `cellSize` widened to cover
+	 * the body — a sample is stamped with a dilated box spanning `2 *
+	 * bodyRadius`, so denser sampling would re-block the same patch.
+	 */
+	stride?: number;
+	/** Metres. The probed extent, which IS the room: the union of what you scoped. */
+	extent?: { x: number; y: number };
+	/** m2. The room's footprint. */
+	floorArea?: number;
+	/** m2 per sample, so an area can be converted back into a count. */
+	sampleArea?: number;
+	sampleCount?: number;
+	/** m2 of floor somebody could stand in. Quantised — see the note. */
+	freeArea?: number;
+	/** `freeArea` over `floorArea`. */
+	freeShare?: number;
+	/** m2 in the single widest connected piece of reachable floor. */
+	largestFreeArea?: number;
+	largestFreeShare?: number;
+	/** Connected pieces of REACHABLE free floor. Above 1 is the cut-room fault. */
+	islandCount?: number;
+	/** m2 of free floor reaching no edge at all. */
+	unreachableArea?: number;
+	/** Objects excluded as shell, too small, or above head height. */
+	ignoredObjects?: string[];
+	/**
+	 * Always present, and worth reading: which figures quantise, which way the
+	 * error runs, and what the measure does not know (doors, and anything only
+	 * a person can judge).
+	 */
+	note?: string;
 }
 
 /**
@@ -1524,6 +1590,19 @@ export interface GeometryProbeOptions {
 	/** Reference dimensions; asking for them implies the `scale` check. */
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
+	/**
+	 * Metres, `clearance` only. The sampling granularity, default 0.05. A
+	 * sample is stamped with a box spanning `2 * body`, so the effective stride
+	 * is this widened to cover the body — `cell` alone does not set resolution.
+	 */
+	cell?: number;
+	/**
+	 * Metres, `clearance` only. How far a person reaches: a sample is blocked
+	 * when an obstruction comes within this. Default 0.25, which is what makes
+	 * a 50 mm gap read as blocked and a 500 mm one as a doorway. Widen it to ask
+	 * "can a wheelchair get through", narrow it to ask "can anything".
+	 */
+	body?: number;
 	expectedAxis?: "X" | "Y" | "Z";
 	timeoutMs?: number;
 	signal?: AbortSignal;

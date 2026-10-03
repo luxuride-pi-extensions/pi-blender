@@ -51,7 +51,7 @@ tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervi
 # at all -- see `## Track the plan in todo` below.
 extensions: __PI_AGENT_EXTENSION_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
-allowedAgents: blender-worker, blender-script-runner, blender-merger, blender-critic, blender-diagnostician, blender-finalizer, blender-camera-aligner, blender-reference-describer, blender-composition-worker, blender-composition-critic, blender-composition-merger
+allowedAgents: blender-worker, blender-script-runner, blender-merger, blender-critic, blender-diagnostician, blender-finalizer, blender-camera-aligner, blender-reference-describer, blender-composition-planner, blender-composition-worker, blender-composition-critic, blender-composition-merger
 acceptanceRole: read-only
 thinking: high
 systemPromptMode: replace
@@ -89,9 +89,9 @@ place cameras. Those are three different agents' jobs. If you catch yourself
 wanting to compute an offset or estimate what a render looks like, that is the
 signal to spawn the right subagent instead.
 
-## The eleven agents
+## The twelve agents
 
-All eleven of these are yours to spawn, and no others.
+All twelve of these are yours to spawn, and no others.
 
 - `blender-worker` (writer): authors ONE `modules/<name>/script.py` and returns
   a written report, not a diff. **Spawn one per part, and spawn several at
@@ -135,6 +135,16 @@ of the three above when the brief is a space; see "Two pipelines" below.
   reports every dimension against the brief's scale contract. Spawn one per
   concern, and note that concerns are **ordered**: the shell exists before
   anything is placed against it.
+- `blender-composition-planner` (read-only): plans a room or a house on paper
+  BEFORE anything is built, and runs earlier than every other composition
+  agent — which is the point, because the three faults it exists to prevent are
+  cheapest to answer before four concerns are built and expensive afterwards.
+  It reasons per room (what is this room FOR, how do you enter it, what is
+  fixed, what is loose) and returns a layout with conflicts marked rather than
+  resolved. Spawn it the moment you know the brief and know the rooms, and
+  brief the workers from its output. It is not optional for a building: without
+  it the workers each place against their own shell, and the fault arrives at
+  the merger as a sofa across a corridor rather than as a decision.
 - `blender-composition-critic` (read-only, has vision): judges a room from
   interior-angle montage panels, scoring the scale contract as a separate finding
   from how the space reads. Spawn it against a room's montage, never against a

@@ -19,8 +19,8 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
   agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
                       + blender-finalizer + blender-script-runner
-                      + blender-merger + the three blender-composition-*
-                      subagent definitions (twelve distinct roles)
+                      + blender-merger + the four blender-composition-*
+                      subagent definitions (thirteen distinct roles)
                       TEMPLATES — run `npm run install:agents`, which copies
                       them to ~/.pi/agent/agents/ and substitutes their
                       `extensions:` frontmatter placeholders with absolute
@@ -235,7 +235,7 @@ Start pi in any project dir. The extension:
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
   `textures`, and `paintSettings` for paint/UV/rig planning
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
-  `bounds`, `axis`, `pair`, `joint`, and `topology`. `shape` measures the mesh rather
+  `bounds`, `axis`, `pair`, `joint`, `clearance`, and `topology`. `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
   (mean, spread, monotonic, taper), self-symmetry about the mesh's own
   bounding-box centre (not the world origin), convexity as the fraction of
@@ -243,6 +243,31 @@ Start pi in any project dir. The extension:
   loose-vertex counts. A render is a projection, so it cannot show a saddle
   facing away, distinguish an asymmetric form from a symmetric one, or see the
   inside of a hollow shell
+- `blender_geometry_probe`'s `clearance` check asks whether the room is a room
+  somebody can USE, which is a different question from whether its parts meet,
+  and the two faults it reports are not the same fault. `islandCount` above 1
+  is reachable free floor in more than one piece — a sofa laid wall to wall
+  splits a room in two, both halves are reachable, and nothing connects them,
+  and the render shows a furnished room, which is why it reaches the user
+  rather than the analyst. `unreachableArea` above 0 is free floor reaching NO
+  edge at all: a pocket a person at the door cannot walk to, cut off by a
+  closed ring of furniture, which reports `islandCount` 1 and so is invisible to
+  the first figure. **The core of the measure is a body radius, not a grid,
+  and that came from a fixture rather than from taste.** Each sample stands for
+  a person and is blocked when an obstruction comes within `body` of it, so
+  every obstruction is DILATED before it is stamped. The obvious version — an
+  occupancy raster with a flood fill — reported a sofa spanning 5.9 m of a 6 m
+  room, 50 mm clear at each end, as ONE free region, and the same sofa with
+  500 mm clear also read 1, so the number could not tell a blocked room from a
+  clear one: a flood fill walks through a one-cell gap as readily as through a
+  metre. `body` is the knob that fixes both, because 50 mm is inside the reach
+  of a shoulder and 500 mm is not. Widen it to ask whether a wheelchair gets
+  through; narrow it to ask whether anything does. It takes its room from the
+  same `objects` you scope it to, so measure one room rather than the house,
+  and note that it does NOT know where a door is: a room with no door at all
+  reads as one reachable island, so a zero here is not a room that works. An
+  area is a count of samples and quantises, so the isolation figures are the
+  ones to act on, and `note` always says which way the error runs
 - `blender_geometry_probe`'s `joint` check finds the parts that are detached
   WITHOUT being asked, which is the only way the defect reaches the user rather
   than the analyst: a shower riser modelled 11 mm clear of the pipe it
@@ -479,7 +504,11 @@ Start pi in any project dir. The extension:
   `blender-script-runner` (serializes module runs and audits them for
   cross-module contamination) and `blender-merger` (one-shot join of the
   finished parts). Three more run the other pipeline, for briefs that are a
-  SPACE rather than a model: `blender-composition-worker` (builds one concern
+  SPACE rather than a model: `blender-composition-planner` (plans the rooms on
+  paper BEFORE anything is built -- purpose, entry and path, fixed elements with
+  conflicts marked rather than resolved -- because a sofa across a corridor is a
+  decision made early and merely discovered late),
+  `blender-composition-worker` (builds one concern
   of a room -- shell, daylight, furniture, dressing -- against a shared
   coordinate frame, and reports every dimension against the brief's scale
   contract), `blender-composition-critic` (judges a room from interior-angle
@@ -496,11 +525,12 @@ Start pi in any project dir. The extension:
   The hierarchy is therefore FLAT at the top: the `/blender` session (depth 0,
   the manager) → its subagents (depth 1) → the aligner's own critics (depth 2).
   The manager session is gated so it delegates instead of authoring code, and
-  it is limited by name to the eleven agents it may nest: `blender-worker`,
+  it is limited by name to the twelve agents it may nest: `blender-worker`,
   `blender-script-runner`, `blender-merger`, `blender-critic`,
   `blender-diagnostician`, `blender-finalizer`, `blender-camera-aligner`,
-  `blender-reference-describer`, `blender-composition-worker`,
-  `blender-composition-critic` and `blender-composition-merger`. `blender-camera-aligner` is reachable only
+  `blender-reference-describer`, `blender-composition-planner`,
+  `blender-composition-worker`, `blender-composition-critic` and
+  `blender-composition-merger`. `blender-camera-aligner` is reachable only
   because of that flat top: no router sits between the command and the manager,
   so the aligner at depth 1 still has room for the depth-2 critics it nests
   itself. The manager needs `PI_SUBAGENT_MAX_DEPTH`-style headroom for its own

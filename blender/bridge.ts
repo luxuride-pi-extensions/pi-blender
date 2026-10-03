@@ -609,6 +609,10 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: string;
+	/** Metres; `clearance` sampling granularity. */
+	cell?: number;
+	/** Metres; `clearance` person reach. */
+	body?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<GeometryProbeResult> {
@@ -627,6 +631,8 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			specifications: options.specifications,
 			tolerance: options.tolerance,
 			expectedAxis: options.expectedAxis,
+			cell: options.cell,
+			body: options.body,
 		},
 		signal: options.signal,
 		timeoutMs: options.timeoutMs,
