@@ -111,6 +111,13 @@ A room is objects that must not intersect and must be flush. Three checks catch
 most of it, and all are cheaper than being re-briefed:
 
 - `checks: ["bounds"]` on every object, to confirm each one is where you think.
+- `checks: ["path"]` with `points` set to the door centres in your brief,
+  whenever the brief names any. A wall you built can satisfy every `joint`
+  reading and still leave a person stair-stepping from one door to the next,
+  because each of your pieces meets its neighbours and none of them meets a
+  shared axis. Judge the ratio against the brief's stated route: the default
+  threshold is 1.45, and a `zigzag: true` entry is the finding, not a style
+  preference.
 - `checks: ["joint"]` on the whole module. This is the one that finds what a
   render hides. A riser pipe modelled 11 mm clear of the pipe it continues looks
   correct from every camera a human would use, and nobody pairs two pipes of the

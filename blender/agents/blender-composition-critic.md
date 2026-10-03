@@ -75,6 +75,16 @@ an issue with a number in it, which is the most useful kind of issue there is;
 folding it into a geometry impression throws that away. If a specification reports
 `missing`, that is the finding — say which object was never built.
 
+**Run `checks: ["path"]` on the brief's door centres, because a zig-zag route
+is the one defect a render actively hides.** If every wall meets and every
+opening is the right width, the picture looks like a house and the walk still
+stair-steps across it. Score a `zigzag: true` route as a correctness failure,
+not as taste, and quote the detour ratio — 1.0 is a corridor, one bend is about
+1.1–1.3, and the default 1.45 threshold exists because rooms bend once and the
+defect is the several-turn stair-step. Compare against the brief's stated
+route; a house with a deliberate detour through a hall reads the same as one
+built by accident, which is why the number needs a brief to be judged against.
+
 **Run `checks: ["joint"]` and read the numbers, because a detached part does not
 photograph as one.** A riser pipe 11 mm clear of the pipe it continues reads
 correctly from every camera a human would use; the join is one pixel of shadow.

@@ -609,10 +609,14 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: string;
-	/** Metres; `clearance` sampling granularity. */
+	/** Metres; `clearance` and `path` sampling granularity. */
 	cell?: number;
-	/** Metres; `clearance` person reach. */
+	/** Metres; `clearance` and `path` person reach. */
 	body?: number;
+	/** World [x, y] positions; implies the `path` check. */
+	points?: [number, number][];
+	/** `path` zig-zag threshold, default 1.45. */
+	detour?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<GeometryProbeResult> {
@@ -633,6 +637,8 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			expectedAxis: options.expectedAxis,
 			cell: options.cell,
 			body: options.body,
+			points: options.points,
+			detour: options.detour,
 		},
 		signal: options.signal,
 		timeoutMs: options.timeoutMs,

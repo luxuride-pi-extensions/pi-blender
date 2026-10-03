@@ -801,6 +801,7 @@ GEOMETRY_PROBE_CHECKS = (
     "axis",
     "joint",
     "clearance",
+    "path",
     "pair",
     "shape",
     "topology",
@@ -1430,6 +1431,11 @@ CLEARANCE_IGNORE_MAX_EXTENT = 0.05
 # contents; the room is measured by its own extent, so a shell object's
 # footprint would otherwise fill the entire floor with "furniture".
 CLEARANCE_OBSTRUCTION_HEIGHT = 1.9
+# How much of the room's own footprint a horizontal surface must cover to be
+# that room's floor rather than a wall standing on it. Generous, because the
+# alternative -- stamping a floor as an obstruction -- reports every room as
+# entirely blocked, which reads as "cannot sample" rather than as a mistake.
+CLEARANCE_FLOOR_SHARE = 0.8
 CLEARANCE_SHELL_HINTS = ("wall", "floor", "ceiling", "roof", "slab", "shell", "room")
 # The radius of a person, and the one number the whole measure turns on. A
 # gap narrower than this is inside the reach of a shoulder, so it is not a way
@@ -1440,6 +1446,216 @@ CLEARANCE_BODY_RADIUS = 0.25
 # at 1 cm -- finer than the raster's own quantisation is worth. Past this the
 # answer is "pass fewer objects", not a coarser guess presented as a number.
 CLEARANCE_MAX_SAMPLES = 4_000_000
+
+
+def _clearance_raster(meshes, cell, radius, include_shell):
+    """One floor raster, shared by every check that reasons about walking.
+
+    Returns the grid plus everything a caller needs to interpret a number read
+    off it: the cell, the stride, the origin, the room's extent, and the
+    `blocked` mask. `include_shell` decides whether walls are stamped.
+
+    The two checks want OPPOSITE answers from the same room, which is why this
+    is one function with a flag rather than two rasterisers that could drift.
+    `clearance` measures free floor, and a wall is not furniture in the room --
+    stamping it would shrink the floor of every room by its own perimeter and
+    then again by the dilation. `path` measures the walk from one door to
+    another, and there a wall is the entire subject: a path that ignores walls
+    goes through them. The floor and the room's own extent are shared, so both
+    checks see the same world at the same resolution.
+
+    A refusal is returned rather than raised, and carries `refused: True` so the
+    caller can strip the marker and return the reason as its own answer: the
+    clearance check reports a refusal as a `sampled: False` payload, because a
+    room too big to sample is a fact about the room.
+    """
+    minima = []
+    maxima = []
+    for obj in meshes:
+        minimum, maximum = _world_bounding_box(obj)
+        minima.append(minimum)
+        maxima.append(maximum)
+    room_min = Vector((min(v.x for v in minima), min(v.y for v in minima), 0.0))
+    room_max = Vector((max(v.x for v in maxima), max(v.y for v in maxima), 0.0))
+    # The floor level, taken as the lowest surface in the room rather than
+    # assumed to be z=0: an imported house often sits at its own origin, and a
+    # test of "is this above head height" is only meaningful relative to the
+    # floor somebody actually stands on.
+    floor_z = min(v.z for v in minima)
+    span_x = room_max.x - room_min.x
+    span_y = room_max.y - room_min.y
+
+    # Samples go on a stride rather than at every grid cell, because each one
+    # is stamped with a dilated box spanning 2R and a dense grid would spend
+    # the whole budget re-blocking the same patch. The stride is the sample's
+    # own extent, so neighbouring samples do not overlap and coverage is
+    # uniform across the room.
+    reach = max(1, int(math.ceil(radius / cell)))
+    step = reach * 2 * cell + cell
+
+    # The first sample is one body-radius in from the room's edge: a person
+    # standing against the wall is still standing in the room, and sampling the
+    # wall line itself would report every room as blocked along its perimeter.
+    usable_x = span_x - 2.0 * radius
+    usable_y = span_y - 2.0 * radius
+    if usable_x < 0.0 or usable_y < 0.0:
+        return {
+            "refused": True,
+            "reason": (
+                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which is narrower than the "
+                f"{_round(radius * 2.0)} m a body of radius {_round(radius)} m needs. Pass a smaller `body`."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+
+    origin = Vector((room_min.x + radius, room_min.y + radius, 0.0))
+    columns = int(math.floor(usable_x / step)) + 1
+    rows = int(math.floor(usable_y / step)) + 1
+    if columns < 1 or rows < 1:
+        return {
+            "refused": True,
+            "reason": (
+                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which holds no sample point at "
+                f"a {step:.2f} m stride. Pass a smaller `body`."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+    if columns * rows > CLEARANCE_MAX_SAMPLES:
+        return {
+            "refused": True,
+            "reason": (
+                f"the probed extent is {span_x:.1f} x {span_y:.1f} m, which is {columns * rows} "
+                f"samples, over the {CLEARANCE_MAX_SAMPLES} ceiling. Pass fewer objects -- one room "
+                "at a time is usually the right scope, since the measure cannot tell a room from "
+                "the house around it."
+            ),
+            "extent": {"x": _round(span_x), "y": _round(span_y)},
+            "cellSize": _round(cell),
+            "bodyRadius": _round(radius),
+        }
+
+    blocked = bytearray(columns * rows)
+    shell = bytearray(columns * rows)
+    ignored = []
+    for obj, minimum, maximum in zip(meshes, minima, maxima, strict=True):
+        extent = maximum - minimum
+        if max(extent.x, extent.y) <= CLEARANCE_IGNORE_MAX_EXTENT:
+            ignored.append(obj.name)
+            continue
+        lowered = obj.name.lower()
+        is_shell = any(hint in lowered for hint in CLEARANCE_SHELL_HINTS)
+        if is_shell and not include_shell:
+            # A shell wall defines the room's boundary; stamping it as
+            # furniture would report every room as blocked along its perimeter
+            # and then again by the dilation. The room is measured by its own
+            # extent, so a shell object's footprint must not count.
+            continue
+        if minimum.z - floor_z > CLEARANCE_OBSTRUCTION_HEIGHT:
+            # Its UNDERSIDE is above head height: a ceiling rose, a hanging
+            # lamp, a beam, an upper shelf. Not an obstruction to somebody
+            # walking, and counting it would shrink the free floor of a room
+            # that is entirely clear.
+            #
+            # The test is the bottom, not the height. A wall is 2.5 m tall --
+            # the ordinary height of a wall -- and testing height would skip
+            # every wall in the house, leaving the walk free to pass straight
+            # through them, which is the whole reason `include_shell` exists.
+            # What distinguishes a wall from a lamp is that a wall reaches the
+            # floor and a lamp does not.
+            continue
+        # A floor and a wall are both named like a shell, and stamping a floor
+        # as a wall blocks the entire room -- including when the caller asked
+        # for walls to be stamped. The name is a weak signal and the geometry is
+        # an exact one: a horizontal surface whose footprint is the room IS the
+        # room's floor, whatever it is called. A wall bounds the room; the floor
+        # IS the room, so it is excluded from both masks and never a target.
+        if is_shell and extent.x * extent.y >= CLEARANCE_FLOOR_SHARE * span_x * span_y:
+            ignored.append(obj.name)
+            continue
+        # Dilate: a sample is blocked when an obstruction is within a body's
+        # reach, so the stamped region grows by the radius in every direction.
+        x0 = int(math.ceil((minimum.x - radius - origin.x) / step))
+        x1 = int(math.floor((maximum.x + radius - origin.x) / step))
+        y0 = int(math.ceil((minimum.y - radius - origin.y) / step))
+        y1 = int(math.floor((maximum.y + radius - origin.y) / step))
+        target = shell if is_shell else blocked
+        for ix in range(max(0, x0), min(columns - 1, x1) + 1):
+            for iy in range(max(0, y0), min(rows - 1, y1) + 1):
+                target[ix * rows + iy] = 1
+
+    return {
+        "columns": columns,
+        "rows": rows,
+        "step": step,
+        "origin": origin,
+        "roomMin": room_min,
+        "roomMax": room_max,
+        "floorArea": span_x * span_y,
+        "extent": {"x": _round(span_x), "y": _round(span_y)},
+        "cellSize": _round(cell),
+        "bodyRadius": _round(radius),
+        "blocked": blocked,
+        "shell": shell,
+        "ignored": ignored,
+    }
+
+
+def _clearance_components(grid, mask):
+    """Connected components of free samples, and the free samples themselves.
+
+    Shared by `clearance` and `path` because both need the same decomposition
+    and because a flood fill written twice is a flood fill that will disagree
+    about what "reachable" means. Returns `(component_sizes_by_index, free
+    total)` where the sizes are in samples, not square metres.
+    """
+    columns = grid["columns"]
+    rows = grid["rows"]
+    blocked = mask
+    free_total = 0
+    for index in range(columns * rows):
+        if not blocked[index]:
+            free_total += 1
+
+    visited = bytearray(columns * rows)
+    queue = []
+    for ix in range(columns):
+        for iy in (0, rows - 1):
+            index = ix * rows + iy
+            if not blocked[index]:
+                queue.append(index)
+    for iy in range(rows):
+        for ix in (0, columns - 1):
+            index = ix * rows + iy
+            if not blocked[index]:
+                queue.append(index)
+
+    component_sizes = []
+    while queue:
+        start = queue.pop()
+        if visited[start]:
+            continue
+        size = 0
+        stack = [start]
+        visited[start] = 1
+        while stack:
+            index = stack.pop()
+            size += 1
+            ix, iy = index // rows, index % rows
+            for neighbour in ((ix + 1, iy), (ix - 1, iy), (ix, iy + 1), (ix, iy - 1)):
+                nx, ny = neighbour
+                if not (0 <= nx < columns and 0 <= ny < rows):
+                    continue
+                other = nx * rows + ny
+                if blocked[other] or visited[other]:
+                    continue
+                visited[other] = 1
+                stack.append(other)
+        component_sizes.append(size)
+    return component_sizes, free_total
 
 
 def _probe_clearance(objects, cell=None, body=None):
@@ -1492,100 +1708,20 @@ def _probe_clearance(objects, cell=None, body=None):
     if not meshes:
         return None
 
-    minima = []
-    maxima = []
-    for obj in meshes:
-        minimum, maximum = _world_bounding_box(obj)
-        minima.append(minimum)
-        maxima.append(maximum)
-    room_min = Vector((min(v.x for v in minima), min(v.y for v in minima), 0.0))
-    room_max = Vector((max(v.x for v in maxima), max(v.y for v in maxima), 0.0))
+    grid = _clearance_raster(meshes, cell, radius, include_shell=False)
+    if grid.get("refused"):
+        refusal = {key: value for key, value in grid.items() if key != "refused"}
+        refusal["sampled"] = False
+        return refusal
 
-    span_x = room_max.x - room_min.x
-    span_y = room_max.y - room_min.y
-
-    # Samples go on a stride rather than at every grid cell, because each one
-    # is stamped with a dilated box spanning 2R and a dense grid would spend
-    # the whole budget re-blocking the same patch. The stride is the sample's
-    # own extent, so neighbouring samples do not overlap and coverage is
-    # uniform across the room.
-    reach = max(1, int(math.ceil(radius / cell)))
-    stride = reach * 2 + 1
-    step = stride * cell
-
-    # The first sample is one body-radius in from the room's edge: a person
-    # standing against the wall is still standing in the room, and sampling the
-    # wall line itself would report every room as blocked along its perimeter.
-    usable_x = span_x - 2.0 * radius
-    usable_y = span_y - 2.0 * radius
-    if usable_x < 0.0 or usable_y < 0.0:
-        return {
-            "sampled": False,
-            "reason": (
-                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which is narrower than the "
-                f"{_round(radius * 2.0)} m a body of radius {_round(radius)} m needs. Pass a smaller `body`."
-            ),
-            "extent": {"x": _round(span_x), "y": _round(span_y)},
-            "cellSize": _round(cell),
-            "bodyRadius": _round(radius),
-        }
-
-    origin = Vector((room_min.x + radius, room_min.y + radius, 0.0))
-    columns = int(math.floor(usable_x / step)) + 1
-    rows = int(math.floor(usable_y / step)) + 1
-    if columns < 1 or rows < 1:
-        return {
-            "sampled": False,
-            "reason": (
-                f"the probed extent is {span_x:.2f} x {span_y:.2f} m, which holds no sample point at "
-                f"a {step:.2f} m stride. Pass a smaller `body`."
-            ),
-            "extent": {"x": _round(span_x), "y": _round(span_y)},
-            "cellSize": _round(cell),
-            "bodyRadius": _round(radius),
-        }
-    if columns * rows > CLEARANCE_MAX_SAMPLES:
-        return {
-            "sampled": False,
-            "reason": (
-                f"the probed extent is {span_x:.1f} x {span_y:.1f} m, which is {columns * rows} "
-                f"samples, over the {CLEARANCE_MAX_SAMPLES} ceiling. Pass fewer objects -- one room "
-                "at a time is usually the right scope, since the measure cannot tell a room from "
-                "the house around it."
-            ),
-            "extent": {"x": _round(span_x), "y": _round(span_y)},
-            "cellSize": _round(cell),
-            "bodyRadius": _round(radius),
-        }
-
-    blocked = bytearray(columns * rows)
-    ignored = []
-    for obj, minimum, maximum in zip(meshes, minima, maxima, strict=True):
-        if maximum.z - minimum.z > CLEARANCE_OBSTRUCTION_HEIGHT:
-            # Above head height: a ceiling rose, a hanging lamp, a beam. Not an
-            # obstruction to somebody walking, and including it would shrink the
-            # free floor for a room that is entirely clear.
-            continue
-        extent = maximum - minimum
-        if max(extent.x, extent.y) <= CLEARANCE_IGNORE_MAX_EXTENT:
-            ignored.append(obj.name)
-            continue
-        lowered = obj.name.lower()
-        if any(hint in lowered for hint in CLEARANCE_SHELL_HINTS):
-            # A shell wall defines the room's boundary; stamping it as
-            # furniture would report every room as blocked along its perimeter
-            # and then again by the dilation. The room is measured by its own
-            # extent, so a shell object's footprint must not count.
-            continue
-        # Dilate: a sample is blocked when an obstruction is within a body's
-        # reach, so the stamped region grows by the radius in every direction.
-        x0 = int(math.ceil((minimum.x - radius - origin.x) / step))
-        x1 = int(math.floor((maximum.x + radius - origin.x) / step))
-        y0 = int(math.ceil((minimum.y - radius - origin.y) / step))
-        y1 = int(math.floor((maximum.y + radius - origin.y) / step))
-        for ix in range(max(0, x0), min(columns - 1, x1) + 1):
-            for iy in range(max(0, y0), min(rows - 1, y1) + 1):
-                blocked[ix * rows + iy] = 1
+    columns = grid["columns"]
+    rows = grid["rows"]
+    step = grid["step"]
+    origin = grid["origin"]
+    room_min = grid["roomMin"]
+    room_max = grid["roomMax"]
+    blocked = grid["blocked"]
+    ignored = grid["ignored"]
 
     # Flood fill the free samples from the sampled grid's own edge, so
     # "reachable" is measured from where a person can actually enter -- the
@@ -1641,14 +1777,14 @@ def _probe_clearance(objects, cell=None, body=None):
     unreachable = free_total - sum(component_sizes)
     largest = max(component_sizes) if component_sizes else 0
     sample_area = step * step
-    floor_area = span_x * span_y
+    floor_area = grid["floorArea"]
 
     return {
         "sampled": True,
         "cellSize": _round(cell),
         "bodyRadius": _round(radius),
         "stride": _round(step),
-        "extent": {"x": _round(span_x), "y": _round(span_y)},
+        "extent": grid["extent"],
         "floorArea": _round(floor_area, 4),
         "sampleArea": _round(sample_area, 6),
         "sampleCount": columns * rows,
@@ -1669,7 +1805,9 @@ def _probe_clearance(objects, cell=None, body=None):
             "unreachable, how large each is -- are the ones to act on. Footprints are bounding boxes, "
             "so a round table reads as the square that bounds it and the free area is understated: "
             "the error is toward calling a room more blocked than it is. Objects above "
-            f"{CLEARANCE_OBSTRUCTION_HEIGHT} m are excluded, as are those under "
+            f"whose underside is more than {CLEARANCE_OBSTRUCTION_HEIGHT} m above the floor (a "
+            "hanging lamp, a beam, an upper shelf -- a wall does not qualify, because a wall reaches "
+            "the floor), as are those under "
             f"{CLEARANCE_IGNORE_MAX_EXTENT} m across and any whose name contains "
             f"{', '.join(CLEARANCE_SHELL_HINTS)} (a shell wall bounds the room, it does not furnish "
             "it). 'islandCount' counts the connected pieces of REACHABLE free floor, so more "
@@ -1680,6 +1818,300 @@ def _probe_clearance(objects, cell=None, body=None):
             "islandCount 1 and a positive unreachableArea. The measure does NOT know where a door is, "
             "so a room with no door at all reads as one reachable island -- that is judgement, not "
             "geometry."
+        ),
+    }
+
+
+# How a door that does not line up is told from a hall that turns a corner.
+#
+# The defect is a path that zig-zags: you come through one door, turn, turn
+# again, and arrive at the next, because somebody placed each room's shell
+# against its own origin rather than against a shared axis. Nothing about it is
+# broken -- every wall meets, every door exists, every opening is the right
+# width -- and it is invisible in a render, because a viewer sees the room and
+# not the route through it. What makes it measurable is that a path is longer
+# than the straight line between its ends by an amount a person can feel and a
+# picture cannot show.
+#
+# So the measure is a RATIO: the walked distance over the straight-line distance
+# between the same two points. 1.0 is a straight corridor, and a right-angle L
+# is about 1.27 -- which is why the threshold is set well above 1 rather than
+# at 1.01: real architecture bends, and a door that is slightly off a wall is
+# what the caller asked to catch, not a hall that turns once.
+PATH_DETOUR_DEFAULT = 1.45
+# A straight-line distance this small carries no direction to be off from: two
+# doors 20 cm apart are a single opening, not a route, and their ratio is
+# whatever the quantisation happens to make it.
+PATH_MIN_SPAN = 0.5
+
+
+def _path_straight_line(grid, first, second):
+    """Euclidean distance between two samples, in metres, ignoring the raster."""
+    return math.hypot((second[0] - first[0]) * grid["step"], (second[1] - first[1]) * grid["step"])
+
+
+def _path_walk(grid, blocked, start, goal):
+    """Shortest walked distance between two samples, or None when unreachable.
+
+    A* on an eight-connected grid, which costs a diagonal `sqrt(2)` and so
+    cannot shave a corner the way a flood fill over four-connected cells
+    quietly can: on a four-connected grid a staircase's shortest path is
+    measurably longer than the staircase, which would inflate exactly the
+    number this measure exists to read. The heuristic is the straight-line
+    distance in cell units, scaled by sqrt(2) so it never overestimates and
+    the search stays admissible.
+    """
+    columns = grid["columns"]
+    rows = grid["rows"]
+    diagonals = math.sqrt(2.0)
+    # Callers think in (column, row) because a sample came from the snapper as
+    # a pair; the search thinks in flat indices because that is what `blocked`
+    # is indexed by. Convert once here rather than at every hop.
+    first_index = start[0] * rows + start[1]
+    goal_index = goal[0] * rows + goal[1]
+
+    def heuristic(index):
+        ix, iy = index // rows, index % rows
+        return diagonals * math.hypot(ix - goal[0], iy - goal[1])
+
+    # A plain binary heap is more code than this measure warrants, and the
+    # frontier here is bounded by the room, so a sorted list with a moving
+    # cursor is simpler and measurably fast enough: the pops are O(n) in the
+    # worst case but n is the frontier, not the room.
+    frontier = [(heuristic(first_index), 0.0, first_index)]
+    cost = {first_index: 0.0}
+    while frontier:
+        frontier.sort(key=lambda entry: entry[0])
+        _, walked, current = frontier.pop(0)
+        if current == goal_index:
+            return walked * grid["step"]
+        if walked > cost.get(current, walked):
+            continue
+        cx, cy = current // rows, current % rows
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = cx + dx, cy + dy
+                if not (0 <= nx < columns and 0 <= ny < rows):
+                    continue
+                # Never cut a corner through a diagonal gap: a cell that is
+                # blocked between two free ones is a wall corner, and letting
+                # the walk squeeze past it would report a path through a wall.
+                if dx and dy:
+                    if blocked[cx * rows + ny] or blocked[nx * rows + cy]:
+                        continue
+                other = nx * rows + ny
+                if blocked[other]:
+                    continue
+                step_cost = diagonals if dx and dy else 1.0
+                candidate = walked + step_cost
+                if candidate < cost.get(other, float("inf")):
+                    cost[other] = candidate
+                    frontier.append((candidate + heuristic(other), candidate, other))
+    return None
+
+
+def _path_samples_near(grid, mask, point, radius):
+    """Free samples whose centre lies within `radius` metres of a world point.
+
+    The mask is the point of the function. A door centre is given by whoever
+    drew the plan, so it lands near the opening as often as in it -- and the
+    nearest sample to that number is frequently the one INSIDE the door frame.
+    Snapping to the blocked cell would start the walk from inside a wall, and
+    the search then reports no route at all, which reads as "this pair is
+    fine" rather than as the failure it is.
+    """
+    columns = grid["columns"]
+    rows = grid["rows"]
+    origin = grid["origin"]
+    step = grid["step"]
+    reach = int(math.ceil(radius / step))
+    centre_x = (point[0] - origin.x) / step
+    centre_y = (point[1] - origin.y) / step
+    found = []
+    for ix in range(max(0, int(centre_x) - reach), min(columns - 1, int(centre_x) + reach) + 1):
+        for iy in range(max(0, int(centre_y) - reach), min(rows - 1, int(centre_y) + reach) + 1):
+            if mask[ix * rows + iy]:
+                continue
+            world_x = origin.x + ix * step
+            world_y = origin.y + iy * step
+            if math.hypot(world_x - point[0], world_y - point[1]) <= radius:
+                found.append((ix, iy))
+    return found
+
+
+def _probe_path(objects, request_points, cell=None, body=None, detour=None, threshold=None):
+    """How much longer the walk between two points is than the line between them.
+
+    This is the one architectural defect in this extension that a picture
+    genuinely cannot show. Every wall meets, every opening is the right width,
+    every room is correct in isolation -- and a person walks a zig-zag from one
+    door to the next because each shell was placed against its own origin. The
+    render looks like a house. Only the route betrays it.
+
+    The measure is a detour ratio: shortest walked distance over the straight
+    line between the same two points. The straight line is a lower bound on any
+    path, so the ratio is 1.0 for a corridor and rises with every turn. A
+    right-angle L is about 1.27, which is why the default threshold is 1.45:
+    real architecture bends once, and the defect asked about here is the
+    several-turn stair-step, not the elbow.
+
+    `points` is the caller's list of world positions to measure between -- door
+    centres, the ends of a corridor, anywhere a person is meant to travel. Each
+    is snapped to the nearest FREE sample within a body's reach, so a point
+    given slightly off the exact opening still resolves: a door centre lands as
+    often beside its frame as in it, and snapping to the blocked cell instead
+    would start the walk from inside a wall and report no route at all, which
+    reads as "this pair is fine" rather than as the failure it is. A point that
+    finds no free sample is reported as `unresolved` rather than guessed at,
+    because a door buried in a solid and a door nobody modelled look identical
+    here and only one of them is a layout error.
+
+    The snap has one consequence worth knowing before a number is compared with
+    a textbook: a door centre moves into the room, so both the straight line and
+    the walk shorten together and the ratio survives, but the absolute ratio of
+    an idealised right-angle L comes out nearer 1.08 than 1.27. The ratio is a
+    property of the building; its exact value is a property of the raster.
+
+    The grid is built with walls INCLUDED, unlike the clearance check on the
+    same scope: a path that ignores walls goes through them. The floor and the
+    room's extent are shared, so both checks see the same world at the same
+    resolution and neither can drift from the other.
+    """
+    meshes = [obj for obj in objects if obj.type == "MESH"]
+    if not meshes:
+        return None
+    cell = CLEARANCE_CELL if cell is None else cell
+    if cell <= 0.0:
+        raise ValueError(f"`cell` must be greater than zero, got {cell!r}")
+    radius = CLEARANCE_BODY_RADIUS if body is None else body
+    if radius < 0.0:
+        raise ValueError(f"`body` must be zero or greater, got {radius!r}")
+    limit = PATH_DETOUR_DEFAULT if detour is None else detour
+    if limit < 1.0:
+        raise ValueError(f"`detour` is a ratio of walked distance over straight-line distance, so it cannot be below 1.0, got {limit!r}")
+    if limit == PATH_DETOUR_DEFAULT and threshold is not None:
+        limit = threshold
+
+    grid = _clearance_raster(meshes, cell, radius, include_shell=True)
+    if grid.get("refused"):
+        refusal = {key: value for key, value in grid.items() if key != "refused"}
+        refusal["sampled"] = False
+        return refusal
+
+    columns = grid["columns"]
+    rows = grid["rows"]
+    blocked = bytearray(columns * rows)
+    for index in range(columns * rows):
+        # Shell and furniture block alike here. That is the whole difference
+        # from `clearance`, and it is why one raster serves both.
+        if grid["blocked"][index] or grid["shell"][index]:
+            blocked[index] = 1
+
+    points = request_points or []
+    if not points:
+        return {
+            "sampled": True,
+            "paths": [],
+            "worstDetour": None,
+            "detailThreshold": _round(limit),
+            "note": (
+                "No `points` were given, so no route could be measured. Pass the world positions "
+                "a person is meant to travel between -- door centres, the ends of a corridor, the "
+                "foot of a stair. The measure reports how much longer the walk is than the "
+                "straight line between the same two points; it does not know which way a person "
+                "should go, only that the shortest walk they can make is longer than the line."
+            ),
+        }
+
+    span = max(grid["extent"]["x"], grid["extent"]["y"])
+    # At least a full step, or a valid point falls BETWEEN samples and is
+    # reported as a door nobody modelled. The stride is body-driven, so it
+    # grows with `body` while this radius must grow with it or the two stops
+    # agreeing; the 1.5 covers a sample that is blocked, so a point beside a
+    # frame still reaches the free cell beyond it rather than the frame.
+    hop = max(radius, grid["step"] * 1.5, span * 0.05)
+    located = []
+    unresolved = []
+    for point in points:
+        near = _path_samples_near(grid, blocked, point, hop)
+        if not near:
+            unresolved.append([_round(point[0]), _round(point[1])])
+            continue
+        located.append((near[0], point))
+    if len(located) < 2:
+        return {
+            "sampled": True,
+            "paths": [],
+            "worstDetour": None,
+            "unresolved": unresolved,
+            "detailThreshold": _round(limit),
+            "note": (
+                f"Only {len(located)} of {len(points)} points landed on free floor within "
+                f"{_round(hop)} m of where they were given. A point nobody can stand at is either "
+                "a door buried in a wall or a door that was never modelled; the measure cannot tell "
+                "those apart, so it reports the position instead of guessing."
+            ),
+        }
+
+    reports = []
+    worst = None
+    # Only the ordered routes the caller named, plus every pair: a house is
+    # short of doors and long of rooms, so the pair a designer forgot is the
+    # one that zig-zags. With a handful of points that is a handful of pairs,
+    # and each is one A* over a room-sized grid.
+    pairs = [(located[i], located[j]) for i in range(len(located)) for j in range(i + 1, len(located))]
+    for first, second in pairs:
+        (fa, fp), (sa, sp) = first, second
+        straight = _path_straight_line(grid, fa, sa)
+        if straight < PATH_MIN_SPAN:
+            continue
+        walked = _path_walk(grid, blocked, fa, sa)
+        if walked is None:
+            continue
+        ratio = walked / straight if straight > 0.0 else float("inf")
+        entry = {
+            "from": [_round(fp[0]), _round(fp[1])],
+            "to": [_round(sp[0]), _round(sp[1])],
+            "straightLine": _round(straight, 3),
+            "walked": _round(walked, 3),
+            "detour": _round(ratio, 3),
+            "excess": _round(walked - straight, 3),
+            "overThreshold": ratio > limit,
+            "zigzag": ratio > limit,
+        }
+        reports.append(entry)
+        if worst is None or ratio > worst["detour"]:
+            worst = entry
+    reports.sort(key=lambda entry: entry["detour"], reverse=True)
+
+    return {
+        "sampled": True,
+        "cellSize": grid["cellSize"],
+        "bodyRadius": grid["bodyRadius"],
+        "stride": _round(grid["step"]),
+        "extent": grid["extent"],
+        "detailThreshold": _round(limit),
+        "paths": reports,
+        "worstDetour": worst,
+        "unresolved": unresolved,
+        "zigzagCount": sum(1 for entry in reports if entry["zigzag"]),
+        "ignoredObjects": sorted(grid["ignored"]),
+        "note": (
+            "Each pair reports the shortest walk a person can make against the straight line "
+            "between the same two points, so 1.0 is a corridor and every turn raises it: a single "
+            "right-angle elbow is about 1.27, which is why the threshold sits well above 1 rather "
+            "than at 1.01. Rooms bend; a stair-step of several short offsets does not, and that is "
+            "the shape this catches -- doors placed against separate origins rather than a shared "
+            "axis. Walls ARE stamped here, unlike the clearance check on the same scope, because a "
+            "path that ignores walls goes through them, and the walk is eight-connected so a "
+            "diagonal costs sqrt(2) and cannot shave a wall corner the way a four-connected fill "
+            "quietly can. `unresolved` lists points that landed on no free floor: either a door "
+            "buried in a wall or a door nobody modelled, and the measure cannot tell those apart. "
+            "It also does not know which route a person SHOULD take -- only that the shortest one "
+            "is longer than the line, so a house with a deliberate detour through a hall reads the "
+            "same as one built by accident. Judge `zigzag` against the brief."
         ),
     }
 
@@ -2662,6 +3094,12 @@ def handle_geometry_probe(request):
         # Naming the dimensions is the request; requiring the caller to also
         # remember the check name is a way of silently measuring nothing.
         requested = list(requested) + ["scale"]
+    if request.get("points") and "path" not in requested:
+        # Same reasoning, and it matters more here: a caller who passes door
+        # positions and forgets the check name gets a probe with no path in it
+        # and no complaint, which reads as a route that was never worth
+        # measuring.
+        requested = list(requested) + ["path"]
     expected_axis = request.get("expectedAxis") or "Z"
     axis_vector = Vector(
         {
@@ -2788,6 +3226,23 @@ def handle_geometry_probe(request):
             _as_float(request.get("body"), "body", None),
         )
 
+    path = None
+    if "path" in requested:
+        points = request.get("points") or []
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError(
+                    f"`points` must be a list of [x, y] world positions in metres, got {point!r}. "
+                    "Pass the door centres a person is meant to travel between."
+                )
+        path = _probe_path(
+            [obj for obj in targets if obj.type == "MESH"],
+            [(float(point[0]), float(point[1])) for point in points],
+            _as_float(request.get("cell"), "cell", None),
+            _as_float(request.get("body"), "body", None),
+            _as_float(request.get("detour"), "detour", None),
+        )
+
     scale_contract = {}
     if "scale" in requested:
         if not specifications:
@@ -2808,6 +3263,7 @@ def handle_geometry_probe(request):
         "pairs": pairs,
         "joints": joints,
         "clearance": clearance,
+        "path": path,
         "scaleContract": scale_contract,
     }
 

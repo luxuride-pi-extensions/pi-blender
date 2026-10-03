@@ -1112,6 +1112,7 @@ export type GeometryProbeCheck =
 	| "pair"
 	| "joint"
 	| "clearance"
+	| "path"
 	| "shape"
 	| "topology"
 	| "scale";
@@ -1499,6 +1500,8 @@ export interface GeometryProbeResult {
 	joints?: GeometryProbeJoints | null;
 	/** Present only when a `clearance` check was requested; null otherwise. */
 	clearance?: GeometryProbeClearance | null;
+	/** Present only when a `path` check was requested; null otherwise. */
+	path?: GeometryProbePaths | null;
 	/** Present only when a `scale` check was requested; empty otherwise. */
 	scaleContract: Record<string, GeometryProbeScaleEntry>;
 }
@@ -1567,6 +1570,74 @@ export interface GeometryProbeClearance {
 }
 
 /**
+ * One route between two of the points you named.
+ *
+ * `detour` is walked distance over straight-line distance between the same two
+ * points, so 1.0 is a corridor and every turn raises it. That ratio is the
+ * whole measure: a right-angle bend lands near 1.1–1.3 on this raster, which is
+ * why the default threshold sits well above 1 — real architecture bends once,
+ * and the defect is the several-turn stair-step.
+ */
+export interface GeometryProbePath {
+	/** The two points as you gave them. */
+	from: [number, number];
+	to: [number, number];
+	/** Metres, ignoring every obstruction. The lower bound on `walked`. */
+	straightLine: number;
+	/** Metres, the shortest walk actually available. */
+	walked: number;
+	/**
+	 * `walked` over `straightLine`. An exact 1.0 means the walk IS the line.
+	 *
+	 * A door centre snaps to the nearest free sample, which pulls both ends off
+	 * the wall plane into the room; line and walk shorten together so the ratio
+	 * survives, but the absolute value is a property of the raster rather than
+	 * of the building. Compare ratios against each other, not against a figure
+	 * from a textbook.
+	 */
+	detour: number;
+	/** Metres of walking wasted on turns. The figure to quote when reporting. */
+	excess: number;
+	overThreshold: boolean;
+	/** The same condition as `overThreshold`, named for the defect it is. */
+	zigzag: boolean;
+}
+
+export interface GeometryProbePaths {
+	/** False when the room could not be sampled; `reason` says why. */
+	sampled: boolean;
+	reason?: string;
+	cellSize?: number;
+	bodyRadius?: number;
+	/** Metres between samples; shared with `clearance` on the same scope. */
+	stride?: number;
+	/** Metres. The probed extent, which IS the building. */
+	extent?: { x: number; y: number };
+	/** The ratio above which a route counts as a zig-zag. Caller-settable. */
+	detailThreshold?: number;
+	/** Every pair of your points, worst first. */
+	paths?: GeometryProbePath[];
+	/** The worst route, or null when there is none to walk. */
+	worstDetour?: GeometryProbePath | null;
+	/**
+	 * Points that landed on no free floor. Either buried in a solid or never
+	 * modelled — the measure cannot tell those apart, so it names the position
+	 * instead of guessing.
+	 */
+	unresolved?: [number, number][];
+	/** How many routes are over the threshold. */
+	zigzagCount?: number;
+	ignoredObjects?: string[];
+	/**
+	 * Always present. Walls ARE stamped for this check and not for `clearance`,
+	 * a deliberate difference; a house with a deliberate detour through a hall
+	 * reads the same as one built by accident, so judge `zigzag` against the
+	 * brief.
+	 */
+	note?: string;
+}
+
+/**
  * Reference dimensions for objects, keyed by the exact object name. Values are
  * millimetres when written as bare numbers ("900") and parsed as metres when
  * they carry a unit ("0.9", "2.4m", "3'4\""), because a brief writes a counter
@@ -1603,6 +1674,22 @@ export interface GeometryProbeOptions {
 	 * "can a wheelchair get through", narrow it to ask "can anything".
 	 */
 	body?: number;
+	/**
+	 * `[x, y]` world positions a person is meant to travel between — door
+	 * centres, the ends of a corridor, the foot of a stair. Passing these
+	 * implies the `path` check, the way `specifications` implies `scale`.
+	 *
+	 * Every pair is measured, not just the ones you ordered: a house is short
+	 * of doors and long of rooms, so the pair a designer forgot is the one that
+	 * zig-zags.
+	 */
+	points?: [number, number][];
+	/**
+	 * `path` only. The detour ratio above which a route counts as a zig-zag,
+	 * default 1.45. Cannot be below 1.0 — the straight line is a lower bound on
+	 * any walk.
+	 */
+	detour?: number;
 	expectedAxis?: "X" | "Y" | "Z";
 	timeoutMs?: number;
 	signal?: AbortSignal;

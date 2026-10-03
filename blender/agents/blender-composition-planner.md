@@ -127,12 +127,28 @@ can measure the built state, and for an existing room that is worth a call:
 ```
 blender_geometry_probe { workspace, objects: [...], checks: ["bounds"] }
 blender_geometry_probe { workspace, checks: ["joint"] }
+blender_geometry_probe { workspace, checks: ["path"], points: [[x, y], ...] }
 ```
 
 Read `bounds.size` against the clearance you assumed, and read `joint`'s
 `overlapping-but-apart` and `buried` entries — a room plan that puts a fixed
 element inside another is the merge's fault later, not a reason to rebuild the
-plan. For a room not yet built, use the numbers in the brief and your own
+plan.
+
+`path` is the one that settles the PATH step above rather than describing it.
+Give it the door centres you intend, as `[x, y]` in metres, and it walks the
+shortest route between every pair of them through the built geometry and
+reports a ratio of walked distance to straight-line distance: 1.0 is a
+corridor, one bend is about 1.1–1.3, and a stair-step of several offset doors
+runs to 1.9 or more. That last number is the finding. It is worth running
+even on a plan that reads fine on paper, because a zig-zag between doors is the
+defect no render shows — from above the house is still a house. Pass `detour`
+when the brief cares about a tighter house than the 1.45 default, and compare
+the numbers against each other rather than against a textbook: a door centre
+snaps to the nearest free floor, which shifts the absolute ratio without
+distorting the comparison.
+
+For a room not yet built, use the numbers in the brief and your own
 dimensions; state which is which so the worker knows what to trust.
 
 ## What you return
@@ -145,7 +161,8 @@ For each room:
 
 - **Purpose** — one falsifiable sentence.
 - **Entry and path** — where the door is, where the path goes, and the
-  narrowest clearance on it with the number.
+  narrowest clearance on it with the number. When `path` could be run, give the
+  measured detour ratio here rather than a claim that the route is fine.
 - **Fixed elements** — one line each: what it is, which wall, the dimension
   that fixes it. Mark any two that claim the same wall as a CONFLICT, because
   that is a planning error and it is cheap to fix here and expensive later.

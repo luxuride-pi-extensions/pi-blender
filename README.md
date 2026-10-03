@@ -235,7 +235,7 @@ Start pi in any project dir. The extension:
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
   `textures`, and `paintSettings` for paint/UV/rig planning
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
-  `bounds`, `axis`, `pair`, `joint`, `clearance`, and `topology`. `shape` measures the mesh rather
+  `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, and `topology`. `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
   (mean, spread, monotonic, taper), self-symmetry about the mesh's own
   bounding-box centre (not the world origin), convexity as the fraction of
@@ -268,6 +268,29 @@ Start pi in any project dir. The extension:
   reads as one reachable island, so a zero here is not a room that works. An
   area is a count of samples and quantises, so the isolation figures are the
   ones to act on, and `note` always says which way the error runs
+- `blender_geometry_probe`'s `path` check asks whether the WALK between two
+  points is longer than the line between them, and it is the only defect in
+  this list that a good-looking render actively hides. Every wall meets, every
+  opening is the right width, every room is correct in isolation, and a person
+  still stair-steps from one door to the next because each shell was placed
+  against its own origin rather than a shared axis. From above it is a house.
+  Pass `points` — door centres, the ends of a corridor — and every PAIR of them
+  is walked over the same floor raster the `clearance` check uses, walls
+  included, because a path that ignores walls goes through them. The number is
+  a ratio: walked over straight, so 1.0 is a corridor, one bend is about
+  1.1–1.3, and four offset doors measured **1.917** in `test/path-probe.py`,
+  which is why the default threshold is 1.45 — real architecture bends once and
+  the defect is the several-turn stair-step. A right-angle L in a textbook reads
+  1.27 and here reads nearer 1.08, because a door centre snaps to the nearest
+  free sample and that pulls both ends off the wall plane: line and walk shorten
+  together so the ratio survives, but **compare ratios against each other, not
+  against a figure from a textbook.** Every pair is measured rather than the
+  ones you ordered, because a house is short of doors and long of rooms and the
+  pair a designer forgot is the one that zig-zags. A wardrobe across a corridor
+  reports **no route at all** rather than a detour of infinity, and a point
+  that lands on no free floor is listed in `unresolved` rather than guessed at —
+  a door buried in a solid and a door nobody modelled are indistinguishable to
+  this measure, and only one of them is a layout error.
 - `blender_geometry_probe`'s `joint` check finds the parts that are detached
   WITHOUT being asked, which is the only way the defect reaches the user rather
   than the analyst: a shower riser modelled 11 mm clear of the pipe it
