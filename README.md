@@ -249,7 +249,7 @@ Start pi in any project dir. The extension:
   continues looks correct in a render from any useful angle, and nobody pairs
   two pipes of the same object family by instinct. It sweeps every pair in
   scope, filters by bounding box so the sweep stays O(n²) in boxes rather than
-  in BVH builds, and reports four severities. `coincident-surface` is the
+  in BVH builds, and reports five severities. `coincident-surface` is the
   defect a pair check cannot see at all: two parts sharing a stretch of
   geometry render as z-fighting colour banding, and the verdict says
   `in-contact` — which is what a CLEAN flush abutment also says — so the joint
@@ -259,7 +259,23 @@ Start pi in any project dir. The extension:
   right scope and the right denominator. The first version divided by the whole
   mesh and the cleanest case of the defect failed to report: a panel laid on a
   wall covers a fraction of the wall, so its 12 touching vertices against the
-  wall's 81 came to 14.8% and slipped under a 15% floor. `broken-continuation`
+  wall's 81 came to 14.8% and slipped under a 15% floor. `buried` is the next
+  one, and it needed TWO numbers rather than one. `interpenetrating` is a single
+  word for both a railing post set 2 mm into a deck — which is how the joint is
+  built — and a wall built straight through a door, so the boolean cannot tell a
+  working construction from a swallowed part. Depth as a multiple of the buried
+  part's own thinnest extent tells them apart, and is scale-free where any
+  threshold in metres is a statement about one asset. That alone was not
+  enough: run against a real 243-object scene it reported 119 buried pairs,
+  almost all of them correct geometry — a pier founded in the ground measured
+  55x buried and a lantern standing inside a railing's extent 8.9x. Both are
+  inside something large. So a second figure is required too: the part must be
+  at least 1.5x smaller than the thing holding it, because something placed
+  INTO something else is smaller than its container, while two surfaces of
+  near-equal extent that overlap are layers. That filter took the same scene
+  from 119 findings to 35. Both figures are reported, and a critic is told to
+  judge the remainder, because the measure is a proportion and not a verdict.
+  `broken-continuation`
   and `overlapping-but-apart` are also defects — two parts that were meant to be
   one and are not touching. `near-miss` is a placement to JUDGE and is deliberately
   not a failure: a chair pulled up to a table is geometrically indistinguishable

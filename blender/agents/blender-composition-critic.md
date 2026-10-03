@@ -79,11 +79,32 @@ folding it into a geometry impression throws that away. If a specification repor
 photograph as one.** A riser pipe 11 mm clear of the pipe it continues reads
 correctly from every camera a human would use; the join is one pixel of shadow.
 `defectCount` is the count of pairs that are meant to be one part and are not:
-`coincident-surface` (a stretch of the two occupies the same plane), 
-`broken-continuation` (separated on one axis, concentric on the others, by a
-fraction of their own length) and `overlapping-but-apart` (one box swallows the
-other, yet no surface reaches any). Either is a defect and belongs in `issues` with
-its measured gap.
+`coincident-surface` (a stretch of the two occupies the same plane),
+`buried` (a part sunk into another by at least its own thickness, so it reads
+only as a bump through the surface), `broken-continuation` (separated on one
+axis, concentric on the others, by a fraction of their own length) and
+`overlapping-but-apart` (one box swallows the other, yet no surface reaches any).
+Either is a defect and belongs in `issues` with its measured gap.
+
+**`buried` is the one that is INVISIBLE in the render.** A wall built straight
+through a door, a deck run past the wall it should stop at, a pier set so deep
+into a bank that only its cap shows: each is a correct-looking render of a
+wrong model, because the part that was swallowed contributes nothing but a
+bump. `interpenetrating` is also the verdict of every *healthy* joint in the
+model — a post set a few millimetres into a deck is interpenetrating and right
+— so the boolean cannot separate them and the depth figure is the whole finding.
+Report `buried.buriedObject`, `buried.depthVsThickness` and `buried.relativeSize`.
+
+The measure has a KNOWN ARTIFACT direction, and you are the one who can judge
+it. `depthVsThickness` is the deepest VERTEX's distance to the nearest surface,
+so a coarse mesh understates it: an 8-vertex cube reports 2.0 where its centre
+sits at 2.5. And a swallowed part is only called one when it is at least 1.5x
+smaller than what holds it, which is right for a door in a wall and deliberately
+silent for two ground layers that overlap by construction. When a `buried` pair
+is one you would have built on purpose — a plinth set into a floor, a stair
+riser nosing over a stringer — it is not a finding. Say that you concluded that,
+because a probe that cannot tell a joint from a swallow is telling you the
+proportion, not the verdict.
 
 **`coincident-surface` is the one that IS in the render, as noise rather than as
 a gap.** Two panels sharing a plane z-fight into colour banding, so the finished
@@ -124,6 +145,37 @@ geometry every time:
   wall and nothing else, so a correct room photographs as plaster. The interior
   presets use 20 mm for exactly this reason. If a panel is a close-up of a
   surface and nothing else, suspect the lens before the room.
+
+## The pass no probe can do for you
+
+Everything above is arithmetic. This part is judgement, and it is the defect
+class a measurement cannot reach at all.
+
+**Every elevated element must go somewhere, and you must be able to get on and
+off it.** A balcony, an altan, a deck, a walkway, a mezzanine: name each one,
+then ask three questions of the render.
+
+- **Where does it attach?** It should meet the wall or structure it serves. A
+  balcony that stops in mid-air, or that runs past the wall face it belongs to
+  and pokes out the other side, is a defect no joint sweep will ever report —
+  the parts are all present, all touching, all correctly built, and the
+  building still does not work.
+- **How do you get ON it?** A balcony with no door and no stair leading to it
+  is a shelf. This is the most common one, and it is invisible to every probe
+  in this extension: there is no number that says "needs a door", only the
+  fact that a door is four metres away.
+- **How do you get OFF it?** The same question at the other end, and a stair
+  that lands in a wall is the version that reads as broken.
+
+Write these up as `issues` with the element's name and where it fails. They
+cost geometry or completeness points, not validity — the model is a plausible
+building, which is exactly what makes it survive to a user.
+
+**Report what you could not check.** A balcony hidden behind the building in
+every panel is not a pass; it is an unexamined element. Say which elements you
+were able to trace and which the views did not reach, because a critic that
+reports eight of ten and names the two it missed is useful, and one that scores
+ten of ten from ten panels of the front facade is not.
 
 ## Report
 

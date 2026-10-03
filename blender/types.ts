@@ -1307,14 +1307,24 @@ export interface GeometryProbeJoint {
 	 * verdict says `in-contact`, because that is what a clean flush abutment
 	 * reports too and nothing else tells them apart.
 	 *
-	 * `near-miss` is a placement to JUDGE: the boxes come within `nearMissMax`
-	 * without overlapping on any axis. A chair pulled up to a table is correct
-	 * and reads the same as a detached riser at this resolution. It is reported
-	 * because it is cheap and a render hides it, and marked because treating it
-	 * as a defect is how a measurement becomes noise an analyst learns to skip.
-	 */
+* `buried` is a DEFECT, and the one most likely to be INVISIBLE: a wall built
+ * straight through a door, a deck run past the wall face it should stop at, a
+ * pier set so deep into a bank that only its cap shows. Each is a correct
+ * render of a wrong model, because the swallowed part contributes nothing but
+ * a bump through the surface. It is reported even though the pair verdict says
+ * `interpenetrating`, which is ALSO the verdict of every healthy joint in the
+ * model — a post set 2 mm into a deck is interpenetrating and right — so the
+ * boolean alone cannot separate them.
+ *
+ * `near-miss` is a placement to JUDGE: the boxes come within `nearMissMax`
+ * without overlapping on any axis. A chair pulled up to a table is correct
+ * and reads the same as a detached riser at this resolution. It is reported
+ * because it is cheap and a render hides it, and marked because treating it
+ * as a defect is how a measurement becomes noise an analyst learns to skip.
+ */
 	severity:
 		| "coincident-surface"
+		| "buried"
 		| "broken-continuation"
 		| "overlapping-but-apart"
 		| "near-miss";
@@ -1324,6 +1334,13 @@ export interface GeometryProbeJoint {
 	gap: number | null;
 	/** Present on every entry; carries the counts the `coincident-surface` verdict rests on. */
 	coincidentSurface: GeometryProbeCoincidence;
+	/**
+	 * Present on every entry; `null` unless one object is inside the other.
+	 * The figures behind the `buried` verdict, and reported on their own because
+	 * they are a PROPORTION and not a verdict — see the caveat on
+	 * `depthVsThickness`.
+	 */
+	buried?: GeometryProbeBuried | null;
 	tolerance: number;
 	/** Signed per-axis bounding-box gap; positive is empty space on that axis. */
 	boundingBoxGap: { x: number; y: number; z: number };
@@ -1387,11 +1404,56 @@ export interface GeometryProbeCoincidence {
 	isCoincident: boolean;
 }
 
+/**
+ * How deep one object sits inside the other, expressed against its own size.
+ *
+ * TWO figures are needed and neither is sufficient alone. Depth without the
+ * size ratio calls a pier founded in the ground 55x buried — measured, on a
+ * real 243-object scene, along with a lantern inside a railing at 8.9x, both
+ * correct geometry — because both are inside something large. The size ratio
+ * without the depth calls a flush abutment a swallow. A part placed INTO
+ * something else is smaller than the thing holding it; two surfaces of
+ * near-equal extent that overlap are layers.
+ */
+export interface GeometryProbeBuried {
+	/** Which object is inside, i.e. the one that vanished. */
+	buriedObject: string;
+	/** Which object it is inside. */
+	buriedIn: string;
+	/** Metres from the deepest vertex to the nearest surface of the container. */
+	depth: number;
+	/**
+	 * The buried object's own smallest world extent, the denominator of
+	 * `depthVsThickness`. `null` for a degenerate object with no thickness.
+	 */
+	thickness: number | null;
+	/**
+	 * `depth` divided by `thickness`. A joint measures well under 1; a part as
+	 * deep as it is thick is 1 and entirely inside.
+	 *
+	 * KNOWN LIMIT, and it errs in the safe direction: depth is the DEEPEST
+	 * VERTEX's distance to the nearest surface, so a coarse mesh understates
+	 * it. An 8-vertex cube centred in a block reads 2.0 where its centre sits
+	 * at 2.5, because none of its eight corners are near its middle.
+	 */
+	depthVsThickness: number | null;
+	/** How much larger the container is, by largest extent. `null` if the part has none. */
+	relativeSize: number | null;
+}
+
 export interface GeometryProbePair {
 	verdict: "interpenetrating" | "in-contact" | "separated" | "unknown";
 	reason?: string;
 	tolerance: number;
 	coincidentSurface: GeometryProbeCoincidence;
+	/**
+	 * `null` unless the pair interpenetrates, and the figure that separates a
+	 * working joint from a swallowed part. `deepestPenetration` alone is the
+	 * SAME NUMBER for a post set 2 mm into a deck and a wall built through a
+	 * door, because both are interpenetrating and nothing but this ratio
+	 * carries the buried part's own size.
+	 */
+	buried?: GeometryProbeBuried | null;
 	closestSurfaceDistance: number | null;
 	deepestPenetration: number;
 	verticesInsideTarget: Record<string, number>;

@@ -70,6 +70,18 @@ done. What is left is the disagreements, and there are four kinds, in this order
    act on that pair's `deepestPenetration`: its inside/outside sign comes from
    ray parity and is arbitrary for two surfaces in one plane.
 
+1c. **Burial.** A part swallowed by another — a wall run straight through a door
+   an earlier concern built, a deck floor passing through the wall it serves, a
+   pier driven so deep into a bank that only its cap shows. The pair verdict is
+   `interpenetrating`, which is ALSO what a correct 2 mm joint gets, so the
+   boolean cannot see it; `buried` in the `joint` report can, because it
+   compares the swallow depth against the part's OWN thickness. This is the
+   seam fault of a merge in the purest form: one concern's shell was built
+   around a wall, and another concern put a door in it, and neither could see
+   the other's face. Read `buried.buriedObject` and `buried.depthVsThickness`
+   and report them with the numbers — the fix belongs to whichever concern owns
+   the container, and a door is not something a merge module should carve.
+
 2. **Scale.** Every concern was checked against the brief's specifications by its
    own worker, but nothing has checked them **together**. Re-run the contract
    across the assembled room and report every number:

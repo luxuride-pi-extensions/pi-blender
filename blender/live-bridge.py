@@ -1020,6 +1020,93 @@ def _world_bounding_box(obj):
     return minimum, maximum
 
 
+def _world_thinnest(obj, points=None):
+    """The object's own SMALLEST world extent, in metres.
+
+    Used as the denominator of the buried measure, and it is a world-axis
+    extent rather than a principal axis on purpose. A principal axis follows
+    the object when it is rotated -- a door lying flat would report its
+    diagonal as its thin dimension and read as shallowly buried -- whereas a
+    world extent is the same number a person measures with a tape, so "buried
+    900 mm into a 40 mm door" reads the same whichever way the door points.
+
+    `_world_vertices` rather than `bound_box` for the same reason: a rotated
+    object's local bounding box corners transform into a LARGER world box, and
+    a rotation would inflate the very dimension the measure divides by.
+    """
+    world_points = _world_vertices(obj) if points is None else points
+    if not world_points:
+        return None
+    spans = []
+    for axis in range(3):
+        values = [point[axis] for point in world_points]
+        spans.append(max(values) - min(values))
+    smallest = min(spans)
+    # A degenerate object -- a plane, a single polygon -- has no thickness to
+    # be buried relative to, so it is reported as absent rather than as zero,
+    # which would divide by nothing and produce an infinity.
+    return smallest if smallest > 1e-6 else None
+
+
+def _buried_depth(depth_inside, depth_outside, first, second, first_points, second_points):
+    """How deep one object sits inside the other, in units of its OWN thickness.
+
+    `interpenetrating` is one word for two unrelated situations: a railing post
+    set 2 mm into a deck, which is how the joint is built, and a door buried
+    900 mm inside a 40 mm wall, which is a wall built through a door. Both are
+    interpenetrating, so the boolean cannot tell a working construction from a
+    swallowed part, and any threshold in absolute metres fails the moment the
+    asset changes scale -- the same 5 cm is a healthy overlap on a railing post
+    and an invisible sliver on a bridge deck.
+
+    Dividing by the BURIED part's own thinnest extent makes the measure
+    scale-free, so one threshold serves a 4 cm door and a 4 m pier. The rule is
+    the arithmetic of intent: a part sinks into another a little so the joint
+    reads as solid, and sinks into it entirely when the modeller placed the two
+    without noticing. Whichever part is deeper inside is the one reported,
+    because that is the one that vanished.
+    """
+    entries = []
+    for depth, obj, points, other_name, other in (
+        (depth_inside, first, first_points, second.name, second),
+        (depth_outside, second, second_points, first.name, first),
+    ):
+        if depth <= 0.0:
+            continue
+        thickness = _world_thinnest(obj, points)
+        own_min, own_max = _world_bounding_box(obj)
+        own_extent = max(own_max[axis] - own_min[axis] for axis in range(3))
+        other_min, other_max = _world_bounding_box(other)
+        other_extent = max(other_max[axis] - other_min[axis] for axis in range(3))
+        # A part swallowed BY something is a part placed into it, and a thing
+        # you place into something else is smaller than the thing that holds
+        # it. Two surfaces of comparable size that overlap are LAYERS -- a
+        # ground plane and a pond floor, a deck and a lawn -- not a swallow,
+        # and without this the pond reports the grass above it as buried.
+        #
+        # Measured on a real 243-object scene, this is the line between the
+        # findings and the artifacts: a 0.1 m part inside a 0.5 m block is 5x
+        # and is a swallow, while two ground layers of near-equal extent
+        # overlap by construction and are not.
+        relative = other_extent / own_extent if own_extent > 0.0 else None
+        entries.append(
+            {
+                "buriedObject": obj.name,
+                "buriedIn": other_name,
+                "depth": _round(depth),
+                "thickness": _round(thickness) if thickness is not None else None,
+                "depthVsThickness": _round(depth / thickness) if thickness is not None else None,
+                "relativeSize": _round(relative) if relative is not None else None,
+            }
+        )
+    if not entries:
+        return None
+    entries.sort(
+        key=lambda entry: entry["depthVsThickness"] if entry["depthVsThickness"] is not None else -1.0
+    )
+    return entries[-1]
+
+
 def _covariance_eigen_extremes(points):
     """Return (largest, smallest) principal directions of a point cloud.
 
@@ -1244,6 +1331,7 @@ def _probe_pair_geometry(first, second, tolerance):
             "coincidentSurface": _coincident_surface(
                 first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max
             ),
+            "buried": None,
         }
 
     first_inside = sum(1 for d in first_to_second if d < 0.0)
@@ -1271,6 +1359,14 @@ def _probe_pair_geometry(first, second, tolerance):
         "tolerance": _round(tolerance),
         "coincidentSurface": _coincident_surface(
             first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max
+        ),
+        "buried": _buried_depth(
+            -min(first_to_second) if first_inside else 0.0,
+            -min(second_to_first) if second_inside else 0.0,
+            first,
+            second,
+            first_points,
+            second_points,
         ),
         "closestSurfaceDistance": _round(closest) if closest is not None else None,
         "deepestPenetration": _round(-deepest) if deepest < 0.0 else 0.0,
@@ -1307,6 +1403,36 @@ JOINT_CONTINUATION_RATIO = 0.1
 # other. A pipe meeting a slightly wider collar is still a joint; a leg beside
 # a step is not.
 JOINT_CONCENTRIC_SLACK = 0.25
+
+# How deep into another object a part may sit, as a multiple of its OWN
+# thinnest extent, before it reads as swallowed rather than joined.
+#
+# The figure comes from how a joint is actually built. A post, a bolt, a
+# railing foot or a pier all sink into what they meet by a sliver, so they
+# measure well under 1. A part that measures AT its own thickness is as deep
+# as it is thick -- entirely inside -- and one at several times that has
+# passed straight through and only shows where it pokes out the far side.
+#
+# The multiple, not a distance, is the whole point: any threshold in metres
+# is a statement about the size of this asset, and assets change size.
+BURIED_DEPTH_RATIO = 1.0
+
+# How much bigger the container must be, as a multiple of the buried part's own
+# largest extent, before the two are a swallow rather than two layers.
+#
+# Without this the depth rule fires on correct geometry: on a real 243-object
+# scene a pier founded in the ground measured 55x buried (a 24 m pier inside a
+# 28 m ground plane) and a lantern standing inside a railing's extent measured
+# 8.9x, because both are inside something large. Neither is a defect, and
+# together they buried the handful of findings that were real.
+#
+# A part swallowed BY something is a part placed into it, and a thing you place
+# into something else is smaller than the thing holding it -- a door in a wall,
+# a rail in a post, a pier in a bank. Two surfaces of near-equal extent that
+# overlap are layers: a ground plane and a lawn, a deck and a rug. 1.5 is where
+# the measured swallows sat (a 0.1 cube in a 0.5 block is 5x) and the measured
+# artifacts sat below (both cases above are under 1.2x).
+BURIED_RELATIVE_SIZE = 1.5
 
 
 def _box_gap(first_min, first_max, second_min, second_max):
@@ -1400,17 +1526,36 @@ def _probe_joints(objects, tolerance):
             # when it could not sample any surface distance.
             coincidence = measurement.get("coincidentSurface") or {}
             is_coincident = bool(coincidence.get("isCoincident"))
-            if measurement["verdict"] in ("interpenetrating", "in-contact") and not is_coincident:
+            buried = measurement.get("buried")
+            buried_info = buried or {}
+            ratio = buried_info.get("depthVsThickness")
+            relative = buried_info.get("relativeSize")
+            # Both figures are required, because each alone is wrong on a real
+            # scene: the depth ratio alone reports a pier founded in the ground
+            # as 55x buried, and the size ratio alone would let a swallowed
+            # part through whenever the container happens to be its match.
+            is_buried = (
+                ratio is not None
+                and relative is not None
+                and ratio >= BURIED_DEPTH_RATIO
+                and relative >= BURIED_RELATIVE_SIZE
+            )
+            if measurement["verdict"] in ("interpenetrating", "in-contact") and not is_coincident and not is_buried:
                 # They DO meet. Nothing to report: this is the healthy case the
                 # sweep exists to distinguish, and reporting it would bury the
                 # one that matters. Coincidence is the ONE exception, because
                 # two surfaces sharing a stretch is still a contact verdict
                 # while rendering as colour banding -- skipping on the verdict
-                # alone is exactly what hid it.
+                # alone is exactly what hid it. A buried part is the other,
+                # because `interpenetrating` is also the verdict of every
+                # working joint in the model: a post 2 mm into a deck is
+                # interpenetrating and correct, while a wall built through a
+                # door is interpenetrating and a defect, and the boolean alone
+                # cannot tell them apart.
                 continue
 
             surfaces = measurement["closestSurfaceDistance"]
-            if surfaces is None and not is_coincident:
+            if surfaces is None and not is_coincident and not is_buried:
                 continue
 
             if is_coincident:
@@ -1426,6 +1571,18 @@ def _probe_joints(objects, tolerance):
                     f"{hits} of one object's vertices lie within {epsilon} of the other's surface "
                     f"(the smaller side is {share} of that mesh), so a stretch of the two occupies "
                     "the same plane and will render as z-fighting colour banding"
+                )
+            elif is_buried:
+                # Ahead of the other defects and behind only coincidence: a
+                # buried part is INVISIBLE in the render, so nothing downstream
+                # will notice it, but the model is wrong -- the part is there
+                # only as a silhouette poking through.
+                severity = "buried"
+                reason = (
+                    f"{buried_info['buriedObject']} sits {buried_info['depth']} m inside {buried_info['buriedIn']}, "
+                    f"which is {ratio} times its own thickness of {buried_info['thickness']} m, and it "
+                    f"itself is only {relative} times the size of what holds it -- the part is swallowed "
+                    "rather than joined, so it reads only as a bump through the surface"
                 )
             elif overlapping:
                 severity = "overlapping-but-apart"
@@ -1475,6 +1632,7 @@ def _probe_joints(objects, tolerance):
                     "reason": reason,
                     "gap": surfaces,
                     "coincidentSurface": coincidence,
+                    "buried": buried,
                     "tolerance": measurement["tolerance"],
                     "boundingBoxGap": {"x": _round(gap[0]), "y": _round(gap[1]), "z": _round(gap[2])},
                     "boundingBoxOverlapAxes": ["XYZ"[i] for i in range(3) if gap[i] < 0.0],
@@ -1483,12 +1641,18 @@ def _probe_joints(objects, tolerance):
                 }
             )
 
-    rank = {"coincident-surface": 0, "broken-continuation": 1, "overlapping-but-apart": 2, "near-miss": 3}
+    rank = {
+        "coincident-surface": 0,
+        "buried": 1,
+        "broken-continuation": 2,
+        "overlapping-but-apart": 3,
+        "near-miss": 4,
+    }
     candidates.sort(key=lambda entry: (rank[entry["severity"]], entry["gap"] if entry["gap"] is not None else 0.0))
     defects = [
         entry
         for entry in candidates
-        if entry["severity"] in ("coincident-surface", "broken-continuation", "overlapping-but-apart")
+        if entry["severity"] in ("coincident-surface", "buried", "broken-continuation", "overlapping-but-apart")
     ]
     near_misses = [entry for entry in candidates if entry["severity"] == "near-miss"]
     return {
@@ -1501,7 +1665,9 @@ def _probe_joints(objects, tolerance):
             "A joint is a pair whose bounding boxes overlap or come within "
             f"{JOINT_NEAR_MISS_MAX} of each other while their surfaces are further apart than the "
             f"tolerance of {_round(tolerance)}. 'coincident-surface' (a stretch of the two lies on "
-            "the same surface, so it renders as z-fighting colour banding), 'broken-continuation' "
+            "the same surface, so it renders as z-fighting colour banding), 'buried' (a part sunk "
+            "into another by at least its own thickness, so it reads only as a bump through the "
+            "surface rather than as a join), 'broken-continuation' "
             "(separated along one axis, "
             "concentric on the others, by a fraction of their own length) and 'overlapping-but-apart' "
             "are defects: two parts that were meant to be one and are not touching. 'near-miss' is a "

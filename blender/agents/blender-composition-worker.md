@@ -132,9 +132,20 @@ most of it, and all are cheaper than being re-briefed:
   defect, not a flush fit. Do not read `deepestPenetration` on such a pair: the
   inside/outside sign behind it comes from ray parity and is meaningless when two
   surfaces share a plane.
+- `buried` is the finding that will not show up in ANY render, which is why it
+  is the one to check before you hand a module over. A part sunk into another by
+  at least its own thickness contributes nothing to the image but a bump through
+  the surface: a wall built straight through a door, a deck run past the wall
+  face it should stop at, a balcony floor passing through the wall it serves.
+  Read `buried.buriedObject` and `buried.depthVsThickness` — depth as a multiple
+  of the part's OWN thickness, so the same threshold works on a 4 cm door and a
+  4 m pier. Set a joint by a sliver, not by half its thickness: a post set 2 mm
+  into a deck measures 0.1 and is correct, and a post set half-way in measures
+  1.0 and has vanished. Do not chase `relativeSize`, which is only there to
+  stop the rule firing on two ground layers that overlap by construction.
 - `pairs` between anything that meets — counter to wall, window frame to wall,
-  door to floor. `separated` is wrong and `interpenetrating` is wrong; a join you
-  meant is fine.
+  door to floor. `separated` is wrong, and `interpenetrating` is wrong beyond a
+  sliver: a join you meant is a few millimetres of overlap, not half the part.
 
 Self-intersections inside one object need `checks: ["topology"]`, which is the
 expensive one. Use it on the shell, where a bad wall costs everything. Its
@@ -162,6 +173,16 @@ A part you intend to be CONTINUOUS with another — a pipe running into a pipe, 
 post into its foot, a collar onto a shaft — is better modelled as one mesh than
 as two objects that merely touch. The sweep is the safety net for when you did
 not, not the plan.
+
+**And the check that is not a check at all: does the building WORK.** No probe
+in this extension can tell you a balcony has no door, or that a stair lands in a
+wall, or that the only way onto an altan is through the railing. Every part is
+present, every part is touching, every measurement above passes, and the
+building still does not function. Before handing over, walk the structure the way
+a person does: for every balcony, deck, walkway or mezzanine, where does it
+attach, how do you get on it, and how do you get off it. If the brief promised a
+way in and there is none, that is a completeness failure and no amount of clean
+geometry covers it.
 
 ## Rendering: you are not framed by the harness
 

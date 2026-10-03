@@ -80,6 +80,20 @@ def joint_for(joints, first, second):
     return None
 
 
+def pair_for(probe, first, second):
+    """The `pairs` figure for two named objects.
+
+    Keyed both ways round because the caller passes a/b in whatever order it
+    happened to build them, and the dict is keyed by the caller's own "A|B"
+    string, not sorted.
+    """
+    pairs = probe.get("pairs") or {}
+    for key in (f"{first}|{second}", f"{second}|{first}"):
+        if key in pairs:
+            return pairs[key]
+    return None
+
+
 def main():
     live_bridge, scratch_blend = load_live_bridge()
 
@@ -188,11 +202,11 @@ def main():
     # Two fixtures that look similar and must NOT be confused, both measured
     # here because the difference is the whole point of the severity:
     #   * this: the part is in a VOID, so no surface reaches it -> a defect.
-    #   * `Embedded` below: the part is inside SOLID material, so the pair
-    #     check reports interpenetrating and the sweep stays out of it.
-    # A five-walled box is not a third case: the walls meet at their corners,
-    # so it is a closed solid and its "interior" is material, exactly like
-    # Embedded. The shape has to be hollow, not merely open.
+    #   * `Embedded` below: the part is inside SOLID material, so the two DO
+    #     touch -- but `Embedded` is also swallowed, which is now its own
+    #     severity. A five-walled box is not a third case: the walls meet at
+    # their corners, so it is a closed solid and its "interior" is material,
+    # exactly like Embedded. The shape has to be hollow, not merely open.
     bpy.ops.mesh.primitive_torus_add(
         major_radius=0.3, minor_radius=0.05, major_segments=32, minor_segments=12
     )
@@ -225,18 +239,102 @@ def main():
             f"the void part should sit ~129mm off the ring, got {buried_entry['gap']}",
         )
         check(buried["defectCount"] >= 1, "a floating part in a void is not counted as a defect")
-    # A part embedded INSIDE solid material is a different finding, and the
-    # sweep must stay out of it: the pair check calls it interpenetrating and
-    # the sweep has nothing to add.
+    # A part buried inside SOLID material is the user's `pier leading into
+    # wall`: the two do touch, so every contact-based rule is satisfied, and
+    # `interpenetrating` is also the verdict of every healthy joint in the
+    # model. The pair check carries the figure; the sweep reads it.
+    #
+    #     The cube is 0.1 and its centre sits at the block's centre, so it is
+    # entirely inside -- but the depth reads 2.0 of its own thickness, not
+    # 1.0, and the reason is worth stating because it is a real limit of the
+    # measure: depth is the DEEPEST VERTEX's distance to the nearest surface,
+    # and a cube has only eight corners, none of them near its middle. The
+    # block spans z -0.25..0.25 and the cube z 0.05..0.15, so its deepest
+    # corner sits 0.2 from the top face and 0.2 from the near side, while its
+    # CENTRE is 0.25 down. A coarse mesh therefore UNDERSTATES depth; it never
+    # overstates it, which is the safe direction for a defect that hides.
     make_cube("SolidBlock", size=0.5, location=(10.0, 0.0, 0.0))
     make_cube("Embedded", size=0.1, location=(10.0, 0.0, 0.1))
     embedded = live_bridge.handle_geometry_probe(
         {"blendPath": scratch_blend, "objects": ["SolidBlock", "Embedded"], "checks": ["joint", "pair"]}
     )
+    embedded_joint = joint_for(embedded["joints"], "SolidBlock", "Embedded")
     check(
-        joint_for(embedded["joints"], "SolidBlock", "Embedded") is None,
-        "a part embedded in solid material was reported as a suspect joint",
+        embedded_joint is not None,
+        "a part entirely inside solid material was not reported at all",
     )
+    if embedded_joint is not None:
+        check(
+            embedded_joint["severity"] == "buried",
+            f"a fully swallowed part should read as buried, got {embedded_joint['severity']}",
+        )
+        check(
+            embedded_joint["buried"] is not None
+            and embedded_joint["buried"]["buriedObject"] == "Embedded",
+            "the buried side must be named: the block is not the part that vanished",
+        )
+        check(
+            embedded_joint["buried"] is not None
+            and 1.95 <= embedded_joint["buried"]["depthVsThickness"] <= 2.05,
+            f"the deepest corner of a 0.1 cube centred in a 0.5 block sits 0.2 from a face = 2.0 of its "
+            f"own thickness, got {embedded_joint['buried']}",
+        )
+    embedded_pair = pair_for(embedded, "SolidBlock", "Embedded")
+    check(embedded_pair is not None, "the pair check did not measure the buried pair")
+    if embedded_pair is not None:
+        check(
+            embedded_pair["buried"] is not None,
+            "the pair check reported interpenetration without the depth that distinguishes a joint from a swallow",
+        )
+        check(
+            embedded_pair["deepestPenetration"] > 0.0,
+            "the pair is interpenetrating, so a depth must exist",
+        )
+
+    # The counter-case for the threshold: a post set a sliver into the thing it
+    # stands on. The post spans z 1.99..2.01 and the deck's top face is z 2.0,
+    # so half of it is inside -- `interpenetrating`, touching, and CORRECT. This
+    # is how the joint is built, and it must stay out of the sweep entirely.
+    make_cube("Deck", size=4.0, location=(-14.0, 0.0, 0.0))
+    make_cube("PostSet", size=0.02, location=(-14.0, 0.0, 2.0))
+    post = live_bridge.handle_geometry_probe(
+        {"blendPath": scratch_blend, "objects": ["Deck", "PostSet"], "checks": ["joint", "pair"]}
+    )
+    check(
+        joint_for(post["joints"], "Deck", "PostSet") is None,
+        "a post set 10mm into a deck is how the joint is built, and must not be reported",
+    )
+    post_pair = pair_for(post, "Deck", "PostSet")
+    if post_pair is not None and post_pair.get("buried") is not None:
+        check(
+            post_pair["buried"]["depthVsThickness"] < 1.0,
+            f"a 10mm overlap on a 20mm post is 0.5 of its own thickness, got {post_pair['buried']}",
+        )
+        check(
+            post_pair["buried"]["relativeSize"] > 1.5,
+            f"the deck dwarfs the post, which is what makes it a joint, got {post_pair['buried']}",
+        )
+
+    # The artifact the size rule exists to kill, measured rather than assumed:
+    # two ground layers of near-equal extent interpenetrate by construction, and
+    # the depth ratio alone calls one of them buried -- a real 243-object scene
+    # reported a pier founded in the ground at 55x buried, and a lantern inside
+    # a railing's extent at 8.9x, both of them correct geometry.
+    make_cube("GroundLayer", size=30.0, location=(-20.0, 0.0, 0.0))
+    make_cube("LawnLayer", size=28.0, location=(-20.0, 0.0, 0.1))
+    layers = live_bridge.handle_geometry_probe(
+        {"blendPath": scratch_blend, "objects": ["GroundLayer", "LawnLayer"], "checks": ["joint", "pair"]}
+    )
+    check(
+        joint_for(layers["joints"], "GroundLayer", "LawnLayer") is None,
+        "two ground layers of near-equal size overlap by construction and are not a swallow",
+    )
+    layer_pair = pair_for(layers, "GroundLayer", "LawnLayer")
+    if layer_pair is not None and layer_pair.get("buried") is not None:
+        check(
+            layer_pair["buried"]["relativeSize"] < 1.5,
+            f"near-equal layers must measure under the size ratio, got {layer_pair['buried']}",
+        )
 
     # A pair also given in `pairs` must get the SAME number from the sweep:
     # the box test only selects candidates, the BVH measurement settles them.
