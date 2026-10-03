@@ -140,9 +140,16 @@ Self-intersections inside one object need `checks: ["topology"]`, which is the
 expensive one. Use it on the shell, where a bad wall costs everything. Its
 `connectedComponents` is the other number a render cannot show: a mesh that has
 drifted into two or more pieces reads as `nonManifoldEdges: 0` and
-`boundaryEdges: 0`, because each piece is a clean closed solid. One object split
-in two is a defect; several components can also be legitimate, so read it with
-`largestComponentShare` to tell a small extra piece from a mesh in pieces.
+`boundaryEdges: 0`, because each piece is a clean closed solid. But read
+`islandRead`, not `isSplit`: joining repeated parts into one mesh is what you are
+asked to do, so `isSplit` fires on every railing (66 balusters), every bamboo
+cluster (83 culms) and every set of drone blades, all of which are CORRECT.
+`islandRead` is `assembly` when no island dominates — repeated parts, leave it
+alone — and `break-candidate` when one body does, which is the drift that costs.
+`minIslandGap` settles the rest: islands a few millimetres apart are a break
+whatever the count. It measures vertex to vertex, so an island lying flat on a
+larger surface can be enclosed by it and still read a large gap; for a real
+clearance probe two objects with `checks: ["pair"]`.
 
 A part you intend to be CONTINUOUS with another — a pipe running into a pipe, a
 post into its foot, a collar onto a shaft — is better modelled as one mesh than

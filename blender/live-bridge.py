@@ -826,6 +826,11 @@ SHAPE_SYMMETRY_EPSILON = 1e-4
 # Relative slack for the in-contact threshold, so float noise cannot flip the
 # verdict for parts that are exactly at the requested tolerance.
 PAIR_TOLERANCE_EPSILON = 1e-9
+# Vertices sampled per island when measuring the gap between islands. The gap is
+# the pair measurement, and a 66-island railing would otherwise be the expensive
+# check in a scene census; 256 per side is far finer than any modelling slip
+# that would hide between the samples.
+ISLAND_GAP_SAMPLE_VERTS = 256
 
 
 def _as_int(value, field, default=None):
@@ -1549,11 +1554,16 @@ def _probe_topology(obj):
     # Connected components over the mesh's own edges, by BFS from each
     # unvisited vertex. Vertices are reached through link_edges rather than the
     # index table so a mesh whose indices are not contiguous still resolves.
+    # Coordinates are snapshotted per island because the gap below needs them
+    # after the BFS consumed `unvisited`, and reading a BMVert after `bm.free()`
+    # raises rather than returning stale data.
     unvisited = set(bm.verts)
     component_sizes = []
+    island_points = []
     while unvisited:
         seed = unvisited.pop()
         component = 1
+        members = [seed]
         frontier = [seed]
         while frontier:
             current = frontier.pop()
@@ -1562,9 +1572,12 @@ def _probe_topology(obj):
                 if other in unvisited:
                     unvisited.discard(other)
                     component += 1
+                    members.append(other)
                     frontier.append(other)
         component_sizes.append(component)
+        island_points.append([vert.co.copy() for vert in members])
     component_sizes.sort(reverse=True)
+    island_points.sort(key=len, reverse=True)
     total_verts = len(bm.verts)
     largest_share = (component_sizes[0] / total_verts) if component_sizes and total_verts else 0.0
     # Island detail, capped: a mesh fragmented into hundreds of pieces needs the
@@ -1575,6 +1588,48 @@ def _probe_topology(obj):
         for size in component_sizes[1:6]
     ]
 
+    # `isSplit` alone cannot tell a broken mesh from a correctly composed one,
+    # because a railing of 66 balusters, a bamboo cluster of 83 culms and a
+    # drone's four propeller blades are all one mesh with many components -- and
+    # all of them are CORRECT. A worker that merges repeated parts into one mesh
+    # is doing what this toolchain asks of it, so the raw count cannot be read as
+    # a defect or every procedural assembly in every workspace reads as broken.
+    #
+    # What separates them is whether any one island dominates. An assembly has no
+    # single body: 66 balusters of 8 verts each means the largest island is 1.5%
+    # of the mesh, and "largest share 1.5%" is the signature of repeated parts. A
+    # mesh that broke has a main body plus an offcut -- 50%, 62%, 96% -- because
+    # the break took a piece off something that was otherwise whole.
+    #
+    # KNOWN LIMIT, stated rather than hidden: this is a heuristic on ONE number,
+    # and a canopy assembled from many similar-sized clusters reads as an
+    # assembly when it is one object a person considers whole. The measurement
+    # below is the evidence; this label is the reading of it. `minIslandGap` is
+    # given for the case the label gets wrong -- islands a few millimetres apart
+    # are a break whatever their count.
+    ISLAND_ASSEMBLY_SHARE = 0.10
+    if len(component_sizes) <= 1:
+        island_read = "continuous"
+    elif largest_share < ISLAND_ASSEMBLY_SHARE:
+        island_read = "assembly"
+    else:
+        island_read = "break-candidate"
+
+    # Nearest approach between the main body and every other island, so a break
+    # the share cannot see (two similar halves of one object) is still measured.
+    # Sampled, because the pair count is what grows: a 66-island railing must not
+    # turn a scene census into the expensive check. Reported in the mesh's own
+    # object space, which is what a modelling slip is expressed in.
+    min_island_gap = None
+    if len(island_points) > 1:
+        body = island_points[0][:: max(1, len(island_points[0]) // ISLAND_GAP_SAMPLE_VERTS)]
+        for points in island_points[1:]:
+            sample = points[:: max(1, len(points) // ISLAND_GAP_SAMPLE_VERTS)]
+            for point in sample:
+                nearest = min((point - other).length_squared for other in body)
+                if min_island_gap is None or nearest < min_island_gap:
+                    min_island_gap = nearest
+        min_island_gap = math.sqrt(min_island_gap)
     bm.free()
     return {
         "available": True,
@@ -1598,6 +1653,11 @@ def _probe_topology(obj):
         # defect count. `largestComponentShare` says how much of the mesh the
         # main body is, which separates "one small extra piece" from "in pieces".
         "isSplit": len(component_sizes) > 1,
+        # The reading of the numbers above, because `isSplit` on its own cannot
+        # be acted on: a railing of 66 balusters and a drone's four blades are
+        # both correctly composed meshes that read as split.
+        "islandRead": island_read,
+        "minIslandGap": min_island_gap,
     }
 
 

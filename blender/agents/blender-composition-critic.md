@@ -107,10 +107,7 @@ being read.
 One object split into drifting pieces is the other thing a render cannot show.
 `checks: ["topology"]` reports `connectedComponents` for exactly that, and it
 reads as `nonManifoldEdges: 0` and `boundaryEdges: 0` because each piece is a
-clean closed solid. `isSplit` is a finding to judge, not an automatic failure: a
-shell with a base and a surface with an inset piece are legitimately more than
-one component. `largestComponentShare` is what tells them apart — near 1 is one
-part plus a few strays, near 0.5 is a model in pieces.
+clean closed solid. But `isSplit` is NOT the signal to score on — it fires on every correctly composed mesh in the workspace: a railing of 66 balusters, a bamboo cluster of 83 culms, a drone's four blades are all one mesh with many components, and all are correct. Read `islandRead` instead. `assembly` means no island dominates (largest share under 10%): repeated parts merged into one mesh, correct, score it as-is. `break-candidate` means one body does dominate — that is the drifting-piece case, and it is what costs geometry points. `continuous` is a single island. `minIslandGap` is the tiebreaker when the label is wrong: a few millimetres between islands is a break whatever the count. It is a vertex-to-vertex distance, so an island lying flat on a larger surface can be enclosed by it and still read a large gap — a real clearance needs `checks: ["pair"]` between two objects.
 
 ## The two failures that are not modelling
 

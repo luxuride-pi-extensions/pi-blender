@@ -1225,6 +1225,38 @@ export interface GeometryProbeTopology {
 	islandSizes: { vertices: number; share: number }[];
 	/** True when `connectedComponents > 1`. A finding to judge, not a failure. */
 	isSplit: boolean;
+	/**
+	 * How to read `isSplit`, because the count alone cannot be acted on.
+	 *
+	 * - `continuous` — one component. The healthy case.
+	 * - `assembly` — many components, none dominant (largest share under 10%).
+	 *   A railing of 66 balusters, a bamboo cluster of 83 culms, a drone's four
+	 *   propeller blades. Merging repeated parts into one mesh is what this
+	 *   toolchain asks a worker to do, so this is CORRECT, not a defect, and
+	 *   reading it as one buries the real finding.
+	 * - `break-candidate` — a dominant body plus other pieces. The case where
+	 *   `islandSizes` and `minIslandGap` are worth reading.
+	 *
+	 * Known limit: this is one number, and an object a person considers whole but
+	 * which is built from many similar clusters (a tree canopy) reads as
+	 * `assembly`. The numbers are the evidence; this is the reading of them.
+	 */
+	islandRead: "continuous" | "assembly" | "break-candidate";
+	/**
+	 * Nearest approach between the main body and any other island, in the
+	 * mesh's own object space, or null when the mesh is continuous.
+	 *
+	 * A VERTEX-to-vertex distance, so a small island sitting flat ON a large
+	 * surface can be fully enclosed by it and still report a large gap: the
+	 * samples on either side are the far corners, and nothing is measured to the
+	 * surface between them. Read it as "do these parts approach each other",
+	 * never as a clearance. For a true clearance use the `pair` check between
+	 * two objects, which measures surfaces.
+	 *
+	 * A gap of a few millimetres is a modelling slip whatever the component
+	 * count, which is the case `islandRead` gets wrong.
+	 */
+	minIslandGap: number | null;
 }
 
 /**

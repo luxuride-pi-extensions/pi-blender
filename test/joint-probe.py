@@ -394,6 +394,41 @@ def main():
         topo["islandSizes"][0]["vertices"] == 8,
         f"the island should be the blob's 8 verts, got {topo['islandSizes']}",
     )
+    # Two equal halves is a 50/50 split: the share does not say whether that is
+    # a break or an assembly of two alike parts, which is why `islandRead`
+    # exists next to the numbers. It has to read as a candidate here, because
+    # the alternative (two alike parts intended as one object) is not a shape a
+    # probe can recognise without an intent it is not given.
+    check(
+        topo["islandRead"] == "break-candidate",
+        f"a 50/50 split should be a break candidate, got {topo['islandRead']}",
+    )
+    check(topo["minIslandGap"] is not None, "a split mesh must report the gap between its islands")
+
+    # The case the raw count gets wrong: 66 identical small cubes merged into one
+    # mesh. `isSplit` is true and has been all along, but this is a RAILING --
+    # correct geometry -- so a reader taking isSplit at face value would bury
+    # the real finding under every assembly in the workspace.
+    for i in range(66):
+        make_cube(f"Baluster{i}", size=0.1, location=(10.0 + i * 0.3, 0.0, 0.0))
+    balusters = [o for o in bpy.data.objects if o.name.startswith("Baluster")]
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in balusters:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = balusters[0]
+    bpy.ops.object.join()
+    railing = bpy.data.objects["Baluster0"]
+    railing.name = "Railing"
+    bpy.context.view_layer.update()
+    rail_topo = live_bridge.handle_geometry_probe(
+        {"blendPath": scratch_blend, "objects": [railing.name], "checks": ["topology"]}
+    )["objects"][railing.name]["topology"]
+    check(rail_topo["connectedComponents"] == 66, f"expected 66 balusters, got {rail_topo['connectedComponents']}")
+    check(rail_topo["isSplit"] is True, "a 66-part assembly still reports isSplit; the label is what changes")
+    check(
+        rail_topo["islandRead"] == "assembly",
+        f"66 equal parts is an assembly, not a break: got {rail_topo['islandRead']} at share {rail_topo['largestComponentShare']}",
+    )
 
     # A single solid cube: one component, not split.
     solid = make_cube("Solid", size=0.3, location=(6.0, 0.0, 0.0))
@@ -402,6 +437,11 @@ def main():
     )["objects"][solid.name]["topology"]
     check(solid_topo["connectedComponents"] == 1, f"a cube should be 1 component, got {solid_topo['connectedComponents']}")
     check(solid_topo["isSplit"] is False, "a cube reported as split")
+    check(
+        solid_topo["islandRead"] == "continuous",
+        f"a cube is the healthy case, got {solid_topo['islandRead']}",
+    )
+    check(solid_topo["minIslandGap"] is None, "a continuous mesh has no gap to report")
     check(solid_topo["largestComponentShare"] == 1.0, f"a cube should be one whole mesh, got {solid_topo['largestComponentShare']}")
 
     # The severities, in one place, because they mean different things

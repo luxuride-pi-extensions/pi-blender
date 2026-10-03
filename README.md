@@ -279,9 +279,19 @@ Start pi in any project dir. The extension:
   mesh split into drifting pieces, and it is there because every other count is
   blind to that case: each piece is a clean closed solid, so a head that has
   drifted off its own pipe reports `nonManifoldEdges: 0`, `boundaryEdges: 0`,
-  `looseVertices: 0` and `duplicateVertices: 0`. `largestComponentShare` is what
-  separates "one part plus a few strays" from "a model in pieces", because more
-  than one component is not automatically wrong
+  `looseVertices: 0` and `duplicateVertices: 0`. But `isSplit` alone is
+  **not** a defect signal, and reading it as one buries the real finding under
+  every assembly in the workspace: a railing of 66 balusters, a bamboo cluster
+  of 83 culms, a drone's four propeller blades are all one mesh with many
+  components, and all of them are CORRECT — merging repeated parts into one mesh
+  is what the toolchain asks a worker to do. So read `islandRead` instead: it
+  is `assembly` when no single island dominates (largest share under 10% — many
+  equal parts), `break-candidate` when one body does dominate, and `continuous`
+  for a single island. `minIslandGap` covers the case the label gets wrong:
+  islands a few millimetres apart are a break whatever the count. Note it is a
+  VERTEX-to-vertex distance, so a small island lying flat on a large surface can
+  be enclosed by it and still report a large gap — for a real clearance use
+  `checks: ["pair"]` between two objects
 - Both of these are measured, not asserted. `test/joint-probe.py` builds a
   scene whose correct answers are known by construction (an 11 mm gap between a
   1 m riser and the pipe above it, a chair pulled up to a table, a cube
