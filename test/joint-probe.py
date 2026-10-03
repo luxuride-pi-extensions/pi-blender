@@ -429,6 +429,52 @@ def main():
         rail_topo["islandRead"] == "assembly",
         f"66 equal parts is an assembly, not a break: got {rail_topo['islandRead']} at share {rail_topo['largestComponentShare']}",
     )
+    # And now the case that `islandRead` gets wrong in the OTHER direction. The
+    # balusters were laid 0.3 m apart with 0.1 m cubes, so every island sits ~9.5x
+    # its own size from its neighbour: 100% floating. A railing like that is not
+    # assembled, it is a broken model whose island count happens to look healthy,
+    # and it is measured from real workspaces rather than invented -- 32 bridge
+    # planks 2.65 m long, 25 mm apart, every island free.
+    check(
+        rail_topo["islandFloatingShare"] == 100.0,
+        f"balusters laid 3x their own size apart are all floating free, got {rail_topo['islandFloatingShare']}",
+    )
+    check(
+        rail_topo["islandContact"] is not None and rail_topo["islandContact"] > 0.05,
+        f"a floating assembly's tightest gap should exceed 5% of the part, got {rail_topo['islandContact']}",
+    )
+
+    # The counter-case, and the one that matters: the SAME assembly shape with
+    # the parts touching. 66 cubes overlapping into a continuous run reads
+    # identically on islandRead and completely differently on contact, which is
+    # what proves the ratio is measuring something the count cannot.
+    for i in range(66):
+        make_cube(f"Course{i}", size=0.1, location=(20.0 + i * 0.08, 0.0, 0.0))
+    courses = [o for o in bpy.data.objects if o.name.startswith("Course")]
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in courses:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = courses[0]
+    bpy.ops.object.join()
+    course = bpy.data.objects["Course0"]
+    course.name = "Course"
+    bpy.context.view_layer.update()
+    course_topo = live_bridge.handle_geometry_probe(
+        {"blendPath": scratch_blend, "objects": [course.name], "checks": ["topology"]}
+    )["objects"][course.name]["topology"]
+    check(course_topo["connectedComponents"] == 66, f"expected 66 courses, got {course_topo['connectedComponents']}")
+    check(
+        course_topo["islandRead"] == rail_topo["islandRead"],
+        "both are 66 equal parts, so islandRead cannot be what separates them",
+    )
+    check(
+        course_topo["islandFloatingShare"] == 0.0,
+        f"touching parts are none of them floating free, got {course_topo['islandFloatingShare']}",
+    )
+    check(
+        course_topo["minIslandGap"] == 0.0,
+        f"overlapping parts share geometry, so the gap is zero, got {course_topo['minIslandGap']}",
+    )
 
     # A single solid cube: one component, not split.
     solid = make_cube("Solid", size=0.3, location=(6.0, 0.0, 0.0))

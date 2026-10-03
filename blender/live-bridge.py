@@ -831,6 +831,11 @@ PAIR_TOLERANCE_EPSILON = 1e-9
 # check in a scene census; 256 per side is far finer than any modelling slip
 # that would hide between the samples.
 ISLAND_GAP_SAMPLE_VERTS = 256
+# An island whose nearest other island is farther away than this fraction of its
+# OWN size is floating free rather than built to meet it. Dimensionless on
+# purpose: the same 25 mm is a seam on a 2.65 m plank and a canyon on a 0.3 m
+# bollard, so no absolute millimetre threshold can serve both.
+ISLAND_FLOATING_RATIO = 0.05
 
 
 def _as_int(value, field, default=None):
@@ -1560,6 +1565,7 @@ def _probe_topology(obj):
     unvisited = set(bm.verts)
     component_sizes = []
     island_points = []
+    island_members = []
     while unvisited:
         seed = unvisited.pop()
         component = 1
@@ -1575,9 +1581,12 @@ def _probe_topology(obj):
                     members.append(other)
                     frontier.append(other)
         component_sizes.append(component)
+        island_members.append(members)
         island_points.append([vert.co.copy() for vert in members])
-    component_sizes.sort(reverse=True)
-    island_points.sort(key=len, reverse=True)
+    order = sorted(range(len(component_sizes)), key=lambda i: component_sizes[i], reverse=True)
+    component_sizes = [component_sizes[i] for i in order]
+    island_members = [island_members[i] for i in order]
+    island_points = [island_points[i] for i in order]
     total_verts = len(bm.verts)
     largest_share = (component_sizes[0] / total_verts) if component_sizes and total_verts else 0.0
     # Island detail, capped: a mesh fragmented into hundreds of pieces needs the
@@ -1615,21 +1624,125 @@ def _probe_topology(obj):
     else:
         island_read = "break-candidate"
 
-    # Nearest approach between the main body and every other island, so a break
-    # the share cannot see (two similar halves of one object) is still measured.
-    # Sampled, because the pair count is what grows: a 66-island railing must not
-    # turn a scene census into the expensive check. Reported in the mesh's own
-    # object space, which is what a modelling slip is expressed in.
+    # `assembly` on its own is not a PASS, and this is where that becomes
+    # actionable. "Many equal parts" says nothing about whether the parts MEET,
+    # and a merged mesh whose parts float apart is the exact shape of the defect
+    # this whole family of checks exists for -- a railing of balusters with 25 cm
+    # of air between each one is not an assembly, it is a broken model with a
+    # healthy-looking island count.
+    #
+    # Measured on real workspaces, the two are indistinguishable by count and
+    # opposite by contact: 32 bridge planks 2.65 m long, 25.4 mm apart, and a
+    # bamboo cluster with 79 of 83 culms 126 mm from their nearest neighbour.
+    # Both read `assembly`. Only the contact answers whether they are built.
+    #
+    # So the contact is measured per island against its nearest OTHER island,
+    # and compared not to an absolute millimetre but to the island's OWN size:
+    # a gap that is large against the part is a part floating free, while a gap
+    # that is small against the part is two pieces that were meant to meet. That
+    # ratio is dimensionless and scale-independent, which a fixed threshold is
+    # not -- the same 25 mm is a seam on a plank and a canyon on a bollard.
+    # `minIslandGap` and `islandFloatingShare` are measured below, from a
+    # nearest-neighbour pass over every island, so they arrive with islandRead.
+    island_floating = None
+    island_contact = None
     min_island_gap = None
     if len(island_points) > 1:
-        body = island_points[0][:: max(1, len(island_points[0]) // ISLAND_GAP_SAMPLE_VERTS)]
-        for points in island_points[1:]:
-            sample = points[:: max(1, len(points) // ISLAND_GAP_SAMPLE_VERTS)]
-            for point in sample:
-                nearest = min((point - other).length_squared for other in body)
-                if min_island_gap is None or nearest < min_island_gap:
-                    min_island_gap = nearest
-        min_island_gap = math.sqrt(min_island_gap)
+        # Box separation was tried first and is WRONG for an elongated part: 32
+        # planks 2.65 m long laid 25 mm apart have OVERLAPPING boxes, so the box
+        # measure reports them joined at gap 0. A box is only as good as its
+        # shortest axis, and every assembly that repeats a long thin member --
+        # planks, balusters, slats, blades -- has almost none.
+        #
+        # Surface to surface, which is the same measure `_probe_pair_geometry`
+        # uses between two objects, applied between islands of one mesh. It needs
+        # a BVH per island, so it is built once per island and asked both ways,
+        # because the nearest approach can be missed from either side alone.
+        #
+        # Cost is O(islands) BVHs and O(vertices) distance queries. That is
+        # deliberately inside the `topology` check the docs already call
+        # "the expensive one", rather than being paid on every probe.
+        island_index_by_vert = {}
+        for index, members in enumerate(island_members):
+            for vert in members:
+                island_index_by_vert[vert.index] = index
+        # Face vertex indices must be LOCAL to the vertex list handed to the BVH,
+        # and an island's vertices are a SUBSET of the mesh's. Passing the mesh's
+        # own indices against a subset list reads out of range: it crashed the
+        # probe at exit 139 before any assertion, which is why it is written as an
+        # explicit remap rather than reused verbatim.
+        island_faces = [[] for _ in island_members]
+        for face in bm.faces:
+            owner = island_index_by_vert.get(face.verts[0].index)
+            if owner is None:
+                continue
+            island_faces[owner].append(
+                [island_members[owner].index(vert) for vert in face.verts]
+            )
+
+        island_bvhs = []
+        for index, members in enumerate(island_members):
+            island_bvhs.append(
+                BVHTree.FromPolygons(
+                    [vert.co.copy() for vert in members],
+                    island_faces[index],
+                    all_triangles=False,
+                    epsilon=0.0,
+                )
+            )
+
+        ratios = []
+        for index, members in enumerate(island_members):
+            own_bvh = island_bvhs[index]
+            extent = max(
+                max(component[axis] for component in island_points[index])
+                - min(component[axis] for component in island_points[index])
+                for axis in range(3)
+            )
+            if extent <= 0.0:
+                continue
+            nearest_distance = None
+            for other_index, members_b in enumerate(island_members):
+                if other_index == index:
+                    continue
+                other_bvh = island_bvhs[other_index]
+                for vert in members:
+                    signed = _signed_distance_to_surface(vert.co, other_bvh)
+                    if signed is None:
+                        continue
+                    # Negative means this vertex is INSIDE the other island, so
+                    # the two parts interpenetrate: contact, not separation.
+                    distance = abs(signed)
+                    if nearest_distance is None or distance < nearest_distance:
+                        nearest_distance = distance
+                for vert in members_b:
+                    signed = _signed_distance_to_surface(vert.co, own_bvh)
+                    if signed is None:
+                        continue
+                    distance = abs(signed)
+                    if nearest_distance is None or distance < nearest_distance:
+                        nearest_distance = distance
+                if nearest_distance == 0.0:
+                    break
+            if nearest_distance is None:
+                continue
+            ratios.append((nearest_distance / extent, nearest_distance))
+        if ratios:
+            ratios.sort()
+            island_contact = _round(ratios[0][0], 4)
+            island_floating = round(
+                100.0 * sum(1.0 for ratio, _ in ratios if ratio > ISLAND_FLOATING_RATIO) / len(ratios), 1
+            )
+            # The tightest join in the mesh, in metres. It comes from the same
+            # nearest-neighbour pass as the ratios above, so there is no second
+            # all-pairs walk: that earlier loop was O(islands x vertices) and this
+            # is O(n log n).
+            #
+            # Its scope is every island pair rather than only main-body-to-other.
+            # A pair of alike halves drifting apart -- the case the body-only
+            # version could not see, because neither half was the largest -- is
+            # exactly what a minimum over all pairs does find.
+            min_island_gap = _round(min(distance for _, distance in ratios), 5)
     bm.free()
     return {
         "available": True,
@@ -1658,6 +1771,16 @@ def _probe_topology(obj):
         # both correctly composed meshes that read as split.
         "islandRead": island_read,
         "minIslandGap": min_island_gap,
+        # Whether the parts of an assembly MEET, which the island count cannot
+        # say and a render cannot show. `islandFloatingShare` is the percentage
+        # of islands whose nearest neighbour is farther than
+        # ISLAND_FLOATING_RATIO of their own size; `islandContact` is that ratio
+        # for the closest pair in the mesh. A railing whose balusters touch
+        # reports a small contact ratio and a low floating share; the same
+        # railing with 25 cm of air between each one reads identically on
+        # islandRead and completely differently here.
+        "islandFloatingShare": island_floating,
+        "islandContact": island_contact,
     }
 
 

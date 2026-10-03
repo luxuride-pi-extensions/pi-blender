@@ -1243,6 +1243,27 @@ export interface GeometryProbeTopology {
 	 */
 	islandRead: "continuous" | "assembly" | "break-candidate";
 	/**
+	 * Whether the parts of an assembly MEET, which `islandRead` cannot say.
+	 *
+	 * `islandFloatingShare` is the percentage of islands whose nearest other
+	 * island is farther away than 5% of their OWN size — dimensionless on
+	 * purpose, because the same 25 mm is a seam on a 2.65 m plank and a canyon
+	 * on a 0.3 m bollard.
+	 *
+	 * The measured pair: 32 bridge planks 2.65 m long, 25 mm apart, gap ≈ 9.6% of
+	 * each plank's own length, 100% floating — NOT an assembly, a broken model
+	 * whose island count looks healthy. A shoji frame whose pieces share
+	 * vertices reads gap 0.0 and 29% floating, which IS built. Both report
+	 * `islandRead: "assembly"`, so the label alone would score them identically.
+	 */
+	islandFloatingShare: number | null;
+	/**
+	 * That same gap-to-own-size ratio for the tightest join in the mesh, so a
+	 * single shared-vertex join (`0`) reads differently from a mesh whose parts
+	 * merely stand close.
+	 */
+	islandContact: number | null;
+	/**
 	 * Nearest approach between the main body and any other island, in the
 	 * mesh's own object space, or null when the mesh is continuous.
 	 *
@@ -1255,6 +1276,10 @@ export interface GeometryProbeTopology {
 	 *
 	 * A gap of a few millimetres is a modelling slip whatever the component
 	 * count, which is the case `islandRead` gets wrong.
+	 *
+	 * Measured over EVERY island pair, not just the main body to the rest, so
+	 * two alike halves drifting apart are found — neither is the largest, which
+	 * is exactly where a body-only minimum would miss them.
 	 */
 	minIslandGap: number | null;
 }

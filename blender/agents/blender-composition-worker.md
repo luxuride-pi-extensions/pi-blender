@@ -144,12 +144,19 @@ drifted into two or more pieces reads as `nonManifoldEdges: 0` and
 `islandRead`, not `isSplit`: joining repeated parts into one mesh is what you are
 asked to do, so `isSplit` fires on every railing (66 balusters), every bamboo
 cluster (83 culms) and every set of drone blades, all of which are CORRECT.
-`islandRead` is `assembly` when no island dominates — repeated parts, leave it
-alone — and `break-candidate` when one body does, which is the drift that costs.
-`minIslandGap` settles the rest: islands a few millimetres apart are a break
-whatever the count. It measures vertex to vertex, so an island lying flat on a
-larger surface can be enclosed by it and still read a large gap; for a real
-clearance probe two objects with `checks: ["pair"]`.
+`islandRead` is `assembly` when no island dominates and `break-candidate` when
+one body does, which is the drift that costs.
+
+  `assembly` is NOT automatically fine, and this is the one that catches you:
+joining parts does not make them a single object, it only hides them in one.
+`islandFloatingShare` is the percentage of your parts sitting more than 5% of
+their own size from their nearest neighbour — 100% means you merged parts and
+left air between them, which reads exactly like the drifting-piece defect and
+is measured the same way. Real workspaces show both: bridge planks 2.65 m long
+laid 25 mm apart read 100% floating, a shoji frame built from touching pieces
+reads 1.8%. If a part is meant to be continuous with its neighbour, overlap them
+so they share surface; if it is meant to stand free, that is a separate object,
+not a component of this one.
 
 A part you intend to be CONTINUOUS with another — a pipe running into a pipe, a
 post into its foot, a collar onto a shaft — is better modelled as one mesh than

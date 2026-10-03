@@ -287,11 +287,19 @@ Start pi in any project dir. The extension:
   is what the toolchain asks a worker to do. So read `islandRead` instead: it
   is `assembly` when no single island dominates (largest share under 10% — many
   equal parts), `break-candidate` when one body does dominate, and `continuous`
-  for a single island. `minIslandGap` covers the case the label gets wrong:
-  islands a few millimetres apart are a break whatever the count. Note it is a
-  VERTEX-to-vertex distance, so a small island lying flat on a large surface can
-  be enclosed by it and still report a large gap — for a real clearance use
-  `checks: ["pair"]` between two objects
+  for a single island.
+
+  But `assembly` alone is NOT a pass: it says *many equal parts*, not that they
+  **meet**. A merged mesh whose parts float apart is the exact shape of the
+  defect this family exists for. So `islandFloatingShare` reports the percentage
+  of islands whose nearest other island is farther than **5% of their own size**,
+  and `islandContact` gives that ratio for the tightest join. The ratio is
+  dimensionless on purpose — the same 25 mm is a seam on a 2.65 m plank and a
+  canyon on a 0.3 m bollard. Measured on real workspaces the two cases are
+  identical on the island count and opposite on contact: 32 bridge planks 2.65 m
+  long, 25 mm apart, gap 9.6% of their own length, **100% floating — not an
+  assembly, a broken model with a healthy-looking count** — against a shoji frame
+  whose pieces share surfaces at **1.8% floating**
 - Both of these are measured, not asserted. `test/joint-probe.py` builds a
   scene whose correct answers are known by construction (an 11 mm gap between a
   1 m riser and the pipe above it, a chair pulled up to a table, a cube
