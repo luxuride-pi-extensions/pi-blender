@@ -13,7 +13,7 @@
 	"license": "MIT",
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node --test test/",
+		"test": "node --test \"test/*.test.mjs\"",
 		"setup": "node scripts/dev-setup.mjs",
 		"check:setup": "node scripts/dev-setup.mjs --check",
 		"install:agents": "node scripts/install-agents.mjs",

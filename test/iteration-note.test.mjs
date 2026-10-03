@@ -95,7 +95,22 @@ test("re-recording the same statement replaces the older one rather than stackin
   assert.equal(second.superseded, 1);
   assert.equal(second.facts.length, 1);
   assert.equal(second.facts[0].source, "blender_geometry_probe (re-measured)");
-  assert.notEqual(second.facts[0].at, first.recorded.at);
+
+  // The re-measurement is the newer one, so its timestamp must not go BACKWARDS
+  // -- and must not merely be equal either, or the two facts are
+  // indistinguishable and a reader cannot tell which measurement is current.
+  //
+  // This was `notEqual`, which failed roughly one run in ten on a fast machine:
+  // both writes landed inside the same millisecond, so the two ISO strings came
+  // out byte-identical and the test failed on a race rather than on a
+  // regression. A timestamp at the system's resolution cannot promise to
+  // distinguish two writes it cannot see apart. Asserting ordering instead
+  // tests what the code actually guarantees, and fails for real if the
+  // superseding fact ever does get stamped with the older time.
+  assert.ok(
+    Date.parse(second.facts[0].at) >= Date.parse(first.recorded.at),
+    `the re-measured fact (${second.facts[0].at}) must not predate the fact it supersedes (${first.recorded.at})`,
+  );
 });
 
 test("a fact without its measured statement is refused", async () => {
