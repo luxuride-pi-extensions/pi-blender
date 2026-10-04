@@ -98,7 +98,13 @@ test("the recommendation states the open count next to the ceiling", async () =>
 	const { blenderBridgeStatus } = await loadTs("../blender/status.ts", env);
 	const status = await blenderBridgeStatus({});
 	assert.match(status.recommendation, new RegExp(`${status.headless.effective} slots?`), "the ceiling belongs in the same sentence as the count");
-	assert.match(status.recommendation, /0 headless Blenders open now against \d+ slots/);
+	// The number after "against" is the ceiling again, and it is read back out
+	// of the same status object rather than written out as a literal. A literal
+	// "slots" was wrong twice over: the string is the plural of whatever the
+	// ceiling resolved to, so on a machine whose ceiling clamps to 1 the code
+	// says "1 slot" and a fixed plural never matches. That is the whole reason
+	// this suite has to name its numbers from the status rather than type them.
+	assert.match(status.recommendation, new RegExp(`0 headless Blenders open now against ${status.headless.effective} slots?`));
 });
 
 test.after(() => {
