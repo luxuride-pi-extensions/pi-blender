@@ -11,7 +11,16 @@
  * Prints one JSON object on stdout.
  */
 
+import { createRequire } from "node:module";
+
 import { loadTs } from "./paths.mjs";
+
+// Before concurrency.ts is loaded, and before anything else in this process has
+// imported node:os as ESM. The stub replaces the two functions the budget reads
+// and syncs them onto the ESM namespace, so the module under test sees the
+// machine these tests describe rather than whichever one CI happens to run on.
+// See test/machine-stub.cjs for why this cannot live in an ESM import.
+createRequire(import.meta.url)("./machine-stub.cjs");
 
 const env = JSON.parse(process.argv[2] ?? "{}");
 for (const [key, value] of Object.entries(env)) {
