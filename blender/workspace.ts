@@ -3,7 +3,8 @@ import { dirname, join, parse, resolve } from "node:path";
 import { getBlenderBridgeDir, getBlenderInstanceId } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { checkLiveBlenderBlend, requestLiveBlenderOpenBlend } from "./bridge.js";
-import { pidIsRunning, readLockHolderPid } from "./liveness.js";
+import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
+import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import { assertWorkspaceOwnership, buildWorkspaceOwner, classifyWorkspaceOwner, describeLiveOwner } from "./ownership.js";
 import type { BlenderWorkspaceManifest, WorkspaceInitOptions, WorkspaceInitResult } from "./types.js";
 import {
@@ -208,9 +209,11 @@ async function acquireManifestLock(
 			// between. Age reclaims only the pre-pid format, where there is no pid
 			// to ask about.
 			let reclaimable = false;
+			let observed = "";
 			try {
 				const stats = await stat(lockPath);
-				const holderPid = readLockHolderPid(lockPath);
+				observed = await readFile(lockPath, "utf-8");
+				const holderPid = parseLockHolderPid(observed);
 				reclaimable =
 					holderPid === null
 						? Date.now() - stats.mtimeMs > MANIFEST_LOCK_STALE_MS
@@ -220,7 +223,11 @@ async function acquireManifestLock(
 				continue;
 			}
 			if (reclaimable) {
-				await rm(lockPath, { force: true });
+				// Conditional, so a holder that released between the judgement and
+				// the unlink cannot have the fresh lock a third waiter wrote in
+				// that window deleted out from under it: two read-modify-write
+				// passes over one manifest is the corruption this lock prevents.
+				await reclaimLockIfUnchanged(lockPath, observed);
 				continue;
 			}
 

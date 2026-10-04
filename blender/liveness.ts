@@ -117,7 +117,26 @@ export function pidIsRunning(pid: number): boolean {
  */
 export function readLockHolderPid(lockPath: string): number | null {
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(lockPath, "utf-8"));
+		return parseLockHolderPid(readFileSync(lockPath, "utf-8"));
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The pid recorded in a lock file's CONTENTS, or null when they carry no
+ * usable one.
+ *
+ * Split from readLockHolderPid because a reclaim has to hold two things about
+ * the same instant: the pid it judged dead, and the bytes it read to judge it.
+ * Re-reading the file to get the second one races the first -- the holder may
+ * have released and a third waiter created a fresh lock in between, and the
+ * caller would then have an identity and a verdict from two different files.
+ * The raw form is also the identity a conditional reclaim compares against.
+ */
+export function parseLockHolderPid(raw: string): number | null {
+	try {
+		const parsed: unknown = JSON.parse(raw);
 		if (typeof parsed !== "object" || parsed === null) return null;
 		const candidate = (parsed as { pid?: unknown }).pid;
 		if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate <= 0) return null;

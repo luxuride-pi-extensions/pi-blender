@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { access, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { getBlenderAssetsDir, getBlenderBridgeDir, getBlenderTempDir } from "../config.js";
-import { pidIsRunning, readLockHolderPid } from "./liveness.js";
+import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
+import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
@@ -379,6 +380,13 @@ export function getBundledBlenderAgentsDir(): string {
  * is force-reclaimed, so a dead holder cannot wedge the bridge forever. Age
  * reclaims only a lock that predates the pid field, because a live holder is
  * never displaced no matter how long it has held the lock.
+ *
+ * The reclaim is CONDITIONAL: it removes the lock only if the file is still
+ * byte-for-byte the one the reclaim decision was made about. Deciding "this
+ * holder is dead" and then unlinking the path are two steps, and between them
+ * the holder can release() and a third waiter can create a fresh lock that
+ * this process would then delete -- handing the one live Blender UI to two
+ * concurrent requests. See lock-reclaim.ts; the policy below is unchanged.
  */
 export async function acquireBridgeLock(options?: {
 	signal?: AbortSignal;
@@ -416,9 +424,15 @@ export async function acquireBridgeLock(options?: {
 			// alone allows 360s), so an mtime rule would interleave two requests
 			// against the one live UI it exists to serialize.
 			let reclaimable = false;
+			let observed = "";
 			try {
 				const stats = await stat(lockPath);
-				const holderPid = readLockHolderPid(lockPath);
+				// Read the bytes once and derive the pid from them. A stat plus a
+				// separate pid read would be two looks at a path that can be
+				// replaced between them, and the reclaim below compares against
+				// exactly what was read here.
+				observed = await readFile(lockPath, "utf-8");
+				const holderPid = parseLockHolderPid(observed);
 				reclaimable =
 					holderPid === null
 						? Date.now() - stats.mtimeMs > LIVE_BRIDGE_LOCK_STALE_MS
@@ -428,7 +442,7 @@ export async function acquireBridgeLock(options?: {
 				continue;
 			}
 			if (reclaimable) {
-				await rm(lockPath, { force: true });
+				await reclaimLockIfUnchanged(lockPath, observed);
 				continue;
 			}
 
