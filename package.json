@@ -11,6 +11,15 @@
 	"private": true,
 	"type": "module",
 	"license": "MIT",
+	"files": [
+		"index.ts",
+		"config.ts",
+		"launch.ts",
+		"manager-core.ts",
+		"core/",
+		"blender/",
+		"scripts/"
+	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "node --test \"test/*.test.mjs\"",

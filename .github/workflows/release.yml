@@ -1,0 +1,225 @@
+name: release
+
+# Publishes a GitHub Release from a git tag. There is deliberately no `npm
+# publish` step, because every package here is `"private": true` -- npm refuses
+# to publish a private package, and unsetting it to get a publish through would
+# trade a correct manifest for a working script.
+#
+# What pi actually installs is the CLONE, not the tarball. `installGit()`
+# (dist/core/package-manager.js) does `git clone <repo> <dir>`, an optional
+# `git checkout <ref>`, then `npm install --legacy-peer-deps` inside it, and pi
+# loads the extension's TypeScript from source through jiti. So there is no
+# build step here and nothing to compile: a tag IS the artifact. The tarball is
+# published alongside it for the cases the clone does not cover -- an offline
+# install, an air-gapped review of exactly what shipped, and a diff between two
+# releases that is one tarball rather than one commit range.
+#
+# `pi install git:github.com/luxuride-pi-extensions/<repo>@<tag>` is therefore
+# the supported install for a pinned release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  # A release that cannot be re-run by hand is a release that cannot be
+  # recovered. workflow_dispatch takes the tag to cut and defaults to the
+  # branch it is dispatched from, so a failed or incomplete release can be
+  # rebuilt without deleting and re-pushing the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must already exist on the remote)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # Two releases of one repo cannot both be creating the same Git tag object.
+  # cancel-in-progress is deliberately false: cancelling the first would leave a
+  # half-written release page, which is worse than waiting.
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: pack and publish
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow is not enough here, and not only for the checkout itself:
+      # `git describe` is what tells us the tag is on the commit being released.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: resolve the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          case "$tag" in
+            v*) ;;
+            *) echo "tag '$tag' does not start with v" >&2; exit 64 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from $(git rev-parse --short HEAD)"
+
+      # The tag must name the commit it claims to. A tag pushed at the wrong
+      # moment -- mid-rebase, against the wrong branch -- otherwise produces a
+      # release whose contents do not match its version, and the only way to
+      # find out is to diff two tarballs later.
+      - name: the tag must be on the checked-out commit
+        run: |
+          set -euo pipefail
+          want="${{ steps.tag.outputs.tag }}"
+          got="$(git tag --points-at HEAD | grep -x "$want" || true)"
+          if [ -z "$got" ]; then
+            echo "tag $want is not on $(git rev-parse HEAD); a release must be cut from the commit it names" >&2
+            git log --oneline -3 >&2
+            exit 1
+          fi
+          echo "ok $want is on $(git rev-parse --short HEAD)"
+
+      # The single most useful check a release can do: the tarball's version
+      # must equal the tag's, and its contents must be the ones
+      # test/package-contents.mjs (pi-manager-core) has already proved correct.
+      # Both read the SAME package.json, so neither can drift from the other.
+      - name: the tag and the package version must agree
+        id: version
+        run: |
+          set -euo pipefail
+          name="$(node -p 'require("./package.json").name')"
+          version="$(node -p 'require("./package.json").version')"
+          tag="${{ steps.tag.outputs.tag }}"
+          if [ "$tag" != "v$version" ]; then
+            echo "tag $tag does not match package.json version $version (expected v$version)" >&2
+            echo "Bump the version and commit it BEFORE tagging; the tag is not the place to bump." >&2
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Releasing $name $version"
+
+      # Verified here, at the moment of publishing, rather than only in CI on
+      # master: a release is the last point at which an incomplete `files`
+      # list can be caught without it reaching a user's machine. The check is
+      # duplicated in each repo on purpose -- a release workflow that borrows
+      # another repository's test needs that repository checked out at the
+      # right ref, which is a moving part a release cannot depend on.
+      - name: the tarball ships what the package needs
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const fs = require("node:fs");
+            const pkg = require("./package.json");
+            const packed = JSON.parse(fs.readFileSync("pack.json", "utf8"));
+            // npm keys the payload by package name, and older npm returns an
+            // array. Read both shapes rather than assume this npm.
+            const p = Array.isArray(packed) ? packed[0] : packed[pkg.name];
+            if (!p) throw new Error(`npm pack --json returned no entry for ${pkg.name}`);
+            const paths = p.files.map((f) => f.path);
+            const missing = [];
+            const entries = Array.isArray(pkg.pi?.extensions) && pkg.pi.extensions.length
+              ? pkg.pi.extensions : ["index.ts"];
+            for (const e of entries) {
+              const rel = e.replace(/^\.\//, "");
+              if (!paths.includes(rel)) missing.push(`extension entry ${rel}`);
+            }
+            for (const bad of ["test/", ".github/"]) {
+              const shipped = paths.filter((x) => x.startsWith(bad));
+              if (shipped.length) missing.push(`${shipped.length} file(s) under ${bad}, e.g. ${shipped[0]}`);
+            }
+            if (missing.length) {
+              console.error("The tarball is not shippable:\n  - " + missing.join("\n  - "));
+              process.exit(1);
+            }
+            console.log(`ok ${p.entryCount} files, ${p.unpackedSize} bytes unpacked`);
+          '
+          rm -f pack.json
+
+      # The artifact itself. npm pack is used rather than a hand-rolled tar so
+      # the published tarball is byte-for-byte what npm would have published,
+      # which is the property that makes it worth trusting as a record of the
+      # release.
+      - name: build the tarball
+        run: npm pack
+
+      # Notes are generated, not required from the tagger. A release whose
+      # description is empty still renders correctly, and a workflow that
+      # refuses to release because nobody wrote prose is a release that gets
+      # skipped. git log between the previous tag and this one is the honest
+      # default: it is what actually changed.
+      - name: write the release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          previous="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          {
+            echo "## $tag"
+            echo
+            if [ -n "$previous" ]; then
+              echo "Changes since $previous:"
+              echo
+              git log --no-merges --pretty="- %s (%h)" "$previous..$tag"
+            else
+              echo "First release."
+              echo
+              git log --no-merges --pretty="- %s (%h)" "$tag"
+            fi
+            echo
+            echo "## Install"
+            echo
+            echo '```bash'
+            echo "pi install git:github.com/luxuride-pi-extensions/${{ steps.version.outputs.name }}@$tag"
+            echo '```'
+            echo
+            echo "Or as a package, for an offline install:"
+            echo
+            echo '```bash'
+            echo "npm install --legacy-peer-deps ./${{ steps.version.outputs.name }}-${{ steps.version.outputs.version }}.tgz"
+            echo '```'
+            echo
+            echo "The extension is TypeScript loaded from source; there is no build step and"
+            echo "nothing to compile."
+          } > notes.md
+          echo "wrote notes.md ($(wc -l < notes.md) lines)"
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          tgz="$(ls ./*.tgz | head -1)"
+          # --verify-tag: publish the tag that is already on the remote rather
+          # than creating one, so a mistyped tag fails here instead of silently
+          # releasing a commit nobody asked for.
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --verify-tag \
+            $tgz
+          echo "published $TAG"
+
+      # The upload is the last step, so a failure anywhere above leaves the tag
+      # in place and re-runnable rather than leaving a release page with no
+      # artifact. If this specific step fails, the fix is to delete the release
+      # (not the tag) and re-run from workflow_dispatch.
+      - name: confirm the artifact is downloadable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'
+          if [ "$(gh release view "$TAG" --json assets --jq '.assets | length')" -lt 1 ]; then
+            echo "the release exists with no artifact attached" >&2
+            exit 1
+          fi
