@@ -14,16 +14,39 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpus, freemem } from "node:os";import { fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const RUNNER = fileURLToPath(new URL("./budget-runner.mjs", import.meta.url));
+
+/**
+ * The machine these assertions are about: the 12-core, 40 GB box the budget
+ * constants were measured on, pinned into every child process.
+ *
+ * Every assertion below states an absolute resolved count -- 4 effective, 2
+ * cores worth, 9 runs of memory -- because the whole subject of this file is
+ * WHICH TERM BINDS, and that is a property of the machine, not of the code.
+ * Left unpinned, those assertions describe one developer's laptop: on a
+ * 2-core GitHub runner the core term allows 1, so the default clamps to 1 and
+ * `assert.equal(result.effective, 4)` fails with `1 !== 4`; on a 32-core box the
+ * core term allows 10 and the MEASURED CEILING is the only thing still binding,
+ * which is a different claim about the code than the one these tests make.
+ *
+ * The values are what test/machine-stub.cjs substitutes for os.cpus() and
+ * os.freemem(); 40 GB with 9 runs of headroom is the figure the constants'
+ * comments already reason from, so the pinned machine and the documented one
+ * are the same machine.
+ */
+const REFERENCE_MACHINE = {
+	PI_TEST_CORES: "12",
+	PI_TEST_FREEMEM: String(40 * 1024 * 1024 * 1024),
+};
 
 /** Resolve the budget in a fresh process under `extra` env. */
 function budget(extra = {}) {
 	const base = { PI_BLENDER_MAX_PARALLEL_RUNS: null, ...extra };
 	const out = execFileSync(process.execPath, [RUNNER, JSON.stringify(base)], {
 		encoding: "utf8",
-		env: { ...process.env },
+		env: { ...process.env, ...REFERENCE_MACHINE },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	return JSON.parse(out);
@@ -57,7 +80,7 @@ test("the measured ceiling binds even where memory would allow more", () => {
 	// still holds at 4, because 4 is the only concurrency ever run.
 	const result = budget({ PI_BLENDER_MAX_PARALLEL_RUNS: "16" });
 	assert.ok(
-		Math.floor((freemem() * 0.5) / (366 * 1024 * 1024)) > 4,
+		Math.floor((Number(REFERENCE_MACHINE.PI_TEST_FREEMEM) * 0.5) / (366 * 1024 * 1024)) > 4,
 		"this test needs a machine where memory is not the binding term",
 	);
 	assert.equal(result.effective, 4);
@@ -129,16 +152,28 @@ test("the memory and core terms describe this machine, not a hardcoded box", () 
 	// use it rather than os.cpus() read at some earlier moment: the reason
 	// string has to name THIS machine's core count, or an operator debugging a
 	// clamp is reading a lie.
+	//
+	// "This machine" is the one REFERENCE_MACHINE pins, for the same reason
+	// every other assertion here names an absolute count: the child process
+	// stubs os.cpus(), so the host's real core count is not the number the
+	// reason string is about and must not be the number compared against it.
 	const result = budget();
-	assert.match(result.reasons.join("; "), new RegExp(`${cpus().length} cores at 3 per run`));
-	// The memory term is asserted CONDITIONALLY, because whether it binds is a
-	// property of this machine at this instant, not of this code: the test suite
-	// runs eight Blenders in parallel, so free memory swings far enough to make
-	// memory the binding term on a loaded run and not on an idle one. Asserting
-	// its absence turned a real clamp report into a flake; what must hold either
-	// way is that if it is reported, it names the per-run figure.
+	assert.match(
+		result.reasons.join("; "),
+		new RegExp(`${Number(REFERENCE_MACHINE.PI_TEST_CORES)} cores at 3 per run`),
+	);
+	// The memory term is asserted CONDITIONALLY, and that conditional stays even
+	// now that the machine is pinned: the pinning decides HOW MANY runs the
+	// memory term allows, but whether the term is reported at all is still
+	// decided by the condition immediately above it. The suite runs several
+	// Blenders in parallel, so on a loaded run the memory term can fall below
+	// the requested count and bind; on an idle one it does not. Asserting its
+	// absence either way turned a real clamp report into a flake.
 	if (result.reasons.some((reason) => reason.includes("per run") && reason.includes("free memory"))) {
 		assert.match(result.reasons.join("; "), /free memory at 366 MB per run allows \d+/);
 	}
-	assert.ok(freemem() > 0);
+	// The sanity check is that the stub is actually in force in the child: a
+	// budget that reported 0 free memory could pass every assertion above by
+	// accident, and this is the one line that would notice.
+	assert.ok(Number(REFERENCE_MACHINE.PI_TEST_FREEMEM) > 0);
 });

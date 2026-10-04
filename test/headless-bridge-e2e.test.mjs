@@ -44,8 +44,19 @@ const launch = await load("launch.ts");
  * Force the no-window path even when the developer's own machine has a watch
  * window open. Otherwise these tests assert the live bridge's behaviour and
  * pass without exercising the headless one at all.
+ *
+ * The parent is created first because mkdtemp makes a directory INSIDE the
+ * path it is given and will not create a missing parent: on a CI runner
+ * ~/.cache does not exist yet, and this line is what the whole file failed on
+ * there with
+ *
+ *   Error: ENOENT: no such file or directory, mkdtemp '/home/runner/.cache/pi-blender-nowindow-XXXXXX'
+ *
+ * which is a missing mkdir, not a missing Blender and not a failing assertion.
  */
-process.env.PI_BLENDER_BRIDGE_DIR = mkdtempSync(join(homedir(), ".cache", "pi-blender-nowindow-"));
+const BRIDGE_DIR = join(homedir(), ".cache", "pi-blender-nowindow-");
+mkdirSync(BRIDGE_DIR, { recursive: true });
+process.env.PI_BLENDER_BRIDGE_DIR = mkdtempSync(BRIDGE_DIR);
 
 async function blenderAvailable() {
 	try {
