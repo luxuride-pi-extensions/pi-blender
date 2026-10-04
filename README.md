@@ -610,3 +610,46 @@ usual; only the extension's auto-engagement now requires `/blender`.)
 - `blender_execute_python` ran a bpy script in the live session (exit 0, saved)
 - `blender_scene_info` returned live objects/cameras
 - `blender_render` (live, material-preview, 480x320) wrote `renders/render.png`
+
+## Releases
+
+Every release is a **git tag**, not a published npm package. All four packages
+in this organization are `"private": true`, so `npm publish` refuses them, and
+unsetting that flag to get a publish through would trade a correct manifest for
+a working script.
+
+pi installs this extension from the **clone**, not from a tarball: `installGit()`
+runs `git clone`, an optional `git checkout <ref>`, then
+`npm install --legacy-peer-deps` inside it, and pi loads the extension's
+TypeScript straight from source through jiti. So a tag *is* the artifact — there
+is no build step and nothing to compile.
+
+### Install a release
+
+```bash
+pi install git:github.com/luxuride-pi-extensions/pi-blender@v<version>
+```
+
+The `@ref` is what pins the version; without it pi tracks the default branch, so
+an unpinned spec is not a release, it is a moving target.
+
+### Cut a release
+
+1. Bump `version` in `package.json` and commit that on its own.
+2. Tag the commit that contains the bump — the tag and the version must agree:
+   ```bash
+   git tag v<version> && git push origin master --tags
+   ```
+3. `.github/workflows/release.yml` packs the tarball, checks it, and publishes
+   the release with generated notes.
+
+Step 2 is the one that is easy to get wrong, so the workflow refuses to guess:
+it fails when the tag is not on the commit being released, and again when the
+tag does not match `package.json`'s `version`. Bump the version *before*
+tagging; the tag is not the place to bump.
+
+The `npm pack --dry-run` check in the release workflow is deliberately a copy of
+what `pi-manager-core`'s `test/package-contents.mjs` proves on every CI run. A
+release workflow that borrowed the check from another repository would depend on
+that repository being checked out at the right ref, which is a moving part a
+release should not have.
