@@ -41,7 +41,7 @@ jobs:
       # sibling checkout can go beside it -- the layout resolver-copies and
       # allowlists look for, and the layout these four repos have in a working
       # directory.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-manager-core
           ref: master
@@ -50,9 +50,9 @@ jobs:
           # PRIVATE. A PAT with read access to the org.
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
