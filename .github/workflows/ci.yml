@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # There is no token-free job in this repository, which is a property of the
+  # suite rather than an omission.
+  #
+  # test/launch-harness.mjs stages this extension into a temp dir by copying
+  # launch.ts, config.ts and manager-core.ts, and then runs against that copy --
+  # which is what makes a missing bundled script testable at all. 17 of the
+  # launch-guard and watch-window checks then ask where pi-manager-core is, and
+  # the staged copy's candidates are its own temp-dir siblings plus the
+  # installed extensions dir. Neither can be a checkout, because the staged
+  # copy is not next to one.
+  #
+  # So those checks are unanswerable without the core's source. Splitting the
+  # suite so that a "unit" job could report 195 of 212 would be a green light
+  # for a suite that has not been run, and the 17 that were skipped would be
+  # the ones that catch a broken launch path.
+  #
+  # Gated on a repository VARIABLE rather than `secrets`: `secrets` is not in
+  # scope for a job-level `if` (only github/needs/vars/inputs are), and writing
+  # `if: ${{ secrets.CONSUMER_TOKEN != '' }}` fails the whole workflow file with
+  # no jobs at all. A variable also expresses the real condition -- "this repo
+  # can read its siblings" -- which is a property of the configuration, not of
+  # whether a particular PAT happens to be populated today.
+  test:
+    name: unit tests, typecheck, and manager-core consistency
+    if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    steps:
+      # pi-manager-core first, so this repo lands in a subdirectory and the
+      # sibling checkout can go beside it -- the layout resolver-copies and
+      # allowlists look for, and the layout these four repos have in a working
+      # directory.
+      - uses: actions/checkout@v5
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          # github.token cannot read a PRIVATE repository, and this one is
+          # PRIVATE. A PAT with read access to the org.
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # The core's own dependency install, and not just its files: jiti is a
+      # transitive dependency of @earendil-works/pi-coding-agent, so this is
+      # the only place on a clean runner where the loader these tests need
+      # exists.
+      - name: install the manager core
+        working-directory: projects/pi-manager-core
+        run: npm ci
+
+      - name: install pi-blender
+        run: npm ci --legacy-peer-deps
+
+      # pi-blender's launch and watch-window suites resolve the core through
+      # the SAME shim a real session uses, and the staged copy those tests
+      # drive lives in a temp dir -- so neither a sibling checkout nor
+      # <extensions>/manager-core can be found from it. This points the shim at
+      # the checkout above. Without it 17 tests fail on a hard "manager-core
+      # could not be found", which is the shim refusing to run from a stale
+      # copy rather than a defect in anything under test.
+      #
+      # --legacy-peer-deps is not optional: package.json declares
+      # peerDependencies: { "pi-manager-core": "*" }, the documented shape for a
+      # Pi package (docs/packages.md), so plain `npm ci` fails with 404 on a
+      # package that was never published.
+      - name: typecheck and test
+        env:
+          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        run: |
+          mkdir -p "$PI_AGENT_DIR"
+          npm run typecheck
+          npm test
+
+      # The core's own cross-repo checks, against the checkout beside it:
+      # resolver-copies diffs this repo's manager-core.ts and
+      # agent-template-checks.mjs against the canonical files, allowlists
+      # asserts every tool this manager's prompt names is in the index.ts
+      # allowlist, and dependency-declaration asserts the peer range.
+      #
+      # pi-manager-core's CI runs these same checks against all three consumers.
+      # Running them here too means a change here fails a check in the PR that
+      # made it, instead of only in the core's next run.
+      - name: cross-repo consistency checks
+        working-directory: projects/pi-manager-core
+        run: |
+          for check in resolver-copies allowlists dependency-declaration agent-rosters; do
+            echo "==> $check"
+            node test/$check.mjs
+          done
