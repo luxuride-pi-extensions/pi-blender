@@ -37,10 +37,27 @@ jobs:
     if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
     runs-on: ubuntu-latest
     steps:
-      # pi-manager-core first, so this repo lands in a subdirectory and the
-      # sibling checkout can go beside it -- the layout resolver-copies and
-      # allowlists look for, and the layout these four repos have in a working
-      # directory.
+      # THIS REPOSITORY FIRST, ON PURPOSE, AND NOT BY ACCIDENT.
+      #
+      # actions/checkout runs `clean: true`, which deletes the CONTENTS OF
+      # $GITHUB_WORKSPACE before it clones. $GITHUB_WORKSPACE is the default
+      # path (an empty `path:`), so with the sibling checkouts already at
+      # projects/*, this step wipes every one of them -- and the run then dies
+      # a step later with
+      #
+      #   error: An error occurred trying to start process '/usr/bin/bash'
+      #   with working directory '.../projects/pi-manager-core'.
+      #   No such file or directory
+      #
+      # which reads like a checkout that never happened and is actually one
+      # that was deleted. Every sibling checkout must therefore come AFTER this
+      # step.
+      - uses: actions/checkout@v5
+
+      # pi-manager-core next, so this repo lands in a subdirectory and the
+      # sibling checkouts can go beside it -- the layout resolver-copies.mjs
+      # and allowlists.mjs look for, and the layout these four repos have in a
+      # working directory.
       - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-manager-core
@@ -50,7 +67,6 @@ jobs:
           # PRIVATE. A PAT with read access to the org.
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
