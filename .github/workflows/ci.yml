@@ -34,9 +34,14 @@ jobs:
   # whether a particular PAT happens to be populated today.
   test:
     name: unit tests, typecheck, and manager-core consistency
-    if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
     runs-on: ubuntu-latest
     steps:
+      - name: probe the gate variable
+        run: |
+          echo "vars.CONSUMER_REPOS_ENABLED=[${{ vars.CONSUMER_REPOS_ENABLED }}]"
+          echo "eq_one=[${{ vars.CONSUMER_REPOS_ENABLED == '1' }}]"
+          echo "secrets.CONSUMER_TOKEN set=[${{ secrets.CONSUMER_TOKEN != '' }}]"
+
       # pi-manager-core first, so this repo lands in a subdirectory and the
       # sibling checkout can go beside it -- the layout resolver-copies and
       # allowlists look for, and the layout these four repos have in a working
