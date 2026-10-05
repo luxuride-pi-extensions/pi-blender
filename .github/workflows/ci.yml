@@ -121,37 +121,47 @@ jobs:
       # STEP 1 of 2: everything that needs NOTHING but this checkout. No
       # CONSUMER_TOKEN, no sibling repository, no pi-manager-core checkout.
       #
-      # THE COMMAND IS DELIBERATELY A SUBSET, and it is worth being precise
-      # about why, because "just run npm test" is the obvious version and it
-      # is NOT token-free:
+      # AND NOTHING ELSE GOES HERE, because "needs nothing" is a much
+      # narrower claim than it looks and this step was previously built on a
+      # measurement of 210 tests that was wrong. It ran them, they passed, and
+      # the reason they passed was that the worktree pi-blender was measured in
+      # sits next to a real ../pi-manager-core checkout, which the resolver
+      # finds as its third candidate -- so pointing PI_MANAGER_CORE_DIR at a
+      # missing directory proved nothing, because the resolver treats a
+      # set-but-absent override as "looked there, not found" and falls
+      # through. The first CI run on this branch is what caught it:
       #
-      #   npm test   -> 26 files, 231 tests, 21 pass and 210 FAIL
+      #   Error: manager-core could not be found. Looked in:
+      #   PI_MANAGER_CORE_DIR; pi's installed extensions dir
+      #   (/home/runner/work/_temp/agent-dir/extensions/manager-core);
+      #   a sibling checkout of manager-core; a sibling checkout of
+      #   pi-manager-core.
+      #   ...
+      #   # tests 71
+      #   # pass 26
+      #   # fail 45
       #
-      # 210 of the 231 fail on ONE hard error -- manager-core.ts's
-      # describeMissingCore() -- because they import the resolver shim and
-      # this runner has no core to resolve. That is not a property of the
-      # 210, it is a property of the missing checkout. A suite that fails
-      # wholesale on a missing setup step verifies nothing, says nothing
-      # about the commit, and gives a reader no way to tell which of the two
-      # they are looking at.
+      # So this list is now MEASURED, not reasoned: each file was run on its
+      # own from a `git archive` export -- no sibling checkout, no installed
+      # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
+      # not exist -- which is the state this step creates. Exactly four files
+      # and 26 tests survive:
       #
-      # So step 1 runs the part that genuinely does not need a core -- the 26
-      # files minus the two whose staged copy cannot be told where the core
-      # is:
+      #   concurrency-budget.test.mjs   11
+      #   module-paths.test.mjs          7
+      #   tool-params.test.mjs           3
+      #   windowless-tools.test.mjs      5
       #
-      #   node --test <26 files>  -> 210 tests, 210 pass, 0 fail
-      #   node --test <the 2>     ->  21 tests,   4 pass, 17 FAIL
-      #   --------------------------------------------------
-      #   231 tests, 214 answered here; the other 17 need the sibling.
-      #
-      # Both numbers were measured with PI_MANAGER_CORE_DIR pointing at a
-      # directory that does not exist, which is also what this step sets it
-      # to, on purpose: the resolver treats a set-but-absent override as
-      # "looked there, not found" and falls through to its remaining
-      # candidates, so nothing is invented and no copy installed on the
-      # runner image can leak in and answer a question this run has not
-      # earned the right to ask.
-      - name: typecheck and unit tests (no core checkout needed)
+      # Every other file fails at import on one hard error --
+      # manager-core.ts's describeMissingCore(), reached through
+      # config.ts:85, which loads the resolver shim at module scope. A suite
+      # that fails wholesale on a missing setup step verifies nothing, says
+      # nothing about the commit, and gives a reader no way to tell which of
+      # the two they are looking at. So the list is spelled out rather than
+      # derived from `ls test/*.test.mjs`: a new test file is unverified by
+      # default and has to be added here, which is the safe direction for a
+      # mistake in the other one.
+      - name: typecheck and the four core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -160,8 +170,24 @@ jobs:
           mkdir -p "$PI_AGENT_DIR"
           npm run typecheck
           node --test \
-            $(ls test/*.test.mjs \
-                | grep -v -e launch-guard -e watch-window)
+            test/concurrency-budget.test.mjs \
+            test/module-paths.test.mjs \
+            test/tool-params.test.mjs \
+            test/windowless-tools.test.mjs
+
+      # ----------------------------------------------------------------------
+      # STEP 1b: the other 22 files, in a layout where the core CAN be found.
+      #
+      # This is where the bulk of pi-blender's suite belongs, and it needs the
+      # same checkout step 2 does -- so it is here, after that checkout, not
+      # in step 1 pretending to be token-free.
+      #
+      # The two suites step 2 exists for are NOT here: they stage this
+      # extension into a temp dir by copying launch.ts, config.ts and
+      # manager-core.ts, and then drive the COPY -- so the copy's candidates
+      # are its own temp-dir siblings plus the installed extensions dir, and
+      # neither can be a checkout. They need PI_MANAGER_CORE_DIR to be an
+      # absolute path they inherit, which is what step 2's env supplies.
 
       # ----------------------------------------------------------------------
       # STEP 2 of 2: the checks that genuinely need a sibling checkout.
@@ -185,7 +211,7 @@ jobs:
       # THE TOKEN IS A SEPARATE MATTER: pi-manager-core is a PRIVATE
       # repository, github.token cannot read it, and the checkout needs
       # secrets.CONSUMER_TOKEN. With no token the steps below are skipped,
-      # the unverified 17 are named in this job's step summary, and
+      # the unverified files are named in this job's step summary, and
       # coverage-audit fails the run -- loudly, and on purpose.
       #
       # SHALLOW, ON PURPOSE, and for a reason worth writing down: a
@@ -214,7 +240,29 @@ jobs:
         working-directory: projects/pi-manager-core
         run: npm ci
 
-      # The same two suites as step 1 leaves out, now with
+      # The 22 files that step 1 could not run, now against a core that
+      # actually exists. This is the bulk of pi-blender's suite, so it is
+      # worth being explicit that it is here BECAUSE it needs the sibling
+      # checkout: `git ls-remote` in coverage-audit proves the token works,
+      # and this step is the first thing that would notice if it did not.
+      #
+      # blender-probes.test.mjs and branch-e2e.test.mjs are in this group and
+      # NOT in step 1 for a second reason as well: they launch a real
+      # Blender, so they take minutes rather than seconds.
+      - name: the rest of the suite, against the core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        env:
+          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        run: |
+          node --test \
+            $(ls test/*.test.mjs \
+                | grep -v -e launch-guard -e watch-window \
+                          -e concurrency-budget -e module-paths \
+                          -e tool-params -e windowless-tools)
+
+      # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
       - name: launch and watch-window suites, against the core
         if: ${{ steps.token.outputs.has_token == '1' }}
@@ -252,6 +300,13 @@ jobs:
       # coverage-audit for the same reason; without it this job would be red
       # for a reason the reader has to be told is the one they can see
       # there.
+      #
+      # Only these two. The 22 files step 1b now carries are not run here:
+      # without a core they fail wholesale on describeMissingCore(), which
+      # measures the missing checkout rather than the commit and buries the
+      # real signal under 40 identical failures. What they cost is 184 tests
+      # NOT VERIFIED, which is what the step summary below reports and what
+      # coverage-audit turns into a red run.
       - name: the core-dependent suites, unsatisfiable without a token
         if: ${{ steps.token.outputs.has_token != '1' }}
         env:
@@ -267,13 +322,24 @@ jobs:
         if: ${{ steps.token.outputs.has_token != '1' }}
         run: |
           {
-            echo "### 17 tests were NOT verified in this job"
+            echo "### Most of this repository's suite was NOT verified"
+            echo
+            echo "26 tests ran, in 4 files: concurrency-budget,"
+            echo "module-paths, tool-params and windowless-tools."
+            echo "Those are the only files measured to pass without a"
+            echo "pi-manager-core checkout."
             echo
             echo '`test/launch-guard.test.mjs` and'
             echo '`test/watch-window.test.mjs` stage this extension into a'
             echo 'temp dir and ask it where pi-manager-core is, and'
             echo 'nothing answered. The step above ran them anyway, so'
             echo 'that number is measured rather than assumed.'
+            echo
+            echo 'The other 22 test files need the same checkout and were'
+            echo 'not run at all: 184 tests NOT VERIFIED. Running them'
+            echo 'without it would fail all 22 on one describeMissingCore()'
+            echo 'error, which measures the missing checkout rather than'
+            echo 'this commit.'
             echo
             echo '`coverage-audit` is failing this run for the same'
             echo 'reason: `secrets.CONSUMER_TOKEN` is not set.'
@@ -294,11 +360,13 @@ jobs:
   #                   case the detect step above cannot see.
   #
   # Why "absent" is a failure rather than a skip: this repository's suite is
-  # 231 tests, and without a core checkout 17 of them cannot pass -- both
-  # halves measured, with the commands in the job above. A run that quietly
-  # verified 214 of 231 while reporting success is the failure mode this job
-  # exists to prevent, and it is worse than an outright red because it is
-  # invisible.
+  # 231 tests in 26 files, and 205 of them cannot run without a core
+  # checkout -- 4 files and 26 tests do, measured from a `git archive` export
+  # with PI_MANAGER_CORE_DIR pointed at a directory that does not exist, and
+  # the two staging suites measured separately with the core present (21
+  # pass). A run that quietly verified 26 of 231 while reporting success is
+  # the failure mode this job exists to prevent, and it is worse than an
+  # outright red because it is invisible.
   #
   # To make this green: add `secrets.CONSUMER_TOKEN` (a PAT with read
   # access to luxuride-pi-extensions) under Settings -> Secrets -> Actions.
@@ -323,8 +391,9 @@ jobs:
               "CONSUMER_TOKEN is not set on this repository, so the" \
               "sibling checkout, the launch and watch-window suites" \
               "against it, and the four cross-repo consistency checks" \
-              "were skipped, and 17 of the 231 tests in pi-blender" \
-              "cannot pass without a core checkout. This run is" \
+              "were skipped, and 205 of the 231 tests in pi-blender" \
+              "cannot run without a core checkout -- 4 of 26 files can." \
+              "This run is" \
               "reported as FAILING on purpose: the alternative is a" \
               "green run in which nothing was verified. The reasoning" \
               "is in full in .github/workflows/ci.yml."
