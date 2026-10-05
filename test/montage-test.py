@@ -14,7 +14,7 @@ import sys
 
 import numpy
 
-sys.path.insert(0, "/var/home/lux/Projects/pi-blender/blender")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blender"))
 
 import montage  # noqa: E402
 

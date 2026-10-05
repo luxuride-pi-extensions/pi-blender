@@ -15,7 +15,11 @@ import os
 import sys
 import tempfile
 
-_BRIDGE_DIR = "/var/home/lux/Projects/pi-blender/blender"
+# Resolved from this file rather than hardcoded: the probe is run by
+# test/blender-probes.test.mjs against whichever checkout the tests live in, and
+# a hardcoded path made it silently exercise a DIFFERENT copy of the guard --
+# which is how the guard could be changed here and go unproven.
+_BRIDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blender")
 failures = []
 
 
@@ -115,6 +119,55 @@ def main():
         blend_path,
         "mutating a property on a live object",
         f"bpy.data.objects['{cube.name}'].location.x = 99.0",
+    )
+    # bpy.data's OWN removers, not bpy.data.<coll>'s. Measured against Blender
+    # 5.2: batch_remove and orphans_purge live on bpy.data itself, and both
+    # removed datablocks while the guard was installed.
+    expect_refused(live_bridge, blend_path, "bpy.data.batch_remove", "bpy.data.batch_remove(list(bpy.data.objects))")
+    expect_refused(live_bridge, blend_path, "bpy.data.orphans_purge", "bpy.data.orphans_purge()")
+    # The outliner namespace's purge really deletes ("Info: Deleted 1
+    # data-block(s)"), and the namespace was not on the refusal list.
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "bpy.ops.outliner.orphans_purge",
+        "bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)",
+    )
+    # bpy.context was not patched at all, so the scene collection's link/unlink
+    # changed whether objects were in the scene, and the datablocks it handed
+    # out were the REAL ones -- which walked around every assignment refusal.
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "bpy.context.scene.collection.objects.unlink",
+        # By name, not by index: the scene collection is empty under
+        # --factory-startup, so objects[0] would raise IndexError before the
+        # guard was ever reached and the case would prove nothing.
+        f"bpy.context.scene.collection.objects.unlink(bpy.data.objects['{cube.name}'])",
+    )
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "bpy.context.scene.collection.objects.link",
+        f"bpy.context.scene.collection.objects.link(bpy.data.objects['{cube.name}'])",
+    )
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "bpy.context.scene.collection.children.link",
+        "bpy.context.scene.collection.children.link(bpy.data.collections.new('sneak'))",
+    )
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "assigning through bpy.context (real datablock)",
+        "bpy.context.scene.objects[0].location.x = 99.0",
+    )
+    expect_refused(
+        live_bridge,
+        blend_path,
+        "assigning through the depsgraph bpy.context hands out",
+        "bpy.context.evaluated_depsgraph_get().objects[0].location.x = 99.0",
     )
 
     # --- must still work -------------------------------------------------

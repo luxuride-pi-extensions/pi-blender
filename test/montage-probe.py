@@ -17,7 +17,10 @@ import os
 import sys
 import tempfile
 
-REPO = "/var/home/lux/Projects/pi-blender"
+# This file's own parent directory is the repo, so the probe tests the checkout
+# it lives in. A hardcoded path here meant a developer's other clone got the
+# coverage instead of the code under review.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE = os.path.join(REPO, "blender", "live-bridge.py")
 
 # live-bridge.py runs its module-level bootstrap on import, which creates bridge
@@ -76,9 +79,11 @@ def main():
     blend_path = os.path.join(tempfile.mkdtemp(prefix="montage-probe-blend-"), "model.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
 
-    output_dir = "/var/home/lux/blender-dbg/montage-out"
-    # Outside /tmp on purpose: the flatpak sandbox can read /var/home/lux but a
-    # sheet written under /tmp is not reachable from the host for inspection.
+    # A scratch directory rather than a hardcoded one, so the probe does not
+    # write into the developer's home on every run. It was previously
+    # /var/home/lux/blender-dbg/montage-out, which made the output land outside
+    # anything the test harness cleans up.
+    output_dir = os.path.join(tempfile.mkdtemp(), "montage-out")
     os.makedirs(output_dir, exist_ok=True)
     for stale in os.listdir(output_dir):
         os.remove(os.path.join(output_dir, stale))
