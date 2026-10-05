@@ -2,7 +2,32 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    # WHY THIS LIST AND NOT `[master]` -- do not tidy it back.
+    #
+    # `pull_request` covers pushes to a branch that HAS a PR, and nothing
+    # else. Every push to a branch with no PR -- the ordinary state of a
+    # branch under development -- ran no CI at all, so the suite reported
+    # success on commits nobody had checked. The branches below are the ones
+    # that exist, taken from `git branch -a` rather than guessed; each has
+    # commits that master does not:
+    #
+    #   master                 -- the integration branch, and the default.
+    #   feat/packaging         -- the `files` allowlist and release workflow.
+    #   fix/ci-checkout-order  -- actions/checkout ordering in this workflow.
+    #   ci/github-actions      -- the actions v5 migration.
+    #   fix/review-findings    -- the current review lane; the branch this
+    #                             list was fixed on.
+    #
+    # A new development branch inherits no trigger until it is added here,
+    # which is a gap -- but the alternative, listing nothing but master, is
+    # the gap that hid four branches from CI for the life of the suite. Keep
+    # this list in step with `git branch -a` when a branch is created.
+    branches:
+      - master
+      - feat/packaging
+      - fix/ci-checkout-order
+      - ci/github-actions
+      - fix/review-findings
   pull_request:
   workflow_dispatch:
 
