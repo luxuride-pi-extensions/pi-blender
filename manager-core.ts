@@ -165,9 +165,42 @@ export interface ManagerPromptParts {
 }
 
 /**
+ * The outcome of ONE prompt read. Mirrors shared/prompts.d.ts, and is declared
+ * here rather than imported because this file resolves the core at RUNTIME -- it
+ * cannot use a static relative import (see the comment at the top). Two copies
+ * of a type declaration is a drift surface, so test/core.test.mjs checks this
+ * file's arity and names against the live core.
+ */
+export interface PromptReadReport {
+	degraded: boolean;
+	path: string;
+	role?: string;
+}
+
+/** How a composition's halves turned out, in composition order. */
+export interface ManagerPromptReport {
+	degraded: boolean;
+	halves: PromptReadReport[];
+}
+
+/**
  * Everything a consumer may call. Kept in step with the shared core by
  * test/core.test.mjs, in both directions: a name declared here that the core
  * lacks, and a name the core has that is not declared here, both fail.
+ *
+ * The report parameters on readPromptFile and composeManagerPrompt are the
+ * attribution capability: both take an optional object they FILL on the success
+ * path as well as the failure path, so a caller can distinguish "read it, it
+ * was fine" from "never looked" and can say WHICH half of a composition
+ * degraded. They are optional and the returns are unchanged `string`, which is
+ * what keeps pi-blender/config.ts and pi-unity/config.ts -- both typed
+ * `getManagerPrompt(): string` -- source-compatible across three independently
+ * released repos. A caller that ignores the report keeps exactly the
+ * best-effort substring behaviour it had before.
+ *
+ * This file is byte-identical in all four repos and test/resolver-copies.mjs
+ * enforces that, so any edit here must be recopied into pi-blender, pi-unity and
+ * pi-unity-blender -- `node test/resolver-copies.mjs --fix` writes them.
  */
 export interface ManagerCore {
 	xdgCacheHome(): string;
@@ -176,9 +209,9 @@ export interface ManagerCore {
 	getInstalledExtensionDir(name: string): string;
 
 	stripFrontmatter(source: unknown): string;
-	readPromptFile(path: string, role: string): string;
+	readPromptFile(path: string, role: string, report?: PromptReadReport): string;
 	isDegradedPrompt(text: unknown): boolean;
-	composeManagerPrompt(parts: ManagerPromptParts): string;
+	composeManagerPrompt(parts: ManagerPromptParts, report?: ManagerPromptReport): string;
 
 	CHILD_AGENT_PROMPT_PATTERN: RegExp;
 	readActiveAgentName(systemPrompt: string | null | undefined): string | null;
