@@ -8,7 +8,7 @@ stock pi, with fixes for a **flatpak** Blender install.
 ## Layout
 
 ```
-index.ts            extension entry (13 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
+index.ts            extension entry (23 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
 launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
@@ -19,8 +19,11 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
   agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
                       + blender-finalizer + blender-script-runner
-                      + blender-merger + the four blender-composition-*
-                      subagent definitions (thirteen distinct roles)
+                      + blender-merger + blender-reference-describer
+                      + the four blender-composition-*
+                      subagent definitions (twelve distinct roles; blender-manager.md
+                      is the manager PROMPT rather than an installed agent, and
+                      exchange.md is the manager/child message contract, not a role)
                       TEMPLATES — run `npm run install:agents`, which copies
                       them to ~/.pi/agent/agents/ and substitutes their
                       `extensions:` frontmatter placeholders with absolute
