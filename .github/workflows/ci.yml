@@ -35,31 +35,22 @@ permissions:
   contents: read
 
 jobs:
-  # There is no token-free job in this repository, which is a property of the
-  # suite rather than an omission.
+  # ===========================================================================
+  # THERE IS NO GATE ON THIS JOB ANYMORE.
   #
-  # test/launch-harness.mjs stages this extension into a temp dir by copying
-  # launch.ts, config.ts and manager-core.ts, and then runs against that copy --
-  # which is what makes a missing bundled script testable at all. 17 of the
-  # launch-guard and watch-window checks then ask where pi-manager-core is, and
-  # the staged copy's candidates are its own temp-dir siblings plus the
-  # installed extensions dir. Neither can be a checkout, because the staged
-  # copy is not next to one.
+  # It used to carry `if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}` and
+  # `vars.*` is a REPOSITORY VARIABLE, which nobody had set -- so the whole
+  # workflow reported SUCCESS having executed zero jobs, which is
+  # indistinguishable from a passing build. The gate is gone; what replaced
+  # it is the `coverage-audit` job at the bottom of this file, and the rule
+  # is absolute:
   #
-  # So those checks are unanswerable without the core's source. Splitting the
-  # suite so that a "unit" job could report 195 of 212 would be a green light
-  # for a suite that has not been run, and the 17 that were skipped would be
-  # the ones that catch a broken launch path.
+  #   either the checks run, or the workflow is visibly NOT-PASSED.
   #
-  # Gated on a repository VARIABLE rather than `secrets`: `secrets` is not in
-  # scope for a job-level `if` (only github/needs/vars/inputs are), and writing
-  # `if: ${{ secrets.CONSUMER_TOKEN != '' }}` fails the whole workflow file with
-  # no jobs at all. A variable also expresses the real condition -- "this repo
-  # can read its siblings" -- which is a property of the configuration, not of
-  # whether a particular PAT happens to be populated today.
+  # There is never a green run in which nothing was verified.
+  # ===========================================================================
   test:
     name: unit tests, typecheck, and manager-core consistency
-    if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
     runs-on: ubuntu-latest
     steps:
       # THIS REPOSITORY FIRST, ON PURPOSE, AND NOT BY ACCIDENT.
@@ -67,69 +58,173 @@ jobs:
       # actions/checkout runs `clean: true`, which deletes the CONTENTS OF
       # $GITHUB_WORKSPACE before it clones. $GITHUB_WORKSPACE is the default
       # path (an empty `path:`), so with the sibling checkouts already at
-      # projects/*, this step wipes every one of them -- and the run then dies
-      # a step later with
+      # projects/*, this step wipes every one of them -- and the run then
+      # dies a step later with
       #
-      #   error: An error occurred trying to start process '/usr/bin/bash'
-      #   with working directory '.../projects/pi-manager-core'.
-      #   No such file or directory
+      #   error: An error occurred trying to start process
+      #   '/usr/bin/bash' with working directory
+      #   '.../projects/pi-manager-core'. No such file or directory
       #
       # which reads like a checkout that never happened and is actually one
-      # that was deleted. Every sibling checkout must therefore come AFTER this
-      # step.
+      # that was deleted. Every sibling checkout must therefore come AFTER
+      # this step.
       - uses: actions/checkout@v5
-
-      # pi-manager-core next, so this repo lands in a subdirectory and the
-      # sibling checkouts can go beside it -- the layout resolver-copies.mjs
-      # and allowlists.mjs look for, and the layout these four repos have in a
-      # working directory.
-      - uses: actions/checkout@v5
-        with:
-          repository: luxuride-pi-extensions/pi-manager-core
-          ref: master
-          path: projects/pi-manager-core
-          # github.token cannot read a PRIVATE repository, and this one is
-          # PRIVATE. A PAT with read access to the org.
-          token: ${{ secrets.CONSUMER_TOKEN }}
-
 
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
-      # The core's own dependency install, and not just its files: jiti is a
-      # transitive dependency of @earendil-works/pi-coding-agent, so this is
-      # the only place on a clean runner where the loader these tests need
-      # exists.
-      - name: install the manager core
-        working-directory: projects/pi-manager-core
-        run: npm ci
-
+      # --legacy-peer-deps is not optional: package.json declares
+      # peerDependencies: { "pi-manager-core": "*" }, the documented shape
+      # for a Pi package (docs/packages.md), so plain `npm ci` fails with
+      # 404 on a package that was never published.
       - name: install pi-blender
         run: npm ci --legacy-peer-deps
 
-      # pi-blender's launch and watch-window suites resolve the core through
-      # the SAME shim a real session uses, and the staged copy those tests
-      # drive lives in a temp dir -- so neither a sibling checkout nor
-      # <extensions>/manager-core can be found from it. This points the shim at
-      # the checkout above. Without it 17 tests fail on a hard "manager-core
-      # could not be found", which is the shim refusing to run from a stale
-      # copy rather than a defect in anything under test.
+      # ----------------------------------------------------------------------
+      # WHY A STEP-LEVEL GATE AND NOT A JOB-LEVEL ONE
       #
-      # --legacy-peer-deps is not optional: package.json declares
-      # peerDependencies: { "pi-manager-core": "*" }, the documented shape for a
-      # Pi package (docs/packages.md), so plain `npm ci` fails with 404 on a
-      # package that was never published.
-      - name: typecheck and test
+      # `secrets` is not an allowed context in ANY `if`: the job-level list is
+      # github/needs/vars/inputs, the step-level list is the same plus
+      # strategy/job/runner/env/steps. Writing `secrets.CONSUMER_TOKEN != ''`
+      # in an `if` does not evaluate false, it fails the whole workflow file
+      # with no jobs at all. So "is there a token" cannot be asked in an
+      # `if` at all, and the only honest way to branch on it is to MOVE it
+      # into a step's output, where `steps.<id>.outputs` IS an allowed
+      # context -- and only for steps defined ABOVE the one that reads it,
+      # which is why this step is here and not further down.
+      #
+      # Note what this step does NOT do: it cannot fail the run. Presence is
+      # not reachability, so this succeeding is not a licence to skip
+      # anything. `coverage-audit` is what turns an unusable token into a
+      # red run.
+      - name: detect the cross-repo token
+        id: token
         env:
-          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
+          CONSUMER_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+        run: |
+          if [ -n "${CONSUMER_TOKEN}" ]; then
+            echo "has_token=1" >> "$GITHUB_OUTPUT"
+            echo "CONSUMER_TOKEN is set."
+          else
+            echo "has_token=" >> "$GITHUB_OUTPUT"
+            echo "CONSUMER_TOKEN is not set on this repository."
+            echo "::warning title=cross-repo checks will be skipped::The" \
+              "sibling checkout and the four cross-repo consistency" \
+              "checks need secrets.CONSUMER_TOKEN. The coverage-audit" \
+              "job in this workflow FAILS when it is missing, so this" \
+              "run is not green on account of that skip."
+          fi
+
+      # ----------------------------------------------------------------------
+      # STEP 1 of 2: everything that needs NOTHING but this checkout. No
+      # CONSUMER_TOKEN, no sibling repository, no pi-manager-core checkout.
+      #
+      # THE COMMAND IS DELIBERATELY A SUBSET, and it is worth being precise
+      # about why, because "just run npm test" is the obvious version and it
+      # is NOT token-free:
+      #
+      #   npm test   -> 26 files, 231 tests, 21 pass and 210 FAIL
+      #
+      # 210 of the 231 fail on ONE hard error -- manager-core.ts's
+      # describeMissingCore() -- because they import the resolver shim and
+      # this runner has no core to resolve. That is not a property of the
+      # 210, it is a property of the missing checkout. A suite that fails
+      # wholesale on a missing setup step verifies nothing, says nothing
+      # about the commit, and gives a reader no way to tell which of the two
+      # they are looking at.
+      #
+      # So step 1 runs the part that genuinely does not need a core -- the 26
+      # files minus the two whose staged copy cannot be told where the core
+      # is:
+      #
+      #   node --test <26 files>  -> 210 tests, 210 pass, 0 fail
+      #   node --test <the 2>     ->  21 tests,   4 pass, 17 FAIL
+      #   --------------------------------------------------
+      #   231 tests, 214 answered here; the other 17 need the sibling.
+      #
+      # Both numbers were measured with PI_MANAGER_CORE_DIR pointing at a
+      # directory that does not exist, which is also what this step sets it
+      # to, on purpose: the resolver treats a set-but-absent override as
+      # "looked there, not found" and falls through to its remaining
+      # candidates, so nothing is invented and no copy installed on the
+      # runner image can leak in and answer a question this run has not
+      # earned the right to ask.
+      - name: typecheck and unit tests (no core checkout needed)
+        env:
+          PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
           PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
         run: |
           mkdir -p "$PI_AGENT_DIR"
           npm run typecheck
-          npm test
+          node --test \
+            $(ls test/*.test.mjs \
+                | grep -v -e launch-guard -e watch-window)
+
+      # ----------------------------------------------------------------------
+      # STEP 2 of 2: the checks that genuinely need a sibling checkout.
+      #
+      # The old comment here said "there is no token-free job in this
+      # repository", and named 17 launch-guard and watch-window checks that
+      # ask where pi-manager-core is. That was true only because
+      # test/launch-harness.mjs stages this extension into a temp dir by
+      # copying launch.ts, config.ts and manager-core.ts, and then drives
+      # the COPY -- so the copy's candidates are its own temp-dir siblings
+      # plus the installed extensions dir, and neither can be a checkout.
+      #
+      # So the shim in the staged copy needs an absolute path, and
+      # PI_MANAGER_CORE_DIR is exactly that: it is the FIRST candidate,
+      # before the installed dir and before the sibling checkouts (see
+      # candidateDirs() in manager-core.ts). Pointing it at
+      # projects/pi-manager-core makes the staged copy find the same core a
+      # real session would, which is what turns those 17 from unanswerable
+      # into answerable.
+      #
+      # THE TOKEN IS A SEPARATE MATTER: pi-manager-core is a PRIVATE
+      # repository, github.token cannot read it, and the checkout needs
+      # secrets.CONSUMER_TOKEN. With no token the steps below are skipped,
+      # the unverified 17 are named in this job's step summary, and
+      # coverage-audit fails the run -- loudly, and on purpose.
+      #
+      # SHALLOW, ON PURPOSE, and for a reason worth writing down: a
+      # previous attempt at this checked out the sibling's branch history
+      # and needed `fetch-depth: 0` to make resolver-copies.mjs's diff
+      # meaningful. It does not need one -- the core's own CI is what
+      # enforces that contract across all three consumers -- and the full
+      # history of a private repository is exactly the token's worth of
+      # surface to hand to steps that have no use for it.
+      - name: check out pi-manager-core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        uses: actions/checkout@v5
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          token: ${{ secrets.CONSUMER_TOKEN }}
+          fetch-depth: 1
+
+      # The core's own dependency install, and not just its files: jiti is
+      # a transitive dependency of @earendil-works/pi-coding-agent, so
+      # this is the only place on a clean runner where the loader these
+      # tests need exists.
+      - name: install the manager core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        working-directory: projects/pi-manager-core
+        run: npm ci
+
+      # The same two suites as step 1 leaves out, now with
+      # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
+      - name: launch and watch-window suites, against the core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        env:
+          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        run: |
+          node --test test/launch-guard.test.mjs \
+                          test/watch-window.test.mjs
 
       # The core's own cross-repo checks, against the checkout beside it:
       # resolver-copies diffs this repo's manager-core.ts and
@@ -137,13 +232,144 @@ jobs:
       # asserts every tool this manager's prompt names is in the index.ts
       # allowlist, and dependency-declaration asserts the peer range.
       #
-      # pi-manager-core's CI runs these same checks against all three consumers.
-      # Running them here too means a change here fails a check in the PR that
-      # made it, instead of only in the core's next run.
+      # pi-manager-core's CI runs these same checks against all three
+      # consumers. Running them here too means a change here fails a check
+      # in the PR that made it, instead of only in the core's next run.
       - name: cross-repo consistency checks
+        if: ${{ steps.token.outputs.has_token == '1' }}
         working-directory: projects/pi-manager-core
         run: |
-          for check in resolver-copies allowlists dependency-declaration agent-rosters; do
+          for check in resolver-copies \
+                       dependency-declaration \
+                       allowlists agent-rosters; do
             echo "==> $check"
             node test/$check.mjs
           done
+
+      # And, when there is NO token: the two suites step 2 could not answer,
+      # run anyway so the number is measured rather than asserted here.
+      # continue-on-error because the run is ALREADY being failed by
+      # coverage-audit for the same reason; without it this job would be red
+      # for a reason the reader has to be told is the one they can see
+      # there.
+      - name: the core-dependent suites, unsatisfiable without a token
+        if: ${{ steps.token.outputs.has_token != '1' }}
+        env:
+          PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        continue-on-error: true
+        run: |
+          node --test test/launch-guard.test.mjs \
+                          test/watch-window.test.mjs
+
+      - name: say what was left unverified
+        if: ${{ steps.token.outputs.has_token != '1' }}
+        run: |
+          {
+            echo "### 17 tests were NOT verified in this job"
+            echo
+            echo '`test/launch-guard.test.mjs` and'
+            echo '`test/watch-window.test.mjs` stage this extension into a'
+            echo 'temp dir and ask it where pi-manager-core is, and'
+            echo 'nothing answered. The step above ran them anyway, so'
+            echo 'that number is measured rather than assumed.'
+            echo
+            echo '`coverage-audit` is failing this run for the same'
+            echo 'reason: `secrets.CONSUMER_TOKEN` is not set.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ===========================================================================
+  # THE ALWAYS-RUNNING AUDIT.
+  #
+  # A sibling of `test` with no `if` at all, so it executes on every trigger
+  # and its conclusion is a fact about the configuration rather than about
+  # whether a gate happened to be open today. It cannot be green in a run
+  # that verified nothing, because that is exactly what it fails on.
+  #
+  #   token absent -> it fails, and says what setting it would change.
+  #   token set    -> it lists pi-manager-core's refs over HTTPS and
+  #                   proves the sibling checkout in `test` can read them.
+  #                   A revoked or expired PAT fails HERE, which is the one
+  #                   case the detect step above cannot see.
+  #
+  # Why "absent" is a failure rather than a skip: this repository's suite is
+  # 231 tests, and without a core checkout 17 of them cannot pass -- both
+  # halves measured, with the commands in the job above. A run that quietly
+  # verified 214 of 231 while reporting success is the failure mode this job
+  # exists to prevent, and it is worse than an outright red because it is
+  # invisible.
+  #
+  # To make this green: add `secrets.CONSUMER_TOKEN` (a PAT with read
+  # access to luxuride-pi-extensions) under Settings -> Secrets -> Actions.
+  # The old `CONSUMER_REPOS_ENABLED` variable is no longer read by this
+  # workflow and can be deleted.
+  # ===========================================================================
+  coverage-audit:
+    name: the sibling checkout must be verifiable, not assumed
+    runs-on: ubuntu-latest
+    steps:
+      - name: assert the cross-repo checkout is reachable
+        env:
+          CONSUMER_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+          EXPECTED_BRANCH: >-
+            ${{ github.event_name == 'pull_request' && github.base_ref
+            || 'master' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CONSUMER_TOKEN}" ]; then
+            echo "::error title=CI is verifying less than it looks::" \
+              "CONSUMER_TOKEN is not set on this repository, so the" \
+              "sibling checkout, the launch and watch-window suites" \
+              "against it, and the four cross-repo consistency checks" \
+              "were skipped, and 17 of the 231 tests in pi-blender" \
+              "cannot pass without a core checkout. This run is" \
+              "reported as FAILING on purpose: the alternative is a" \
+              "green run in which nothing was verified. The reasoning" \
+              "is in full in .github/workflows/ci.yml."
+            echo "::error title=CONSUMER_REPOS_ENABLED is obsolete::That" \
+              "repository VARIABLE used to gate the only job in this" \
+              "workflow, which made an unset variable mean" \
+              "success-with-zero-jobs. It is no longer read by this" \
+              "workflow; you can delete it."
+            exit 1
+          fi
+
+          echo "::group::resolving pi-manager-core"
+          # HTTPS rather than an SSH remote even though the token is a PAT:
+          # an SSH agent on the runner image is a second moving part, and
+          # this check exists to measure ONE thing.
+          #
+          # Heads only, and no history: a reachability probe has no use for
+          # the history and the token should not be spent fetching it. The
+          # branch is the base branch for a PR and master otherwise, so an
+          # empty result on a PR names the branch it tried rather than just
+          # reporting "no refs".
+          url="https://x-access-token:${CONSUMER_TOKEN}"
+          url="$url@github.com/luxuride-pi-extensions"
+          url="$url/pi-manager-core.git"
+          if git ls-remote --heads "$url" "$EXPECTED_BRANCH" \
+            | grep -q .; then
+            echo "ok pi-manager-core $EXPECTED_BRANCH is reachable" \
+              "with CONSUMER_TOKEN"
+          else
+            {
+              echo "pi-manager-core $EXPECTED_BRANCH is NOT reachable."
+              echo "An empty result here means the secret is wrong,"
+              echo "expired, or lacks access to the private"
+              echo "luxuride-pi-extensions/pi-manager-core."
+              echo "Set secrets.CONSUMER_TOKEN to a PAT with read"
+              echo "access and re-run."
+            } >&2
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          # A second fact, stated in the log rather than left implicit:
+          # with the token present the gate above is open and `test` really
+          # did run everything. Without this line the green case and the
+          # near-miss case are told apart only by an `if:`.
+          echo "CONSUMER_TOKEN is set, so 'test' ran the sibling" \
+            "checkout, the launch and watch-window suites against it," \
+            "and the four cross-repo consistency checks."
