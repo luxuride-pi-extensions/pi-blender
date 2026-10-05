@@ -141,10 +141,11 @@ def main():
     # Two panels of the SAME scene differ only if the cameras moved: identical
     # bytes would mean every view rendered the same picture, which is a montage
     # that cannot compare anything.
-    digests = {
-        open(path, "rb").read()
-        for path in result["panelPaths"]
-    }
+    def panel_bytes(path):
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    digests = {panel_bytes(path) for path in result["panelPaths"]}
     check(len(digests) == 4, f"each view produced a distinct panel: {len(digests)} distinct of 4")
 
     # The framing must describe the cube, not the world: the cube sits at
@@ -153,7 +154,8 @@ def main():
     centre = result["framing"]["center"]
     expected_centre = [3.0, -2.0, 1.0]
     check(
-        all(abs(a - b) < 0.01 for a, b in zip(centre, expected_centre)),
+        len(centre) == len(expected_centre)
+        and all(abs(a - b) < 0.01 for a, b in zip(centre, expected_centre, strict=True)),
         f"framing centre is the subject's, not the world's: {centre}",
     )
     check(
