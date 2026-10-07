@@ -142,6 +142,25 @@ export interface EngageCommandOptions {
 	getArgumentCompletions?: (argumentPrefix: string) => unknown[] | null | Promise<unknown[] | null>;
 }
 
+export interface LazyToolGateOptions {
+	/** The family of tool names that activate together. */
+	toolNames?: readonly string[];
+	/**
+	 * Called at each turn boundary; when it returns true the family is
+	 * re-armed before the run starts. Typically the manager gate's
+	 * isEngaged, so an engaged session never runs a turn without its tools.
+	 */
+	isEngaged?: () => boolean;
+}
+
+export interface LazyToolGate {
+	isActive(): boolean;
+	activate(ctx: unknown): boolean;
+	shouldActivateOnCall(event: { toolName?: string } | null | undefined): boolean;
+	reset(reason?: string): void;
+	install(pi: unknown): void;
+}
+
 export interface ExitCommandOptions {
 	name: string;
 	description?: string;
@@ -185,6 +204,7 @@ export interface ManagerCore {
 
 	createManagerMode(options?: ManagerModeOptions): ManagerMode;
 	createContextInjection(options: ContextInjectionOptions): ContextInjectionHandler;
+	createLazyToolGate(options?: LazyToolGateOptions): LazyToolGate;
 
 	registerEngageCommand(
 		pi: { registerCommand: unknown; sendUserMessage: unknown },
