@@ -58,6 +58,33 @@ jobs:
         with:
           node-version: 22
 
+      # pi-unity-blender's three binder scripts ARE that package's product --
+      # they are what moves meshes between a live Blender and a live Unity --
+      # and they are Python files named in `files`. Nothing in CI can execute
+      # them: test/binder-scripts.test.mjs needs a real Blender build that
+      # ubuntu-latest does not have, and skips without one, which is the same
+      # "green with nothing verified" shape this suite is being fixed for. The
+      # release lane already packs the tarball, so it is the last place that
+      # can be sure the shipped Python compiles under the Python it ships for.
+      #
+      # Keyed on the directory existing rather than the package name, so this
+      # one file stays byte-identical in all four repos: the three that ship no
+      # Python skip the loop and report zero, which is a fact, not a failure.
+      - name: the shipped Python compiles
+        if: ${{ hashFiles('binder/scripts/*.py') != '' }}
+        run: |
+          set -euo pipefail
+          count=0
+          for py in binder/scripts/*.py; do
+            python3 -m py_compile "$py"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "binder/scripts/*.py is non-empty per hashFiles but no file compiled" >&2
+            exit 1
+          fi
+          echo "ok $count shipped Python script(s) compile under $(python3 -V)"
+
       - name: resolve the tag
         id: tag
         run: |
@@ -111,12 +138,44 @@ jobs:
       # duplicated in each repo on purpose -- a release workflow that borrows
       # another repository's test needs that repository checked out at the
       # right ref, which is a moving part a release cannot depend on.
+      #
+      # That duplication is also why the check below is SELF-CONTAINED: it reads
+      # only package.json and npm's own `npm pack --dry-run --json`, and knows
+      # nothing about any other repo in the suite. Keep it that way -- nothing
+      # here may name a sibling repository or a directory that only one of the
+      # four has, because this file is byte-identical in all four by design.
+      #
+      # "Byte-identical in all four" is the load-bearing constraint and it has
+      # now cost real work twice, so it is worth saying why it exists rather
+      # than only what it forbids. A release gate that existed in one repo and
+      # not the others would protect the package it was written for and leave
+      # the other three shipping whatever they shipped before. So the rule is
+      # not "keep the file tidy" -- it is "the gate must be the same gate
+      # everywhere, or it is not a suite-wide gate".
+      #
+      # The corollary is that a repo-specific check keys on something that
+      # EXISTS rather than on the package name: the Python block below is
+      # written so that three repos skip it and one runs it, and a block keyed
+      # on `pkg.name == "pi-unity-blender"` would be correct today and wrong
+      # the day a fifth repo ships Python.
+      #
+      # There is still no sync check keeping the four copies equal. That is a
+      # known gap, not a settled design: pi-manager-core/test/resolver-copies.mjs
+      # enforces byte-identity for manager-core.ts and
+      # scripts/agent-template-checks.mjs, and no equivalent covers this file.
+      #
+      # Zero git tags exist in any of the four repos as of this commit, so the
+      # `tag == v<package.json version>` check below has never been satisfied
+      # and no release has ever been cut through this workflow. There is also no
+      # CHANGELOG.md anywhere in the suite: the notes are generated from
+      # `git log` subjects, which is why that step has no CHANGELOG to read.
       - name: the tarball ships what the package needs
         run: |
           set -euo pipefail
           npm pack --dry-run --json > pack.json
           node -e '
             const fs = require("node:fs");
+            const path = require("node:path");
             const pkg = require("./package.json");
             const packed = JSON.parse(fs.readFileSync("pack.json", "utf8"));
             // npm keys the payload by package name, and older npm returns an
@@ -135,8 +194,189 @@ jobs:
               const shipped = paths.filter((x) => x.startsWith(bad));
               if (shipped.length) missing.push(`${shipped.length} file(s) under ${bad}, e.g. ${shipped[0]}`);
             }
+
+            // Every entry of `files` must actually be in the tarball, AND every
+            // relative import reachable from a shipped entry must resolve
+            // inside it. pi loads the extension from a git CLONE, where a
+            // missing allowlist entry is invisible -- the file is in the
+            // working tree either way -- so `files` only ever takes effect on
+            // this tarball, and a stale or dropped name there ships a package
+            // that cannot start.
+            //
+            // The import walk is what closes the gap the entry check above
+            // could not see. Every package here imports its runtime through a
+            // relative path from index.ts, written with a .js suffix:
+            //
+            //   pi-manager-core    ./shared/core.js
+            //   pi-blender         ./blender/runtime.js
+            //   pi-unity           ./unity/runtime.js
+            //   pi-unity-blender   ./binder/bridge.js
+            //
+            // so those directories are load-bearing exactly as much as the
+            // entry is. Drop `shared/` from `files` and the entry-only check
+            // still reported PASS, while the tarball lost 17 files including
+            // the module index.ts imports.
+            //
+            // Derived from the shipped files and the relative specifiers in
+            // them, so it names no directory of any particular repo and stays
+            // correct in all four, which share this file byte for byte.
+            //
+            // Resolution mirrors what pi and node do for these cases: an exact
+            // path first, then the TS-to-JS rewrite the sources use
+            // (`./blender/runtime.js` in a package that ships
+            // `blender/runtime.ts`, resolved from source by jiti), then the
+            // TypeScript sources themselves, then a directory index.
+            //
+            // The .ts candidates are load-bearing, not belt and braces: all
+            // four packages write their relative imports with a .js suffix and
+            // ship TypeScript, so a resolver that looked only for .js reported
+            // every runtime import in pi-blender, pi-unity and
+            // pi-unity-blender as missing. This file is byte-identical in all
+            // four repos, so a check that passes here and fails there is worse
+            // than no check. Verified by running this exact script against all
+            // four packages.
+            const shipped = new Set(paths);
+            const resolveIn = (from, spec) => {
+              const base = path.posix.normalize(
+                path.posix.join(path.posix.dirname(from), spec)
+              );
+              const cands = [base];
+              // Every package here writes its relative imports with a .js
+              // suffix and ships TypeScript -- `./blender/runtime.js` next to a
+              // `blender/runtime.ts` -- and pi resolves that from source
+              // through jiti. So REWRITE the specifier's extension rather
+              // than appending to it: appending would only ever ask for
+              // `runtime.js.ts`, which exists nowhere, and would report every
+              // runtime import in all three consumer packages as missing.
+              if (base.endsWith(".js") || base.endsWith(".mjs") ||
+                  base.endsWith(".cjs")) {
+                const stem = base.replace(/\.(js|mjs|cjs)$/, "");
+                cands.push(stem + ".ts", stem + ".tsx", stem + ".mts",
+                           stem + ".js");
+              } else {
+                cands.push(base + ".ts", base + ".tsx", base + ".mts",
+                           base + ".js");
+              }
+              cands.push(path.posix.join(base, "index.js"),
+                         path.posix.join(base, "index.ts"));
+              return cands.find((c) => shipped.has(c)) || null;
+            };
+            const specifiersOf = (file) => {
+              let src;
+              try {
+                src = fs.readFileSync(file, "utf8");
+              } catch {
+                return [];
+              }
+              // Strip comments before reading specifiers out. These files
+              // discuss their own imports in prose, and every one of the three
+              // consumer packages says in manager-core.ts:
+              //
+              //   It cannot be `typeof import(".../shared/core.js")`, because
+              //   that path is computed at runtime
+              //
+              // which is a COMMENT naming a path that must not exist. Read
+              // without stripping, that sentence is an unresolvable import
+              // and the check fails in all three consumer repos -- while
+              // passing here, where no such comment exists. That asymmetry is
+              // exactly what the byte-identical-copy rule exists to catch.
+              const code = src
+                .replace(/\/\*[\s\S]*?\*\//g, "")
+                .replace(/(^|[^:])\/\/.*$/gm, "$1");
+              return [...code.matchAll(
+                /(?:from|import|require)\s*\(?\s*["'](\.[^"']*)["']/g
+              )].map((m) => m[1]);
+            };
+            // Every `files` entry must also still EXIST in the repository.
+            // An entry naming a deleted path means either a stale allowlist
+            // or a file lost in a commit, and npm reports neither.
+            for (const entry of Array.isArray(pkg.files) ? pkg.files : []) {
+              if (entry.startsWith("!")) continue; // a negation, not a payload
+              const rel = entry.replace(/^\.\//, "").replace(/\/$/, "");
+              if (rel && !fs.existsSync(rel)) {
+                missing.push(
+                  `files entry ${rel} does not exist in this repository`
+                );
+              }
+            }
+
+            // The directories pi actually LOADS at runtime, not just the
+            // extension entries. An entry-only check is what let a `files`
+            // list naming index.ts and nothing else pass: the extension
+            // installs, its manager prompt loads, and every tool it registers
+            // fails to import a module that was never shipped. The
+            // missing-skills case is worse, because it throws nothing at all.
+            //
+            // Keyed by package name and skipped when the source directory does
+            // not exist, so one block is correct in all four repositories and
+            // stays correct in a fifth. That shape is deliberate: a per-repo
+            // literal list would have to be edited in four places, and the
+            // directory it forgets is the one that costs the most and
+            // complains the least.
+            //
+            // The names below are ALWAYS_SHIP and SKILL_DIRS from
+            // pi-manager-core/test/package-contents.mjs -- the same assertion
+            // on the CI side, where it only runs under PI_REQUIRE_PACKAGES=1,
+            // which is why a release needs its own copy.
+            const ALWAYS_SHIP = ["core/", "scripts/", "agents/"];
+            const SKILL_DIRS = {
+              "pi-blender": ["blender/skills"],
+              "pi-unity": ["unity/skills"],
+              "pi-unity-blender": ["skills"],
+            };
+            const MODULE_DIRS = {
+              "pi-blender": ["blender/"],
+              "pi-unity": ["unity/"],
+              "pi-unity-blender": ["binder/"],
+              "pi-manager-core": ["shared/"],
+            };
+            const runtime = [
+              ...ALWAYS_SHIP,
+              ...(SKILL_DIRS[pkg.name] ?? []),
+              ...(MODULE_DIRS[pkg.name] ?? []),
+            ];
+            for (const d of runtime) {
+              if (!fs.existsSync(d)) continue;
+              if (!paths.some((x) => x.startsWith(d))) {
+                missing.push(
+                  `${d} exists on disk but nothing from it ships, so the extension cannot load it`,
+                );
+              }
+            }
+
+            // The import walk starts at the extension entries, which are
+            // TypeScript in every package here, so it reads .ts as well as
+            // .js. Skipping them -- which an earlier draft of this check did --
+            // silently reduces the whole walk to zero files, and every gap
+            // below it passes.
+            const queue = entries.map((e) => e.replace(/^\.\//, ""));
+            const seen = new Set(queue);
+            while (queue.length) {
+              const file = queue.shift();
+              if (!/\.(ts|tsx|mts|js|mjs|cjs)$/.test(file)) continue;
+              for (const spec of specifiersOf(file)) {
+                const target = resolveIn(file, spec);
+                if (!target) {
+                  missing.push(
+                    `${file} imports ${spec}, which is not in the tarball`
+                  );
+                  continue;
+                }
+                if (!seen.has(target)) {
+                  seen.add(target);
+                  queue.push(target);
+                }
+              }
+            }
+
             if (missing.length) {
-              console.error("The tarball is not shippable:\n  - " + missing.join("\n  - "));
+              // Deduplicated: one unshipped module reached from six import
+              // sites is one fault, and six identical lines in a release log
+              // read as six.
+              const faults = [...new Set(missing)];
+              console.error(
+                `The tarball is not shippable:\n  - ${faults.join("\n  - ")}`
+              );
               process.exit(1);
             }
             console.log(`ok ${p.entryCount} files, ${p.unpackedSize} bytes unpacked`);

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { describe } from "node:test";
@@ -39,28 +40,50 @@ function detectBlender() {
 }
 
 /**
- * Every probe in this directory, by glob rather than by name: a probe added
- * without a test is a probe that runs in no one else's lifetime, and the
- * failure mode is invisible rather than loud.
+ * Every probe in this directory, by glob rather than by name.
+ *
+ * Discovered, not listed. The header above this function says a hardcoded list
+ * is how a probe quietly died -- and it did: test/montage-test.py existed, was
+ * correct, and no runner ever invoked it. So the directory is scanned, and a
+ * probe that does not declare its success line is a hard error here rather than
+ * a file nothing looks at.
+ *
+ * `needsBlender` is read from the probe's own source (an `import bpy`) rather
+ * than being declared in this file, for the same reason: a probe's requirements
+ * belong to the probe. Without a declaration the only thing a missing runner
+ * can do is stay quiet.
  */
-const PROBES = [
-	"clearance-probe.py",
-	"joint-probe.py",
-	"montage-probe.py",
-	"path-probe.py",
-	"readonly-probe.py",
-	"shape-probe.py",
-];
+function discoverProbes() {
+	return readdirSync(import.meta.dirname)
+		.filter((name) => name.endsWith(".py"))
+		.map((name) => {
+			const source = readFileSync(join(import.meta.dirname, name), "utf-8");
+			return {
+				name,
+				needsBlender: /^\s*import bpy\b/m.test(source),
+				summary: /print\(\s*(?:f?)(["'])PASS: (.+?)\1/.exec(source)?.[2],
+			};
+		});
+}
 
-/** The line each probe prints on success. A missing one is the failure signal. */
-const SUMMARIES = {
-	"clearance-probe.py": "PASS: clearance agrees with known floor plans",
-	"joint-probe.py": "PASS: joint sweep and island count agree with known geometry",
-	"montage-probe.py": "PASS: a montage frames the subject, restores the scene, and writes the sheet",
-	"path-probe.py": "PASS: the walk between two doors agrees with the floor plan it was built from",
-	"readonly-probe.py": "PASS: the read-only guard refuses mutation and restores cleanly",
-	"shape-probe.py": "PASS: shape family agrees with known geometry",
-};
+const PROBES = discoverProbes();
+
+/**
+ * The line each probe prints on success, taken from its own source.
+ *
+ * A probe with no such line cannot be asserted on, and asserting nothing is
+ * what made this file look like coverage while proving nothing, so it fails
+ * loudly instead.
+ */
+function summaryFor(probe) {
+	if (!probe.summary) {
+		throw new Error(
+			`test/${probe.name} prints no "PASS: ..." line, so a successful run cannot be told from a ` +
+				`failed one. Print one, or this probe is dead weight in the suite.`,
+		);
+	}
+	return `PASS: ${probe.summary}`;
+}
 
 const blender = detectBlender();
 
@@ -68,8 +91,13 @@ describe("the Python probes against a real Blender", { skip: blender ? false : "
 	// A probe is slow (a headless Blender launch is seconds), and they are
 	// independent processes touching only their own scratch blend, so they run
 	// together rather than one at a time. The timeout covers all of them.
+	//
+	// All of them, not only the ones that import bpy: two are pure-Python (the
+	// montage tiling test, and the read-only guard's fake-bpy harness) and
+	// running them here makes "discovered by globbing" literally true. A probe
+	// in this directory is either run or it is not a probe.
 	for (const probe of PROBES) {
-		test(`test/${probe} passes`, () => {
+		test(`test/${probe.name} passes`, () => {
 			const result = spawnSync(
 				blender[0],
 				[
@@ -77,7 +105,7 @@ describe("the Python probes against a real Blender", { skip: blender ? false : "
 					"--background",
 					"--factory-startup",
 					"--python",
-					join(import.meta.dirname, probe),
+					join(import.meta.dirname, probe.name),
 				],
 				{
 					encoding: "utf8",
@@ -97,8 +125,8 @@ describe("the Python probes against a real Blender", { skip: blender ? false : "
 			// 0, so the exit code cannot be the signal. Asserting on the
 			// ABSENCE of the summary is what makes a failure a failure even
 			// when Blender reports success.
-			if (!output.includes(SUMMARIES[probe])) {
-				throw new Error(`${probe} did not pass:\n${output.slice(-8000)}`);
+			if (!output.includes(summaryFor(probe))) {
+				throw new Error(`${probe.name} did not pass:\n${output.slice(-8000)}`);
 			}
 		});
 	}

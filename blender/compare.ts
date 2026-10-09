@@ -98,18 +98,32 @@ export async function blenderCompare(options: CompareOptions): Promise<CompareRe
  * checkpoint is exactly what that run rendered — the baseline the sheet wants
  * without needing a render from that generation to have been kept.
  *
+ * The baseline is this module's previous run THAT HAS A CHECKPOINT, and the
+ * module's LATEST run is required to have one too. The two rules exist because
+ * a record with no checkpointPath cannot be a baseline -- there is no file to
+ * hand the bridge -- and the filter that guarantees the first rule used to
+ * guarantee the second one silently as well: a latest run with no checkpoint
+ * was filtered out and `at(-2)` then handed back the run before THAT one, so
+ * the sheet compared two generations ago and reported it as the latest
+ * comparison. Every recorded run in this repo does carry a checkpoint
+ * (blender/branch.ts:557 and blender/module.ts:260 each copy model.blend
+ * before writing their record), but the manifest is read from disk as untyped
+ * JSON and a record from an older build need not, and a diagnostic tool that
+ * answers the wrong question silently is worse than one that refuses.
+ *
  * A run and its apply are ONE event, not two: the headless path runs a branch
  * and then applies it, and both write a record sharing the run's sequence. Keyed
  * by sequence and de-duplicated, or a single run looks like a previous
  * generation to compare against and the sheet compares the build with itself --
  * the exact false all-clear this function exists to prevent. The merge keeps the
  * branchRuns entry, which is the one that names the checkpoint the run started
- * from, which is the state that run rendered.
+ * from, which is the state that run rendered. De-duplicated on BOTH lists before
+ * the ordering, so a sequence belonging to another module cannot reorder this
+ * module's generations.
  *
- * Two runs is the minimum — a first run has nothing before it — and with only
- * one available the answer says so instead of comparing the build with itself,
- * which would produce a sheet of identical pairs that reads as proof of
- * stability.
+ * Fewer than two checkpointed generations raises. A first run has nothing
+ * before it, and with only one available the answer would be a sheet of
+ * identical pairs that reads as proof of stability.
  *
  * The iteration comes back with the path because the sheet's labels print it: a
  * panel that says which iteration it is still means something once it is sitting
@@ -122,14 +136,19 @@ export function resolvePreviousCheckpoint(
 	},
 	moduleName: string,
 ): { checkpointPath: string; iteration: number | undefined } {
-	const bySequence = new Map<number, { checkpointPath: string; iteration: number | undefined }>();
+	// Every run of THIS module, in order, whether or not it carries a
+	// checkpoint -- the latest one has to be visible here, because a latest run
+	// with no checkpoint is the case that must raise rather than be skipped.
+	const bySequence = new Map<number, { checkpointPath: string | undefined; iteration: number | undefined }>();
 	for (const run of manifest.branchRuns ?? []) {
-		if (run.module === moduleName && run.checkpointPath) {
+		if (run.module === moduleName) {
 			bySequence.set(run.sequence, { checkpointPath: run.checkpointPath, iteration: run.iteration });
 		}
 	}
 	for (const run of manifest.moduleRuns ?? []) {
-		if (run.name === moduleName && run.checkpointPath && !bySequence.has(run.sequence)) {
+		// branchRuns wins a shared sequence: it is the record that names the
+		// checkpoint the run started from, which is the state that run rendered.
+		if (run.name === moduleName && !bySequence.has(run.sequence)) {
 			bySequence.set(run.sequence, { checkpointPath: run.checkpointPath, iteration: run.iteration });
 		}
 	}
@@ -137,13 +156,35 @@ export function resolvePreviousCheckpoint(
 		.sort((a, b) => a[0] - b[0])
 		.map(([, run]) => run);
 
-	const previous = runs.at(-2);
-	if (!previous) {
+	const latest = runs.at(-1);
+	if (!latest) {
+		// Its own message: "the latest one records no checkpoint" is nonsense
+		// when there is no latest one, and the two cases need different
+		// advice (the second is a manifest the caller pointed at the wrong
+		// module or a workspace that was never run).
 		throw new Error(
-			`Module "${moduleName}" has ${runs.length} recorded run${runs.length === 1 ? "" : "s"}, so there is no previous generation to compare against — a comparison needs at least two. ` +
+			`Module "${moduleName}" has no recorded runs, so there is nothing to compare against. ` +
+				`Run the module, or pass baselineBlendPath pointing at a checkpoint from a run that already had ${moduleName} in it.`,
+		);
+	}
+	if (!latest.checkpointPath) {
+		throw new Error(
+			`Module "${moduleName}" has ${runs.length} recorded run${runs.length === 1 ? "" : "s"} but its latest one records no checkpoint, so there is no build to compare the current state against. ` +
 				`Run the module again, or pass baselineBlendPath pointing at a checkpoint from a run that already had ${moduleName} in it.`,
 		);
 	}
 
-	return previous;
+	// The generation before the latest, skipping only runs that cannot be a
+	// baseline. Every run here is this module's, in this module's order.
+	const previous = runs
+		.slice(0, -1)
+		.filter((run) => run.checkpointPath)
+		.at(-1);
+	if (!previous?.checkpointPath) {
+		throw new Error(
+			`Module "${moduleName}" has ${runs.length} recorded run${runs.length === 1 ? "" : "s"}, so there is no previous generation to compare against — a comparison needs at least two with a checkpoint. ` +
+				`Run the module again, or pass baselineBlendPath pointing at a checkpoint from a run that already had ${moduleName} in it.`,
+		);
+	}
+	return { checkpointPath: previous.checkpointPath, iteration: previous.iteration };
 }

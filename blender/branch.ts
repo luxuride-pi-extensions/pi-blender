@@ -27,7 +27,8 @@ import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
-import { pidIsRunning, readLockHolderPid } from "./liveness.js";
+import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
+import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import type {
 	BlenderBranchRunRecord,
 	BlenderModuleRunRecord,
@@ -944,16 +945,22 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
 			// A dead holder is reclaimed at any age. A live one never is, however
 			// long it has been running: this lock is held across the merge itself.
 			let reclaimable = false;
+			let observed = "";
 			try {
 				const stats = await stat(lockPath);
-				const holderPid = readLockHolderPid(lockPath);
+				observed = await readFile(lockPath, "utf-8");
+				const holderPid = parseLockHolderPid(observed);
 				reclaimable =
 					holderPid === null ? Date.now() - stats.mtimeMs > APPLY_LOCK_STALE_MS : !pidIsRunning(holderPid);
 			} catch {
 				continue;
 			}
 			if (reclaimable) {
-				await rm(lockPath, { force: true });
+				// Conditional on the lock still being the judged one. A reclaim
+				// that unlinks by path can delete a lock a third waiter created
+				// after the holder released, and two applies against one
+				// model.blend is precisely what this lock exists to stop.
+				await reclaimLockIfUnchanged(lockPath, observed);
 				continue;
 			}
 			if (Date.now() >= deadline) {

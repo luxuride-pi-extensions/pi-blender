@@ -618,6 +618,73 @@ def main():
         f"the coincidence probe should hold only its own pair, first, got {ranked}",
     )
 
+    # --- a mesh with no faces: the sweep must survive it -----------------
+    # _probe_pair_geometry has TWO return shapes. With no polygons the BVH has
+    # no surface, every signed distance comes back None, and it returns the
+    # "unknown" shape -- which carries no "closestSurfaceDistance" key at all.
+    # The sweep read that key directly, so a scene with one empty mesh in it
+    # took the whole geometry probe down with
+    #   KeyError: 'closestSurfaceDistance'
+    # Reproduced before the fix, and the fix is a `.get`, so the honest answer
+    # for "no distance could be measured" is None and the existing branch skips
+    # the pair.
+    #
+    # The two boxes here overlap, so the sweep really does reach the pair; the
+    # assertion is that the probe RETURNS rather than raising, and that the
+    # faceless pair is not reported as a defect it cannot measure.
+    faceless_a = bpy.data.objects.new("FacelessA", bpy.data.meshes.new("FacelessA"))
+    faceless_a.data.vertices.add(8)
+    for vertex in faceless_a.data.vertices:
+        vertex.co = (0.05, 0.05, 0.05)
+    bpy.context.scene.collection.objects.link(faceless_a)
+    faceless_b = bpy.data.objects.new("FacelessB", bpy.data.meshes.new("FacelessB"))
+    faceless_b.data.vertices.add(8)
+    for vertex in faceless_b.data.vertices:
+        vertex.co = (0.05, 0.05, 0.05)
+    faceless_b.location = (0.01, 0.0, 0.0)
+    bpy.context.scene.collection.objects.link(faceless_b)
+    bpy.context.view_layer.update()
+
+    try:
+        faceless = live_bridge.handle_geometry_probe(
+            {
+                "blendPath": scratch_blend,
+                "objects": [faceless_a.name, faceless_b.name],
+                "checks": ["pair", "joint"],
+                "pairs": [[faceless_a.name, faceless_b.name]],
+                "tolerance": 0.002,
+            }
+        )
+        check(True, "a mesh with no faces did not take the geometry probe down")
+    except Exception as error:  # noqa: BLE001 - any failure here is the defect
+        check(
+            False,
+            f"a mesh with no faces took the geometry probe down: {type(error).__name__}: {error}",
+        )
+        faceless = None
+
+    if faceless is not None:
+        # The early-return shape itself, pinned: `unknown`, a stated reason,
+        # and NO closestSurfaceDistance key -- which is what made the direct
+        # index a crash rather than a wrong number.
+        unknown = faceless["pairs"][f"{faceless_a.name}|{faceless_b.name}"]
+        check(
+            unknown["verdict"] == "unknown" and "no surface distance samples" in unknown["reason"],
+            f"a faceless pair should report unknown with a reason, got {unknown['verdict']!r}",
+        )
+        check(
+            "closestSurfaceDistance" not in unknown,
+            "the early-return shape grew a closestSurfaceDistance key, so the two "
+            "return shapes are no longer distinguishable and this assertion no "
+            "longer proves what it was written to prove",
+        )
+        check(
+            faceless["joints"]["joints"] == [],
+            f"an unmeasurable pair must not be reported as a joint, got {faceless['joints']['joints']}",
+        )
+        bpy.data.objects.remove(faceless_a)
+        bpy.data.objects.remove(faceless_b)
+
     if failures:
         print("FAIL")
         for failure in failures:

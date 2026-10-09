@@ -901,12 +901,33 @@ def _world_vertices(obj, limit=GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT):
     Probing every vertex of a subdivided mesh would blow the analyst's
     context; an even stride keeps the spatial distribution of the shape, which
     is what gap/penetration measurements actually depend on.
+
+    Two things here are correctness, not taste, and both were measured against
+    a real Blender rather than reasoned about:
+
+    The stride is applied by INDEX, not by slice. `vertices[::stride]` raises
+    `TypeError: bpy_prop_collection[slice]: slice steps not supported` in
+    Blender 5.2, so the sampling only ever ran on meshes at or under the limit
+    (`stride == 1`, and a step of 1 is not a step). The first mesh over
+    GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT -- measured with an 8066-vertex UV
+    sphere -- took the whole geometry probe down with that TypeError, which is
+    the exact case the subsampling exists to handle.
+
+    The last vertex is appended only when the stride did NOT already sample it.
+    The intent is "an even sample, plus the last vertex so the extreme is not
+    lost", and `stride > 1` was standing in for that: it happens to be right
+    whenever the last index is not a multiple of the stride, and it silently
+    counts the last vertex TWICE when it is (8000 vertices at a limit of 4000
+    samples every index the stride reaches). Comparing the index to the stride
+    states the intent, so the count is `total // stride` or `total // stride + 1`
+    and never the same vertex twice.
     """
     total = len(obj.data.vertices)
     stride = max(1, total // limit)
-    coords = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices[::stride]]
-    if coords and stride > 1:
-        coords.append(obj.matrix_world @ obj.data.vertices[-1].co)
+    sampled = range(0, total, stride)
+    coords = [obj.matrix_world @ obj.data.vertices[index].co for index in sampled]
+    if total > 0 and (total - 1) % stride != 0:
+        coords.append(obj.matrix_world @ obj.data.vertices[total - 1].co)
     return coords
 
 
@@ -2281,7 +2302,18 @@ def _probe_joints(objects, tolerance):
                 # cannot tell them apart.
                 continue
 
-            surfaces = measurement["closestSurfaceDistance"]
+            # `.get`, not `[...]`: _probe_pair_geometry has TWO return shapes.
+            # When it could not sample a single signed distance -- which a mesh
+            # with no faces does, since the BVH has no surface to find a nearest
+            # point on -- it returns the "unknown" shape, and that shape has no
+            # "closestSurfaceDistance" key at all. Reproduced against a real
+            # Blender: the sweep raised
+            #   KeyError: 'closestSurfaceDistance'
+            # here, taking the whole geometry probe with it, on a scene where
+            # one object had no faces yet. `None` is the honest answer for
+            # "no distance could be measured", and the branch below already
+            # treats None as "nothing to report".
+            surfaces = measurement.get("closestSurfaceDistance")
             if surfaces is None and not is_coincident and not is_buried:
                 continue
 

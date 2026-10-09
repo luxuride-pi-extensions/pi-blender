@@ -17,7 +17,10 @@ import os
 import sys
 import tempfile
 
-REPO = "/var/home/lux/Projects/pi-blender"
+# This file's own parent directory is the repo, so the probe tests the checkout
+# it lives in. A hardcoded path here meant a developer's other clone got the
+# coverage instead of the code under review.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE = os.path.join(REPO, "blender", "live-bridge.py")
 
 # live-bridge.py runs its module-level bootstrap on import, which creates bridge
@@ -76,9 +79,11 @@ def main():
     blend_path = os.path.join(tempfile.mkdtemp(prefix="montage-probe-blend-"), "model.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
 
-    output_dir = "/var/home/lux/blender-dbg/montage-out"
-    # Outside /tmp on purpose: the flatpak sandbox can read /var/home/lux but a
-    # sheet written under /tmp is not reachable from the host for inspection.
+    # A scratch directory rather than a hardcoded one, so the probe does not
+    # write into the developer's home on every run. It was previously
+    # /var/home/lux/blender-dbg/montage-out, which made the output land outside
+    # anything the test harness cleans up.
+    output_dir = os.path.join(tempfile.mkdtemp(), "montage-out")
     os.makedirs(output_dir, exist_ok=True)
     for stale in os.listdir(output_dir):
         os.remove(os.path.join(output_dir, stale))
@@ -136,10 +141,11 @@ def main():
     # Two panels of the SAME scene differ only if the cameras moved: identical
     # bytes would mean every view rendered the same picture, which is a montage
     # that cannot compare anything.
-    digests = {
-        open(path, "rb").read()
-        for path in result["panelPaths"]
-    }
+    def panel_bytes(path):
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    digests = {panel_bytes(path) for path in result["panelPaths"]}
     check(len(digests) == 4, f"each view produced a distinct panel: {len(digests)} distinct of 4")
 
     # The framing must describe the cube, not the world: the cube sits at
@@ -148,7 +154,8 @@ def main():
     centre = result["framing"]["center"]
     expected_centre = [3.0, -2.0, 1.0]
     check(
-        all(abs(a - b) < 0.01 for a, b in zip(centre, expected_centre)),
+        len(centre) == len(expected_centre)
+        and all(abs(a - b) < 0.01 for a, b in zip(centre, expected_centre, strict=True)),
         f"framing centre is the subject's, not the world's: {centre}",
     )
     check(
