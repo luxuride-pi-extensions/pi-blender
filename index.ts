@@ -252,6 +252,58 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 const IMAGE_READ_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
 
 /**
+ * The blender_* family, registered inert and declared to the model only when
+ * this session shows it needs them: /blender engage, or a first call. Every
+ * registerTool above passes defaultActive:false, and this is the list of the
+ * same names — one array, because a tool that is inert but not listed here
+ * would be unreachable, and one listed here but registered active would cost
+ * context every turn again.
+ *
+ * Kept in lockstep with the registerTool calls by test/registration.test.mjs
+ * (see that file): a name on one side and not the other fails the suite.
+ *
+ * Child sessions are unaffected: pi activates any tool a --tools allowlist
+ * names even when it is defaultActive:false, and lazyTools's tool_call
+ * handler deliberately does NOT expand a session whose loadout already
+ * declares the called tool, so a worker's scoping stays a worker's.
+ */
+const LAZY_BLENDER_TOOL_NAMES = [
+	"blender_workspace_init",
+	"blender_execute_python",
+	"blender_session_context",
+	"blender_scene_info",
+	"blender_save_view",
+	"blender_render",
+	"blender_module_run",
+	"blender_branch_run",
+	"blender_branch_apply",
+	"blender_module_revert",
+	"blender_set_mode",
+	"blender_log_critique",
+	"blender_rank_assets",
+	"blender_iteration_state",
+	"blender_record_iteration_fact",
+	"blender_export_asset",
+	"blender_add_reference",
+	"blender_bridge_status",
+	"blender_geometry_probe",
+	"blender_image_probe",
+	"blender_read_only_python",
+	"blender_montage",
+	"blender_compare",
+];
+
+/**
+ * The gate that turns the family on. isEngaged re-arms an engaged session at
+ * every turn boundary — the /blender engage may happen between turns, and a
+ * session that has engaged must not run a turn without its kit.
+ */
+const lazyTools = core.createLazyToolGate({
+	toolNames: LAZY_BLENDER_TOOL_NAMES,
+	isEngaged: () => managerMode.isEngaged(),
+});
+
+/**
  * Manager mode, entered ONLY by the /blender command.
  *
  * It governs two things: the workflow guidance, and the write/edit/image gate
@@ -345,6 +397,7 @@ function formatJsonResult(value: unknown): string {
 
 export default function piBlenderExtension(pi: ExtensionAPI) {
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_workspace_init",
 			label: "Blender Workspace Init",
 			description:
@@ -398,6 +451,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_execute_python",
 			label: "Blender Execute Python",
 			description:
@@ -462,6 +516,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_session_context",
 			label: "Blender Session Context",
 			description:
@@ -506,6 +561,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_scene_info",
 			label: "Blender Scene Info",
 			description:
@@ -554,6 +610,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_save_view",
 			label: "Blender Save View",
 			description:
@@ -594,6 +651,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_render",
 			label: "Blender Render",
 			description:
@@ -683,6 +741,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_module_run",
 			label: "Blender Module Run",
 			description:
@@ -761,6 +820,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_branch_run",
 			label: "Blender Branch Run",
 			description:
@@ -825,6 +885,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_branch_apply",
 			label: "Blender Branch Apply",
 			description:
@@ -861,6 +922,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_module_revert",
 			label: "Blender Module Revert",
 			description:
@@ -904,6 +966,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_set_mode",
 			label: "Blender Set Mode",
 			description:
@@ -954,6 +1017,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_log_critique",
 			label: "Blender Log Critique",
 			description:
@@ -1054,6 +1118,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_rank_assets",
 			label: "Blender Rank Assets",
 			description:
@@ -1098,6 +1163,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_iteration_state",
 			label: "Blender Iteration State",
 			description:
@@ -1139,6 +1205,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_record_iteration_fact",
 			label: "Blender Record Iteration Fact",
 			description:
@@ -1185,6 +1252,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_export_asset",
 			label: "Blender Export Asset",
 			description:
@@ -1243,6 +1311,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_add_reference",
 			label: "Blender Add Reference",
 			description:
@@ -1291,6 +1360,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_bridge_status",
 			label: "Blender Bridge Status",
 			description:
@@ -1316,6 +1386,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_geometry_probe",
 			label: "Blender Geometry Probe",
 			description:
@@ -1396,10 +1467,26 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					}),
 				),
 				points: Type.Optional(
-					Type.Array(Type.Tuple([Type.Number(), Type.Number()]), {
-						description:
-							"World `[x, y]` positions in metres a person is meant to travel between — door centres, the ends of a corridor, the foot of a stair. Passing these implies the `path` check. Every PAIR is walked, not just the ones you ordered: a house is short of doors and long of rooms, so the pair a designer forgot is the one that zig-zags. Each point snaps to the nearest free floor within a body's reach, so a door centre given beside its frame still resolves; one that lands on nothing is reported in `unresolved` rather than guessed at.",
-					}),
+					// Deliberately NOT `Type.Tuple([Type.Number(), Type.Number()])`.
+					//
+					// A tuple serializes to a POSITIONAL `items` array:
+					//   { "items": [ { "type": "number" }, { "type": "number" } ] }
+					// That is valid draft-07, but strict providers reject it as a
+					// malformed tool schema, which fails the whole request:
+					//   Tool 22 function has invalid 'parameters' schema:
+					//   [{'type': 'number'}, {'type': 'number'}] is not of type
+					//   'object', 'boolean'
+					// The bounded inner array below serializes to the OBJECT form
+					// (`items: { "type": "number" }` plus minItems/maxItems), which
+					// every provider accepts. `Type.Unsafe` supplies the `[number,
+					// number]` static type that the plain `Type.Array` loses, so the
+					// call site keeps its exact typing without a cast.
+					Type.Unsafe<[number, number][]>(
+						Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
+							description:
+								"World `[x, y]` positions in metres a person is meant to travel between — door centres, the ends of a corridor, the foot of a stair. Passing these implies the `path` check. Every PAIR is walked, not just the ones you ordered: a house is short of doors and long of rooms, so the pair a designer forgot is the one that zig-zags. Each point snaps to the nearest free floor within a body's reach, so a door centre given beside its frame still resolves; one that lands on nothing is reported in `unresolved` rather than guessed at.",
+						}),
+					),
 				),
 				detour: Type.Optional(
 					Type.Number({
@@ -1446,6 +1533,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_image_probe",
 			label: "Blender Image Probe",
 			description:
@@ -1505,6 +1593,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_read_only_python",
 			label: "Blender Read-Only Python",
 			description:
@@ -1547,6 +1636,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_montage",
 			label: "Blender Montage",
 			description:
@@ -1621,6 +1711,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		});
 
 		pi.registerTool({
+			defaultActive: false,
 			name: "blender_compare",
 			label: "Blender Compare",
 			description:
@@ -1741,6 +1832,11 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			// engagement, every other reason is a genuinely different session and
 			// inherits nothing. See createManagerMode's reset().
 			managerMode.reset(event?.reason);
+			// Same semantics for the lazy tools: a reload keeps an activated
+			// family, a fresh session starts with it inert. The gate itself also
+			// installs its own session_start handler; this explicit reset keeps
+			// the two gates' lifecycle visibly in one place.
+			lazyTools.reset(event?.reason);
 			// `/reload` re-fires this event, and it is the only lifecycle hook a
 			// reload is guaranteed to reach. Re-arming here is what keeps a reload
 			// from ending up with two supervisors: whichever module instance is
@@ -1828,6 +1924,10 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			engagedMessage: "Blender engaged — this session is the manager.",
 			onEngage: () => {
 				managerMode.markEngaged();
+				// The engage command runs outside a turn, so the family must be
+				// declared here; the before_agent_start re-arm only fires when a
+				// turn starts after this point.
+				lazyTools.activate(pi);
 			},
 		});
 
@@ -1952,6 +2052,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 		// three manager extensions use. The three refusals below stay here,
 		// because each names an agent only this manager can spawn.
 		managerMode.install(pi);
+		lazyTools.install(pi);
 
 		pi.on("before_agent_start", injectBlenderContext);
 };
