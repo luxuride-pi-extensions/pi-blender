@@ -1467,10 +1467,26 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					}),
 				),
 				points: Type.Optional(
-					Type.Array(Type.Tuple([Type.Number(), Type.Number()]), {
-						description:
-							"World `[x, y]` positions in metres a person is meant to travel between — door centres, the ends of a corridor, the foot of a stair. Passing these implies the `path` check. Every PAIR is walked, not just the ones you ordered: a house is short of doors and long of rooms, so the pair a designer forgot is the one that zig-zags. Each point snaps to the nearest free floor within a body's reach, so a door centre given beside its frame still resolves; one that lands on nothing is reported in `unresolved` rather than guessed at.",
-					}),
+					// Deliberately NOT `Type.Tuple([Type.Number(), Type.Number()])`.
+					//
+					// A tuple serializes to a POSITIONAL `items` array:
+					//   { "items": [ { "type": "number" }, { "type": "number" } ] }
+					// That is valid draft-07, but strict providers reject it as a
+					// malformed tool schema, which fails the whole request:
+					//   Tool 22 function has invalid 'parameters' schema:
+					//   [{'type': 'number'}, {'type': 'number'}] is not of type
+					//   'object', 'boolean'
+					// The bounded inner array below serializes to the OBJECT form
+					// (`items: { "type": "number" }` plus minItems/maxItems), which
+					// every provider accepts. `Type.Unsafe` supplies the `[number,
+					// number]` static type that the plain `Type.Array` loses, so the
+					// call site keeps its exact typing without a cast.
+					Type.Unsafe<[number, number][]>(
+						Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
+							description:
+								"World `[x, y]` positions in metres a person is meant to travel between — door centres, the ends of a corridor, the foot of a stair. Passing these implies the `path` check. Every PAIR is walked, not just the ones you ordered: a house is short of doors and long of rooms, so the pair a designer forgot is the one that zig-zags. Each point snaps to the nearest free floor within a body's reach, so a door centre given beside its frame still resolves; one that lands on nothing is reported in `unresolved` rather than guessed at.",
+						}),
+					),
 				),
 				detour: Type.Optional(
 					Type.Number({
