@@ -417,6 +417,14 @@ jobs:
       # >= 11.5.1); id-token: write is what makes the token mintable at all.
       # id-token is job-level rather than step-level because Actions only
       # accepts the permissions block at job scope here.
+      # Node 22 alone is not enough for OIDC: setup-node ships npm 10.x
+      # with it, and npm's OIDC exchange landed in 11.5.1. npm 10 publishes
+      # fine WITH a token, but this publish has no token -- the OIDC claim
+      # IS the credential -- so npm 10 fails ENEEDAUTH here. Upgrade npm
+      # first; the comment above the step below documents the full contract.
+      - name: upgrade npm for trusted publishing
+        run: npm install -g npm@11
+
       - name: publish to npm
         run: npm publish --access public --provenance
 
@@ -430,7 +438,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.tag.outputs.tag }}"
-          previous="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          previous="$(git describe --tags --abbrev=0 "${tag}^" \
+            2>/dev/null || true)"
           {
             echo "## $tag"
             echo
@@ -447,17 +456,19 @@ jobs:
             echo "## Install"
             echo
             echo '```bash'
-            echo "pi install git:github.com/luxuride-pi-extensions/${{ steps.version.outputs.name }}@$tag"
+            name="${{ steps.version.outputs.name }}"
+            version="${{ steps.version.outputs.version }}"
+            echo "pi install git:github.com/luxuride-pi-extensions/$name@$tag"
             echo '```'
             echo
             echo "Or as a package, for an offline install:"
             echo
             echo '```bash'
-            echo "npm install --legacy-peer-deps ./${{ steps.version.outputs.name }}-${{ steps.version.outputs.version }}.tgz"
+            echo "npm install --legacy-peer-deps ./$name-$version.tgz"
             echo '```'
             echo
-            echo "The extension is TypeScript loaded from source; there is no build step and"
-            echo "nothing to compile."
+            echo "The extension is TypeScript loaded from source;"
+            echo "there is no build step and nothing to compile."
           } > notes.md
           echo "wrote notes.md ($(wc -l < notes.md) lines)"
 
@@ -488,8 +499,10 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'
-          if [ "$(gh release view "$TAG" --json assets --jq '.assets | length')" -lt 1 ]; then
+          gh release view "$TAG" --json assets \
+            --jq '.assets[] | "\(.name) \(.size) bytes"'
+          if [ "$(gh release view "$TAG" --json assets \
+            --jq '.assets | length')" -lt 1 ]; then
             echo "the release exists with no artifact attached" >&2
             exit 1
           fi
