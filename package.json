@@ -36,5 +36,9 @@
   },
   "peerDependencies": {
     "@luxuride-pi/manager-core": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luxuride-pi-extensions/pi-blender.git"
   }
 }
