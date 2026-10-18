@@ -41,7 +41,7 @@ tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervi
 # templates in this directory. The placeholders are STALE BY DESIGN: they are
 # kept rather than replaced with a host path because a committed literal path
 # is indistinguishable from a machine-specific mistake to the next reader, and
-# because the pair records which extensions this role depends on. pi-unity's
+# because the pair records which extensions this role depends on. pi-unity-vrchat's
 # manager prompt keeps them too.
 #
 # The todo package is listed because this role names `todo`. A foreground child

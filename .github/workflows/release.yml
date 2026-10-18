@@ -34,6 +34,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   # Two releases of one repo cannot both be creating the same Git tag object.
@@ -209,7 +210,7 @@ jobs:
             //
             //   pi-manager-core    ./shared/core.js
             //   pi-blender         ./blender/runtime.js
-            //   pi-unity           ./unity/runtime.js
+            //   pi-unity-vrchat       ./unity/runtime.js
             //   pi-unity-blender   ./binder/bridge.js
             //
             // so those directories are load-bearing exactly as much as the
@@ -230,7 +231,7 @@ jobs:
             // The .ts candidates are load-bearing, not belt and braces: all
             // four packages write their relative imports with a .js suffix and
             // ship TypeScript, so a resolver that looked only for .js reported
-            // every runtime import in pi-blender, pi-unity and
+            // every runtime import in pi-blender, pi-unity-vrchat and
             // pi-unity-blender as missing. This file is byte-identical in all
             // four repos, so a check that passes here and fails there is worse
             // than no check. Verified by running this exact script against all
@@ -321,12 +322,12 @@ jobs:
             const ALWAYS_SHIP = ["core/", "scripts/", "agents/"];
             const SKILL_DIRS = {
               "pi-blender": ["blender/skills"],
-              "pi-unity": ["unity/skills"],
+              "pi-unity-vrchat": ["unity/skills"],
               "pi-unity-blender": ["skills"],
             };
             const MODULE_DIRS = {
               "pi-blender": ["blender/"],
-              "pi-unity": ["unity/"],
+              "pi-unity-vrchat": ["unity/"],
               "pi-unity-blender": ["binder/"],
               "pi-manager-core": ["shared/"],
             };
@@ -389,6 +390,19 @@ jobs:
       # release.
       - name: build the tarball
         run: npm pack
+
+      # Publishes the tarball to npm as @luxuride-pi/<name>.
+      # Authentication is npm trusted publishing (OIDC): the registry exchange
+      # is derived from the workflow's own identity, so there is no NPM_TOKEN
+      # secret and nothing to rotate. The npmjs.com side is configured once
+      # per package under Packages → <package> → Settings → Trusted publisher:
+      # repository luxuride-pi-extensions/<repo>, workflow filename
+      # release.yml. Node 22 is required for the CLI's OIDC support (npm
+      # >= 11.5.1); id-token: write is what makes the token mintable at all.
+      # id-token is job-level rather than step-level because Actions only
+      # accepts the permissions block at job scope here.
+      - name: publish to npm
+        run: npm publish --access public --provenance
 
       # Notes are generated, not required from the tagger. A release whose
       # description is empty still renders correctly, and a workflow that

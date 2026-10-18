@@ -134,6 +134,14 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 
 ## Install
 
+The released package installs with pi itself:
+
+```bash
+pi install npm:@luxuride-pi/blender
+```
+
+For development from a clone:
+
 ```bash
 git clone <this repo's URL>
 cd pi-blender
@@ -616,20 +624,21 @@ usual; only the extension's auto-engagement now requires `/blender`.)
 
 ## Releases
 
-Every release is a **git tag**, not a published npm package. All four packages
-in this organization are `"private": true`, so `npm publish` refuses them, and
-unsetting that flag to get a publish through would trade a correct manifest for
-a working script.
+Every release is both a **git tag** and an npm package. The package publishes
+as `@luxuride-pi/blender` from the release workflow via npm trusted publishing (OIDC from
+GitHub Actions — no publish token exists anywhere).
 
-pi installs this extension from the **clone**, not from a tarball: `installGit()`
-runs `git clone`, an optional `git checkout <ref>`, then
+pi can also install this extension from the **clone**: `installGit()` runs
+`git clone`, an optional `git checkout <ref>`, then
 `npm install --legacy-peer-deps` inside it, and pi loads the extension's
-TypeScript straight from source through jiti. So a tag *is* the artifact — there
-is no build step and nothing to compile.
+TypeScript straight from source through jiti. So a tag *is* the artifact for a
+git install — there is no build step and nothing to compile.
 
 ### Install a release
 
 ```bash
+pi install npm:@luxuride-pi/blender@^<version>
+# or, from the clone:
 pi install git:github.com/luxuride-pi-extensions/pi-blender@v<version>
 ```
 

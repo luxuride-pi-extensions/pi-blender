@@ -212,13 +212,13 @@ export interface ManagerPromptReport {
  * path as well as the failure path, so a caller can distinguish "read it, it
  * was fine" from "never looked" and can say WHICH half of a composition
  * degraded. They are optional and the returns are unchanged `string`, which is
- * what keeps pi-blender/config.ts and pi-unity/config.ts -- both typed
+ * what keeps pi-blender/config.ts and pi-unity-vrchat/config.ts -- both typed
  * `getManagerPrompt(): string` -- source-compatible across three independently
  * released repos. A caller that ignores the report keeps exactly the
  * best-effort substring behaviour it had before.
  *
  * This file is byte-identical in all four repos and test/resolver-copies.mjs
- * enforces that, so any edit here must be recopied into pi-blender, pi-unity and
+ * enforces that, so any edit here must be recopied into pi-blender, pi-unity-vrchat and
  * pi-unity-blender -- `node test/resolver-copies.mjs --fix` writes them.
  */
 export interface ManagerCore {
