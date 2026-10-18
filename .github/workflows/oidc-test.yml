@@ -1,0 +1,9 @@
+name: oidc-test
+on: workflow_dispatch
+permissions:
+  id-token: write
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - run: env | grep -i id_token | sed 's/=.*/=<set>/' || echo "NO ID TOKEN ENV"
