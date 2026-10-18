@@ -174,7 +174,12 @@ jobs:
         run: |
           set -euo pipefail
           npm pack --dry-run --json > pack.json
-          node -e '
+          # The script arrives on stdin rather than as `node -e '...'`: the
+          # comments below contain apostrophes, and the first one would
+          # terminate the shell's single-quoted argument and truncate the
+          # script mid-comment. A quoted heredoc interpolates nothing, so
+          # apostrophes, backticks and $ all read verbatim.
+          node --input-type=commonjs - <<'PACK_CHECK'
             const fs = require("node:fs");
             const path = require("node:path");
             const pkg = require("./package.json");
@@ -381,7 +386,7 @@ jobs:
               process.exit(1);
             }
             console.log(`ok ${p.entryCount} files, ${p.unpackedSize} bytes unpacked`);
-          '
+          PACK_CHECK
           rm -f pack.json
 
       # The artifact itself. npm pack is used rather than a hand-rolled tar so
