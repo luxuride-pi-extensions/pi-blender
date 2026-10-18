@@ -88,8 +88,19 @@ jobs:
 
       - name: resolve the tag
         id: tag
+        env:
+          # A workflow_dispatch's inputs.* is not an environment variable
+          # by itself; it is only readable through the ${{ }} context, and
+          # this shared script reads ONE name for both trigger shapes.
+          # Sourcing the input into INPUT_TAG here gives the step below a
+          # single lookup: set on a dispatch, absent on a tag push, where
+          # GITHUB_REF_NAME is the pushed tag itself.
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          # On a tag push GITHUB_REF_NAME is the tag; on a workflow_dispatch
+          # it is the branch, so the dispatch input must win — INPUT_TAG is
+          # set exactly then, and falls back otherwise.
           tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           case "$tag" in
             v*) ;;
