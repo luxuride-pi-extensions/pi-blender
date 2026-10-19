@@ -430,6 +430,34 @@ export interface ReadOnlyPythonResult {
 	refused: boolean;
 }
 
+export interface UsageCategoryResult {
+	score: number;
+	certainty: number;
+	signals: string[];
+}
+
+export interface UsageGuessResult {
+	blendPath: string;
+	workspacePath?: string;
+	categories: {
+		animation: UsageCategoryResult;
+		rendering: UsageCategoryResult;
+		shading: UsageCategoryResult;
+		procedural: UsageCategoryResult;
+		modeling: UsageCategoryResult;
+		[category: string]: UsageCategoryResult;
+	};
+	primaryGuess: string | null;
+	allSignals: string[];
+}
+
+export interface UsageGuessOptions {
+	cwd: string;
+	workspace?: string;
+	blendPath?: string;
+	signal?: AbortSignal;
+}
+
 export interface SceneInfoOptions {
 	cwd: string;
 	workspace: string;
@@ -446,6 +474,8 @@ export interface SceneInfoOptions {
 		| "armatures"
 		| "textures"
 		| "paintSettings"
+		| "usage_guess"
+		| "usageGuess"
 	>;
 	signal?: AbortSignal;
 }
@@ -475,6 +505,7 @@ export interface SceneInfoResult {
 	armatures: Array<Record<string, unknown>>;
 	textures: Array<Record<string, unknown>>;
 	paintSettings: Record<string, unknown> | null;
+	usageGuess?: UsageGuessResult | null;
 }
 
 export interface BlenderSceneUnits {
@@ -503,6 +534,7 @@ export interface SceneInfoSelection {
 	includeArmatures: boolean;
 	includeTextures: boolean;
 	includePaintSettings: boolean;
+	includeUsageGuess: boolean;
 }
 
 export interface SessionContextOptions {

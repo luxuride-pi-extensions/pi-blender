@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
+import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection, UsageGuessResult } from "./types.js";
+import { blenderUsageGuess } from "./usage-guess.js";
 import { runBlenderJson } from "./utils.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
 
@@ -21,6 +22,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeArmatures: selected.has("armatures"),
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
+			includeUsageGuess: selected.has("usage_guess") || selected.has("usageGuess"),
 		};
 	}
 
@@ -39,6 +41,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeArmatures: false,
 		includeTextures: false,
 		includePaintSettings: false,
+		includeUsageGuess: false,
 	};
 }
 
@@ -315,6 +318,14 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 	// was a second, redundant derivation of the same options.
 	const selection = resolveSceneInfoSelection(options);
 	const result = await getSceneInfoForSelection(options.cwd, manifest, selection, options.signal);
+	let usageGuessResult: UsageGuessResult | null = null;
+	if (selection.includeUsageGuess) {
+		usageGuessResult = await blenderUsageGuess({
+			cwd: options.cwd,
+			workspace: manifest.workspacePath,
+			signal: options.signal,
+		});
+	}
 	const sceneInfoResult: SceneInfoResult = {
 		workspacePath: manifest.workspacePath,
 		blendPath: manifest.blendPath,
@@ -334,6 +345,7 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		armatures: selection.includeArmatures ? result.armatures : [],
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
+		usageGuess: selection.includeUsageGuess ? usageGuessResult : undefined,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;
