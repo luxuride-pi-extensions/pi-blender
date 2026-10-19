@@ -55,6 +55,7 @@ import {
 	blenderIterationState,
 	blenderRecordIterationFact,
 	blenderExportAsset,
+	blenderImportAsset,
 	blenderModuleRevert,
 	blenderModuleRun,
 	blenderMontage,
@@ -78,7 +79,7 @@ import {
 	resolveRunBudget,
 	WATCH_WINDOW_RSS_BYTES,
 } from "./blender/runtime.js";
-import type { AssetExportOptions } from "./blender/types.js";
+import type { AssetExportOptions, ImportFormat } from "./blender/types.js";
 import { isLiveBridgeAlive } from "./launch.js";
 import { blenderCompare } from "./blender/compare.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
@@ -284,6 +285,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_iteration_state",
 	"blender_record_iteration_fact",
 	"blender_export_asset",
+	"blender_import_asset",
 	"blender_add_reference",
 	"blender_bridge_status",
 	"blender_geometry_probe",
@@ -1303,6 +1305,70 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: `Exported ${result.format} to ${result.exportPath} (${result.bytes} bytes, ${result.meshCount} mesh(es)).`,
+						},
+					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_import_asset",
+			label: "Blender Import Asset",
+			description:
+				"Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Checkpoints the workspace blend before importing so partial imports are cleanly revertible. Guards against path traversal and sanitizes asset names. Probes format and add-on support (e.g. FBX), reporting missing capabilities as explicit results rather than tracebacks. Returns a post-import report detailing imported objects, non-uniform scale checks, and principal axes.",
+			annotations: {
+				destructiveHint: true,
+				idempotentHint: false,
+			},
+			parameters: Type.Object({
+				workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+				path: Type.String({ description: "Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx)." }),
+				format: Type.Optional(
+					Type.String({
+						description: "Format of the asset: obj, stl, gltf, glb, or fbx. If omitted, inferred from file extension.",
+						enum: ["obj", "stl", "gltf", "glb", "fbx"],
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description: "Optional asset name or object name prefix. Sanitized against invalid characters.",
+					}),
+				),
+				allowedPaths: Type.Optional(
+					Type.Array(Type.String(), {
+						description: "Allowed directories or file paths for source assets to guard against traversal. Defaults to the workspace directory and current working directory.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+				const result = await blenderImportAsset({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					path: params.path,
+					format: params.format as ImportFormat | undefined,
+					name: params.name,
+					allowedPaths: params.allowedPaths,
+				});
+
+				if (!result.success) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Import failed: ${result.error}`,
+							},
+						],
+						details: result,
+					};
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Imported ${result.format} asset "${result.assetName}" (${result.importedObjects.length} object(s): ${result.importedObjects.join(", ")}). Pre-import checkpoint saved to ${result.checkpointPath}.${result.report?.hasNonUniformScale ? " Warning: non-uniform scale detected." : ""}`,
 						},
 					],
 					details: result,
