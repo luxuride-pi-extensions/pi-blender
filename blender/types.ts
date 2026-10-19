@@ -468,6 +468,33 @@ export interface LinkedLibrariesResult {
 	hasIndirect: boolean;
 }
 
+export interface UsageCategoryResult {
+	score: number;
+	certainty: number;
+	signals: string[];
+}
+
+export interface UsageGuessResult {
+	blendPath: string;
+	workspacePath?: string;
+	categories: {
+		animation: UsageCategoryResult;
+		rendering: UsageCategoryResult;
+		shading: UsageCategoryResult;
+		procedural: UsageCategoryResult;
+		modeling: UsageCategoryResult;
+		[category: string]: UsageCategoryResult;
+	};
+	primaryGuess: string | null;
+	allSignals: string[];
+}
+
+export interface UsageGuessOptions {
+	cwd: string;
+	workspace?: string;
+	blendPath?: string;
+	signal?: AbortSignal;}
+
 export interface SceneInfoOptions {
 	cwd: string;
 	workspace: string;
@@ -488,6 +515,8 @@ export interface SceneInfoOptions {
 		| "missingFiles"
 		| "linkedLibraries"
 		| "scene_stats"
+		| "usage_guess"
+		| "usageGuess"
 	>;
 	targetObject?: string;
 	signal?: AbortSignal;
@@ -578,6 +607,7 @@ export interface SceneInfoResult {
 	linkedLibraries?: LinkedLibrariesResult | null;
 	scene_stats?: BlenderSceneStats | null;
 	sceneStats?: BlenderSceneStats | null;
+	usageGuess?: UsageGuessResult | null;
 }
 
 export interface BlenderSceneUnits {
@@ -610,6 +640,7 @@ export interface SceneInfoSelection {
 	includeMissingFiles: boolean;
 	includeLinkedLibraries: boolean;
 	includeSceneStats: boolean;
+	includeUsageGuess: boolean;
 }
 
 export interface ObjectDetailOptions {
