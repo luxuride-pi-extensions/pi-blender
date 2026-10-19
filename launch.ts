@@ -202,6 +202,45 @@ function flatpakHasBlender(): boolean {
 	}
 }
 
+export const BLENDER_VERSION_FLOOR = "4.2.0";
+
+export function parseBlenderVersion(output: string): string | null {
+	const match = output.match(/Blender\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i);
+	return match?.[1] ?? null;
+}
+
+export function isBlenderVersionSufficient(version: string, floor = BLENDER_VERSION_FLOOR): boolean {
+	const parse = (v: string): [number, number, number] => {
+		const parts = v.split(".").map((n) => parseInt(n, 10) || 0);
+		return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+	};
+	const [vMaj, vMin, vPatch] = parse(version);
+	const [fMaj, fMin, fPatch] = parse(floor);
+	if (vMaj !== fMaj) return vMaj > fMaj;
+	if (vMin !== fMin) return vMin > fMin;
+	return vPatch >= fPatch;
+}
+
+export function assertBlenderVersionFloor(versionOutput: string, commandDescription: string): string {
+	const version = parseBlenderVersion(versionOutput);
+	if (!version) {
+		throw new Error(
+			`Could not parse Blender version from '${commandDescription} --version':\n${versionOutput.trim()}`,
+		);
+	}
+	if (!isBlenderVersionSufficient(version, BLENDER_VERSION_FLOOR)) {
+		throw new Error(
+			`Blender version ${version} found at '${commandDescription}', but pi-blender requires Blender >= ${BLENDER_VERSION_FLOOR} (Blender 4.2 LTS or later).\n` +
+				`Earlier versions lack required APIs (such as EEVEE-Next, modern OBJ/STL exporters). Please upgrade Blender or set BLENDER_PATH to a supported build.`,
+		);
+	}
+	return version;
+}
+
+export function clearCachedBlenderArgv(): void {
+	cachedArgv = undefined;
+}
+
 export function resolveBlenderArgv(): Promise<BlenderArgv> {
 	cachedArgv ??= (async () => {
 		const configured = process.env.BLENDER_PATH?.trim();

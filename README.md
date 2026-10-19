@@ -54,8 +54,20 @@ node scripts/install-agents.mjs            # dry run: print resolved paths
 node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
 ```
 
-Blender itself is autodetected (`BLENDER_PATH`, macOS app bundle, flatpak,
-`PATH`). Set `BLENDER_PATH` if yours lives elsewhere.
+### Requirements & Version Floor
+
+- **Node.js**: `>= 22.0.0`
+- **Blender**: `>= 4.2.0` (Blender 4.2 LTS or later)
+
+Blender 4.2 LTS is the version floor. The extension relies on modern Blender APIs including the EEVEE-Next engine and modern geometry export operators (`bpy.ops.wm.obj_export`, `bpy.ops.wm.stl_export`). Earlier Blender releases (such as 3.x or 4.0/4.1) lack these APIs and are rejected with an explicit, actionable error message.
+
+Blender is autodetected in the following order:
+1. `$BLENDER_PATH` environment variable (e.g. `BLENDER_PATH="flatpak run --command=blender org.blender.Blender"` or `/opt/blender/blender`)
+2. macOS application bundle (`/Applications/Blender.app/Contents/MacOS/Blender`)
+3. Flatpak (`org.blender.Blender` via `flatpak info`)
+4. System `PATH` (`blender`)
+
+If Blender is missing or below version 4.2.0, the extension fails fast with actionable upgrade instructions.
 
 Usage, workspace semantics, environment variables and per-tool behaviour:
 [docs/DESIGN.md](docs/DESIGN.md).
