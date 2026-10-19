@@ -1,6 +1,6 @@
 {
   "name": "@luxuride-pi/blender",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "pi extension: Blender integration (live Blender session, render, scene inspection) with flatpak support",
   "keywords": [
     "blender",
