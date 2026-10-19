@@ -16,6 +16,10 @@
     ]
   },
   "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": ">=22.0.0",
+    "blender": ">=4.2.0"
+  },
   "files": [
     "index.ts",
     "config.ts",
