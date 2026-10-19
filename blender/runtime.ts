@@ -41,7 +41,13 @@ export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";
 export { blenderSetMode } from "./set-mode.js";
+export { blenderWindowLayout } from "./window-layout.js";
 export type {
+	WindowLayoutArea,
+	WindowLayoutWindow,
+	WindowLayoutData,
+	WindowLayoutOptions,
+	WindowLayoutResult,
 	AddReferenceOptions,
 	AddReferenceResult,
 	BlenderBranchRunRecord,

@@ -651,6 +651,75 @@ export interface SetModeResult {
 	reason?: string;
 }
 
+export interface WindowLayoutArea {
+	type: string;
+	uiType?: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	spaceType?: string | null;
+	spaces?: string[];
+	regions?: Array<{
+		type: string;
+		width: number;
+		height: number;
+		x: number;
+		y: number;
+	}>;
+}
+
+export interface WindowLayoutWindow {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	screen: string | null;
+	workspace: string | null;
+	areas: WindowLayoutArea[];
+}
+
+export interface WindowLayoutData {
+	windows: WindowLayoutWindow[];
+	activeWindow?: WindowLayoutWindow | null;
+	screens: string[];
+	activeScreen: string | null;
+	activeWorkspace: string | null;
+}
+
+export interface WindowLayoutOptions {
+	cwd?: string;
+	workspace?: string;
+	format?: "json" | "image";
+	screenshot?: boolean;
+	as_image?: boolean;
+	as_json?: boolean;
+	area_type?: string;
+	max_bytes?: number;
+	output_path?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}
+
+export interface WindowLayoutResult {
+	ok: boolean;
+	layout: WindowLayoutData | null;
+	areas: WindowLayoutArea[];
+	activeObject: { name: string; type: string } | null;
+	selection: {
+		activeObject: { name: string; type: string } | null;
+		selectedObjects: Array<{ name: string; type: string }>;
+		selectedObjectCount: number;
+	} | null;
+	captured: boolean;
+	imagePath?: string | null;
+	dimensions?: { width: number; height: number } | null;
+	bytes?: number | null;
+	pixelSize?: number | null;
+	maxBytes?: number | null;
+	reason?: string;
+}
+
 export type BlenderRenderMethod = "live" | "background";export type BlenderRenderViewSource = "camera" | "current-view";
 export type BlenderViewportShading = "wireframe" | "solid" | "material-preview" | "rendered";
 export type BlenderRenderEngine = "eevee" | "cycles" | "workbench";

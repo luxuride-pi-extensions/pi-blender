@@ -64,6 +64,7 @@ import {
 	blenderSceneInfo,
 	blenderSessionContext,
 	blenderSetMode,
+	blenderWindowLayout,
 	blenderWorkspaceInit,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
@@ -246,6 +247,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// asset, so the manager may record what its own probes established.
 	"blender_record_iteration_fact",
 	"blender_export_asset",
+	"blender_window_layout",
 ]);
 
 /** Image types `read` would attach to the request, mirroring pi's own sniffing. */
@@ -291,6 +293,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_read_only_python",
 	"blender_montage",
 	"blender_compare",
+	"blender_window_layout",
 ];
 
 /**
@@ -554,6 +557,84 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					});
 
 						return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_window_layout",
+			label: "Blender Window Layout",
+			description:
+				"Read the live Blender UI window layout, screens, areas, space types, active object, and selection as JSON (zero image token cost), or capture a byte-capped screenshot downscaled with system pixel_size awareness. Any screenshot capture is byte-capped at 500 KB (512,000 bytes) and downscaled honoring context.preferences.system.pixel_size. Window-only: reports layout: null and captured: false with a reason instead of failing when no watch window is open.",
+			annotations: {
+				readOnlyHint: true,
+			},
+			parameters: Type.Object({
+				workspace: Type.Optional(
+					Type.String({
+						description:
+							"Optional workspace path for the Blender task. Relative paths resolve from the current working directory.",
+					}),
+				),
+				format: Type.Optional(
+					Type.Union([Type.Literal("json"), Type.Literal("image")], {
+						description:
+							"Output format: 'json' for zero-cost layout description (default), or 'image' for a byte-capped screenshot.",
+					}),
+				),
+				screenshot: Type.Optional(
+					Type.Boolean({
+						description:
+							"Whether to capture a screenshot (default false). When true, downscales and byte-caps the image at 500 KB.",
+					}),
+				),
+				as_image: Type.Optional(
+					Type.Boolean({
+						description: "Alias for screenshot: true.",
+					}),
+				),
+				as_json: Type.Optional(
+					Type.Boolean({
+						description:
+							"Return layout and selection as JSON only, asserting no image payload (default true).",
+					}),
+				),
+				area_type: Type.Optional(
+					Type.String({
+						description:
+							"Optional Blender area type to screenshot (e.g. 'VIEW_3D', 'OUTLINER', 'PROPERTIES'). If omitted or 'window', captures the entire window.",
+					}),
+				),
+				max_bytes: Type.Optional(
+					Type.Number({
+						description:
+							"Maximum file size in bytes for the downscaled screenshot (default 512,000 = 500 KB).",
+					}),
+				),
+				output_path: Type.Optional(
+					Type.String({
+						description: "Optional file path where the screenshot PNG will be written.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderWindowLayout({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					format: params.format,
+					screenshot: params.screenshot,
+					as_image: params.as_image,
+					as_json: params.as_json,
+					area_type: params.area_type,
+					max_bytes: params.max_bytes,
+					output_path: params.output_path,
+					signal,
+				});
+
+				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};

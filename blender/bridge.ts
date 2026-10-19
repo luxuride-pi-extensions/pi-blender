@@ -11,6 +11,7 @@ import type {
 	GeometryProbeResult,
 	GeometryProbeSpecification,
 	MontageResult,
+	WindowLayoutResult,
 } from "./types.js";
 import {
 	acquireBridgeLock,
@@ -182,7 +183,13 @@ async function runHeadlessBridgeRequest<T>(options: {
  * is not listed and has no window still raises from its own handler, which is
  * the honest outcome: the tool found out by trying, and said why.
  */
-const WINDOW_ONLY_REQUEST_TYPES = new Set(["set-mode", "capture-view"]);
+const WINDOW_ONLY_REQUEST_TYPES = new Set([
+	"set-mode",
+	"capture-view",
+	"window-layout",
+	"get-window-layout",
+	"window-screenshot",
+]);
 
 export async function requestBridge<T>(options: {
 	payload: Record<string, unknown>;
@@ -532,6 +539,50 @@ export async function requestLiveBlenderSetMode(options: {
 		// nobody has to notice a missing field to know the mode never switched.
 		if (error instanceof NoWatchWindowError) {
 			return { ok: false, mode: options.mode, reason: error.message };
+		}
+		throw error;
+	}
+}
+
+export async function requestLiveBlenderWindowLayout(options: {
+	blendPath?: string;
+	format?: "json" | "image";
+	screenshot?: boolean;
+	as_image?: boolean;
+	as_json?: boolean;
+	area_type?: string;
+	max_bytes?: number;
+	output_path?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<WindowLayoutResult> {
+	try {
+		return await requestBridge<WindowLayoutResult>({
+			payload: {
+				type: "window-layout",
+				blendPath: options.blendPath,
+				format: options.format,
+				screenshot: options.screenshot,
+				as_image: options.as_image,
+				as_json: options.as_json,
+				area_type: options.area_type,
+				max_bytes: options.max_bytes,
+				output_path: options.output_path,
+			},
+			signal: options.signal,
+			timeoutMs: options.timeoutMs,
+		});
+	} catch (error) {
+		if (error instanceof NoWatchWindowError) {
+			return {
+				ok: false,
+				layout: null,
+				areas: [],
+				activeObject: null,
+				selection: null,
+				captured: false,
+				reason: error.message,
+			};
 		}
 		throw error;
 	}
