@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { getBlenderAssetsDir } from "../config.js";
 import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
 import { runBlenderJson } from "./utils.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
@@ -21,10 +22,12 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeArmatures: selected.has("armatures"),
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
+			includeMissingFiles: selected.has("missingFiles"),
+			includeLinkedLibraries: selected.has("linkedLibraries"),
 		};
 	}
 
-	// Full payload by default; the new paint/UV/rig sections stay opt-in to
+	// Full payload by default; the new paint/UV/rig/health sections stay opt-in to
 	// keep the plain default response compact.
 	return {
 		includeObjects: true,
@@ -39,6 +42,8 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeArmatures: false,
 		includeTextures: false,
 		includePaintSettings: false,
+		includeMissingFiles: false,
+		includeLinkedLibraries: false,
 	};
 }
 
@@ -46,9 +51,20 @@ function buildSceneInfoScript(): string {
 	return `
 import bpy
 import json
+import os
 import sys
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
+
+_assets_dir = payload.get("assetsDir")
+if _assets_dir and _assets_dir not in sys.path:
+    sys.path.insert(0, _assets_dir)
+
+try:
+    from scene_info import extract_missing_files, extract_linked_libraries
+except ImportError:
+    extract_missing_files = None
+    extract_linked_libraries = None
 
 def maybe_vector(value):
     if value is None:
@@ -71,6 +87,8 @@ result = {
     "armatures": [],
     "textures": [],
     "paintSettings": None,
+    "missingFiles": None,
+    "linkedLibraries": None,
 }
 
 if payload.get("includeUv", False):
@@ -243,6 +261,34 @@ if payload.get("includeRenderSettings", True):
         "camera": scene.camera.name if scene.camera else None,
     }
 
+if payload.get("includeMissingFiles", False):
+    blend_path = payload.get("blendPath")
+    if extract_missing_files is not None:
+        result["missingFiles"] = extract_missing_files(blend_path)
+    else:
+        result["missingFiles"] = {
+            "images": [],
+            "libraries": [],
+            "fonts": [],
+            "sounds": [],
+            "movieClips": [],
+            "caches": [],
+            "sequences": [],
+            "totalCount": 0,
+        }
+
+if payload.get("includeLinkedLibraries", False):
+    blend_path = payload.get("blendPath")
+    if extract_linked_libraries is not None:
+        result["linkedLibraries"] = extract_linked_libraries(blend_path)
+    else:
+        result["linkedLibraries"] = {
+            "tree": [],
+            "list": [],
+            "totalCount": 0,
+            "hasIndirect": False,
+        }
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(result))
 print("__PI_BLENDER_JSON_END__")
@@ -270,6 +316,8 @@ async function getSceneInfoForSelection(
 		blendPath: manifest.blendPath,
 		scriptSource: buildSceneInfoScript(),
 		payload: {
+			assetsDir: getBlenderAssetsDir(),
+			blendPath: manifest.blendPath,
 			includeObjects: selection.includeObjects,
 			includeCollections: selection.includeCollections,
 			includeMaterials: selection.includeMaterials,
@@ -282,6 +330,8 @@ async function getSceneInfoForSelection(
 			includeArmatures: selection.includeArmatures,
 			includeTextures: selection.includeTextures,
 			includePaintSettings: selection.includePaintSettings,
+			includeMissingFiles: selection.includeMissingFiles,
+			includeLinkedLibraries: selection.includeLinkedLibraries,
 		},
 		signal,
 		timeoutMs: 60_000,
@@ -334,6 +384,8 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		armatures: selection.includeArmatures ? result.armatures : [],
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
+		missingFiles: selection.includeMissingFiles ? result.missingFiles ?? null : null,
+		linkedLibraries: selection.includeLinkedLibraries ? result.linkedLibraries ?? null : null,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;
