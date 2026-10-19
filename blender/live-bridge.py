@@ -39,6 +39,10 @@ import montage  # pyright: ignore[reportMissingImports]
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import export_asset  # pyright: ignore[reportMissingImports]
 
+# Hand-off fidelity checks for joint probe findings.
+# pi-lens-ignore: ast-grep:unresolved-import-python
+import joint_probe  # pyright: ignore[reportMissingImports]
+
 BRIDGE_DIR = os.environ.get("PI_BLENDER_BRIDGE_DIR") or os.path.join(
     # Same XDG convention config.ts uses for its own default. This is only
     # reached when Blender was started BY HAND with --python live-bridge.py and
@@ -2383,6 +2387,17 @@ def _probe_joints(objects, tolerance):
                         "overlapping on any axis, so the two may or may not be meant to meet -- judge this one"
                     )
 
+            handoff = joint_probe.compute_handoff(
+                first.name,
+                second.name,
+                first_min,
+                first_max,
+                second_min,
+                second_max,
+                severity,
+                gap,
+            )
+
             candidates.append(
                 {
                     "a": first.name,
@@ -2397,6 +2412,8 @@ def _probe_joints(objects, tolerance):
                     "boundingBoxOverlapAxes": ["XYZ"[i] for i in range(3) if gap[i] < 0.0],
                     "overlapping": overlapping,
                     "boundingBoxDistance": _round(distance),
+                    "handoff": handoff,
+                    "handOff": handoff,
                 }
             )
 
