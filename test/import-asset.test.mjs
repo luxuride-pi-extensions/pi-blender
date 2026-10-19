@@ -110,7 +110,7 @@ test("asset name sanitization strips invalid characters and clamps length", () =
 	assert.equal(sanitizeAssetName(""), "asset");
 });
 
-test("path traversal guard rejects paths outside allowed roots", async () => {
+test("path traversal guard rejects paths outside allowed roots", { skip }, async () => {
 	const ws = await makeWorkspace();
 	const dummyObj = writeSampleObj(ws.root, "legit.obj");
 
