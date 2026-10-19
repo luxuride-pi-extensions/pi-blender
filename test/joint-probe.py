@@ -162,6 +162,14 @@ def main():
         )
         check(defect["overlapping"] is False, "stacked pipes with a gap are not inside one another")
         check(joints["defectCount"] >= 1, f"defectCount was {joints['defectCount']}")
+        check(defect.get("handoff") is not None, "defect must report handoff metadata")
+        handoff = defect["handoff"]
+        check(handoff.get("ambiguous") is False, f"riser handoff should not be ambiguous, got {handoff}")
+        check(handoff.get("partToMove") == "HeadPipe", f"expected partToMove HeadPipe, got {handoff.get('partToMove')}")
+        check(
+            abs(handoff["offset"][0]) < 1e-5 and abs(handoff["offset"][1]) < 1e-5 and abs(handoff["offset"][2] - (-0.011)) < 1e-4,
+            f"expected offset [0, 0, -0.011], got {handoff.get('offset')}",
+        )
 
     # The healthy join: present in the scene, absent from the report.
     check(

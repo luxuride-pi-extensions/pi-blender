@@ -336,6 +336,16 @@ Start pi in any project dir. The extension:
   dropped off that list dies quietly, and `test/shape-probe.py` did exactly
   that, failing silently for as long as it went unrun after the handlers began
   requiring the `blendPath` they were not passing
+- **Hand-off offset vectors for fixable joints**. When a critic identifies a
+  detached riser or broken join, reporting only a scalar magnitude (e.g. an 11 mm
+  gap) forces the downstream worker to re-derive the direction and guess which
+  part to move. To eliminate guessing, the `joint` probe computes a signed
+  world-space `handoff` offset vector (`{ partToMove: "HeadPipe", offset: [0, 0, -0.011] }`)
+  for fixable findings (`near-miss`, `broken-continuation`, `overlapping-but-apart`,
+  `detached`). The part to move is chosen as the smaller part by bounding
+  extent, reusing the container rule. When the two parts have near-equal extent
+  (< 1.5x ratio) or displacement is indeterminate, `ambiguous: true` is reported
+  rather than hazarding an ungrounded guess.
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
