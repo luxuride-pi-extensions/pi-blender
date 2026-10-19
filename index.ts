@@ -64,6 +64,7 @@ import {
 	blenderSceneInfo,
 	blenderSessionContext,
 	blenderSetMode,
+	blenderUsageGuess,
 	blenderWorkspaceInit,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
@@ -235,6 +236,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// Blender inspection. Read-only: the manager may look, not author.
 	"blender_workspace_init",
 	"blender_scene_info",
+	"blender_usage_guess",
 	"blender_add_reference",
 	"blender_module_revert",
 	"blender_session_context",
@@ -272,6 +274,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_execute_python",
 	"blender_session_context",
 	"blender_scene_info",
+	"blender_usage_guess",
 	"blender_save_view",
 	"blender_render",
 	"blender_module_run",
@@ -401,7 +404,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_workspace_init",
 			label: "Blender Workspace Init",
 			description:
-				"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available.",
+				"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available. When sourceBlend is specified, the source scene is adopted wholesale as model.blend. WARNING: Adopting a source blend wholesale discards the default studio template rig and camera (StudioCamera, StudioKey, StudioFill, StudioRim); the workspace inherits whatever lighting and cameras exist in the source file, or has none if none were defined.",
 			parameters: Type.Object({
 				workspace: Type.Optional(
 					Type.String({
@@ -410,7 +413,8 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 				),
 				sourceBlend: Type.Optional(
 					Type.String({
-						description: "Optional source .blend file to copy into the workspace as the starting model.blend.",
+						description:
+							"Optional source .blend file to copy into the workspace as the starting model.blend. WARNING: Adopting an external source scene wholesale discards the default studio lighting rig (StudioKey, StudioFill, StudioRim) and studio camera; the workspace inherits the source file's existing lighting and cameras (or lacks them entirely if none were defined in the source).",
 					}),
 				),
 				template: Type.Optional(
@@ -421,7 +425,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 						],
 						{
 							description:
-								'Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender\'s startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since the source scene brings its own setup.',
+								'Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender\'s startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since adopting a source blend wholesale discards the studio rig/lighting.',
 							default: "studio",
 						},
 					),
@@ -585,10 +589,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("armatures"),
 							Type.Literal("textures"),
 							Type.Literal("paintSettings"),
+							Type.Literal("usage_guess"),
+							Type.Literal("usageGuess"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For orientation heuristic add `usage_guess`. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),
@@ -600,9 +606,44 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					workspace: params.workspace,
 					categories: params.categories,
 					signal,
-					});
+				});
 
-						return {
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_usage_guess",
+			label: "Blender Usage Guess",
+			description:
+				"Inspect a saved .blend file headlessly (no live UI bridge lock needed) and guess what it is for. Evaluates signals across data-blocks for animation (actions, armatures), rendering (render engines, output paths, compositor), shading (materials, shader node trees, textures), procedural (geometry nodes, procedural modifiers), and modeling (mesh geometry complexity, curves, vertex groups, shape keys, with default cube check). Returns normalized score (0-100) and certainty (0-100) per category along with named contributing signals. If no signals are found in the file, returns zeroed scores rather than guessing a default.",
+			parameters: Type.Object({
+				workspace: Type.Optional(
+					Type.String({
+						description:
+							"Optional workspace path containing model.blend to analyze. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+					}),
+				),
+				blendPath: Type.Optional(
+					Type.String({
+						description:
+							"Optional direct path to a .blend file to analyze headlessly. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderUsageGuess({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					blendPath: params.blendPath,
+					signal,
+				});
+
+				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
