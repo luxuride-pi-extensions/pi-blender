@@ -10,12 +10,15 @@
 // no call can express "this key was dropped on the way down".
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const lines = readFileSync(new URL("../index.ts", import.meta.url), "utf8").split("\n");
+const sourcePath = existsSync(new URL("../core/tools.ts", import.meta.url))
+	? "../core/tools.ts"
+	: "../index.ts";
+const lines = readFileSync(new URL(sourcePath, import.meta.url), "utf8").split("\n");
 
-/** Each pi.registerTool({ ... }) block, split out by brace depth. */
+/** Each tool definition block, split out by brace depth. */
 function toolBlocks() {
 	const blocks = [];
 	let cur = null;
@@ -28,7 +31,7 @@ function toolBlocks() {
 		if (!cur) continue;
 		cur.lines.push(lines[i]);
 		depth += (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
-		if (depth <= 0 && /^\t\t\}\);/.test(lines[i])) {
+		if (depth <= 0 && (/^\t\t\}\);/.test(lines[i]) || /^\};$/.test(lines[i]))) {
 			blocks.push(cur);
 			cur = null;
 		}
@@ -46,10 +49,11 @@ function schemaKeys(block) {
 	if (start < 0) return null;
 	const keys = [];
 	let depth = 1; // the `Type.Object({` we just matched
+	const keyIndent = sourcePath.includes("core/tools.ts") ? "^\t{2}" : "^\t{4}";
 	for (let i = start + 1; i < block.lines.length; i++) {
 		const line = block.lines[i];
 		if (!line.trim()) continue;
-		const key = line.match(/^\t{4}([a-zA-Z_][a-zA-Z0-9_.]*): Type\./);
+		const key = line.match(new RegExp(`${keyIndent}([a-zA-Z_][a-zA-Z0-9_.]*): Type\\.`));
 		if (key) keys.push(key[1]);
 		depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
 		if (depth === 0) break;

@@ -7,10 +7,15 @@ tool-by-tool usage reference.
 ## Layout
 
 ```
-index.ts            extension entry (23 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
+index.ts            pi extension entry (registers core tools with pi, /blender command, skills, prompt injection)
 launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
-core/exec.ts        execCommand stand-in (argv spawn, no shell)
+core/               transport-agnostic Blender capability layer (NO pi symbols, bare Node unit-testable)
+  index.ts            barrel export for core types, tools, exec, and MCP server
+  types.ts            CoreToolDefinition, CoreToolContext, CoreToolResult types
+  tools.ts            23 tool schemas, descriptions, and execute handlers + read-only subset
+  exec.ts             execCommand stand-in (argv spawn, no shell)
+  mcp-server.ts       Model Context Protocol stdio façade exposing read-only tools
 blender/            module from packages/coding-agent/src/blender/ (+ set-mode, paint scene-info categories, module run/revert)
   live-bridge.py      file-based bridge polled inside a running Blender UI
   blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch (per-instance path)
@@ -28,6 +33,7 @@ blender/            module from packages/coding-agent/src/blender/ (+ set-mode, 
                       `extensions:` frontmatter placeholders with absolute
                       paths for your machine (no ~ or env expansion happens
                       for that field)
+scripts/mcp-server.mjs  executable stdio MCP server exposing read-only tools to third-party clients
 scripts/install-agents.mjs  generates the machine-specific agent copies
                             (`--check` verifies them without writing)
 scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
@@ -36,6 +42,32 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
                             (`--check` is read-only and exits 1 on any problem)
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 ```
+
+## Architecture: Layer Boundaries & Ownership
+
+pi-blender separates core domain capabilities from environment-specific transports and harnesses:
+
+1. **Core Capability Layer (`core/`)**
+   - **Ownership**: Owns tool definitions, TypeBox parameter schemas, and execution handlers for all 23 Blender operations. Also owns transport-neutral execution primitives (`exec.ts`) and the stdio Model Context Protocol façade (`mcp-server.ts`).
+   - **Boundary Guarantee**: Imports **NO pi symbols** (no `@earendil-works/pi-coding-agent`, no `@luxuride-pi/manager-core`). It executes and is fully unit-testable in a bare Node.js process without any extension container.
+   - **Subsets**: Exports the full tool roster (`BLENDER_TOOLS`) as well as the read-only inspection subset (`READ_ONLY_TOOLS`: `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`).
+
+2. **Pi Extension Façade (`index.ts`)**
+   - **Ownership**: Adapts core capabilities to the `@earendil-works/pi-coding-agent` runtime.
+   - **Responsibilities**:
+     - Iterates over `BLENDER_TOOLS` and registers each tool with `pi.registerTool({ defaultActive: false, ... })`.
+     - Exposes the `/blender` and `/blender-exit` slash commands.
+     - Implements manager mode session gating, write/edit tool gating, and turn hooks (`session_start`, `session_shutdown`, `before_agent_turn`).
+     - Injects volatile live-state snapshots and constant manager workflow guidance.
+     - Discovers bundled skills via `resources_discover`.
+
+3. **Model Context Protocol (MCP) Façade (`core/mcp-server.ts`, `scripts/mcp-server.mjs`)**
+   - **Ownership**: Provides a standard JSON-RPC 2.0 stdio transport interface for third-party MCP clients (such as Claude Desktop, cursor, or independent agent processes).
+   - **Responsibilities**:
+     - Handles `initialize` (negotiating MCP protocol version 2024-11-05 and declaring tool capabilities).
+     - Handles `ping` and notifications (`notifications/initialized`).
+     - Handles `tools/list`, advertising the read-only tools with standard JSON Schema `inputSchema` objects.
+     - Handles `tools/call`, executing the requested inspection or probe tool against the designated workspace and returning standard `{ content: [{ type: "text", text }], isError }` responses.
 
 ## Flatpak fixes (vs. upstream)
 

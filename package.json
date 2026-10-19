@@ -31,7 +31,8 @@
     "setup": "node scripts/dev-setup.mjs",
     "check:setup": "node scripts/dev-setup.mjs --check",
     "install:agents": "node scripts/install-agents.mjs",
-    "check:agents": "node scripts/install-agents.mjs --check"
+    "check:agents": "node scripts/install-agents.mjs --check",
+    "mcp": "node scripts/mcp-server.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.99.1",
