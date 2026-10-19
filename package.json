@@ -10,6 +10,11 @@
     "subagent"
   ],
   "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "license": "MIT",
   "files": [
     "index.ts",
