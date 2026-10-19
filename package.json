@@ -23,7 +23,8 @@
     "manager-core.ts",
     "core/",
     "blender/",
-    "scripts/"
+    "scripts/",
+    "docs/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -41,6 +41,17 @@ export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";
 export { blenderSetMode } from "./set-mode.js";
+export {
+	blenderGetPythonApiDocs,
+	blenderSearchApiDocs,
+	blenderSearchManualDocs,
+} from "./doc-grounding.js";
+export type {
+	BlenderApiDocResult,
+	BlenderDocParam,
+	BlenderSearchMatch,
+	BlenderSearchResult,
+} from "./doc-grounding.js";
 export type {
 	AddReferenceOptions,
 	AddReferenceResult,

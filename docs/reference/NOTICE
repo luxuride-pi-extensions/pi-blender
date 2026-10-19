@@ -1,0 +1,23 @@
+Blender Reference Documentation Notice
+=======================================
+
+This directory contains curated reference documentation and manual excerpts
+derived from Blender (Blender 4.2 LTS), published by the Blender Foundation
+and individual contributors.
+
+Licensing:
+- Blender User Manual excerpts located in `docs/reference/manual/` are licensed
+  under the Creative Commons Attribution-ShareAlike 4.0 International License
+  (CC BY-SA 4.0).
+  Reference: https://docs.blender.org/manual/en/4.2/
+  License details: https://creativecommons.org/licenses/by-sa/4.0/
+
+- Blender Python API documentation, operator signatures, parameter descriptions,
+  and type definitions located in `docs/reference/api/` are derived from the
+  Blender source code and docstrings, licensed under the GNU General Public
+  License (GPL), version 2 or later (and GPL version 3).
+  Reference: https://docs.blender.org/api/4.2/
+  License details: https://www.gnu.org/licenses/gpl-3.0.html
+
+Copyright (C) Blender Foundation, Blender Contributors.
+All rights and trademarks belong to their respective owners.

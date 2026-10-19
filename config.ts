@@ -147,6 +147,10 @@ export function getBundledBlankBootstrapPath(): string {
 	return resolve(join(getBlenderAssetsDir(), "blank-bootstrap.py"));
 }
 
+export function getBlenderDocsReferenceDir(): string {
+	return join(EXTENSION_DIR, "docs", "reference");
+}
+
 /**
  * The manager's own prompt, as a system-prompt section.
  *
