@@ -803,6 +803,291 @@ def handle_get_session_context(_request):
     }
 
 
+def downscale_image_to_size_limit(raw_path, output_path, max_bytes=500 * 1024, pixel_size=None):
+    """Downscale an image honoring system pixel_size and capping file size under max_bytes."""
+    import imbuf  # pyright: ignore[reportMissingImports]
+
+    if pixel_size is None:
+        pixel_size = getattr(bpy.context.preferences.system, "pixel_size", 1.0) or 1.0
+    if pixel_size <= 0:
+        pixel_size = 1.0
+
+    raw_copy = raw_path + ".raw_scale.png"
+    if os.path.abspath(raw_path) != os.path.abspath(output_path):
+        shutil.copyfile(raw_path, raw_copy)
+    else:
+        os.replace(raw_path, raw_copy)
+
+    ibuf = imbuf.load(raw_copy)
+    if ibuf is None:
+        if os.path.exists(raw_copy):
+            with contextlib.suppress(OSError):
+                os.remove(raw_copy)
+        raise RuntimeError(f"Failed to load captured screenshot from {raw_path}")
+
+    orig_w, orig_h = ibuf.size
+    # Honor context.preferences.system.pixel_size for HiDPI downscaling
+    base_w = max(1, int(orig_w / pixel_size))
+    base_h = max(1, int(orig_h / pixel_size))
+
+    # Resize to base dimensions first
+    ibuf.resize((base_w, base_h))
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    imbuf.write(ibuf, filepath=output_path)
+
+    current_size = os.path.getsize(output_path)
+    final_w, final_h = base_w, base_h
+
+    # If over budget, binary-search a scale factor to land under max_bytes
+    if current_size > max_bytes:
+        low = 0.05
+        high = 1.0
+        best_w, best_h = base_w, base_h
+        for _ in range(8):
+            mid = (low + high) / 2.0
+            test_w = max(1, int(base_w * mid))
+            test_h = max(1, int(base_h * mid))
+            test_buf = imbuf.load(raw_copy)
+            if test_buf is None:
+                break
+            test_buf.resize((test_w, test_h))
+            imbuf.write(test_buf, filepath=output_path)
+            size = os.path.getsize(output_path)
+            if size <= max_bytes:
+                best_w, best_h = test_w, test_h
+                low = mid
+            else:
+                high = mid
+        final_w, final_h = best_w, best_h
+
+    if os.path.exists(raw_copy):
+        with contextlib.suppress(OSError):
+            os.remove(raw_copy)
+
+    final_size = os.path.getsize(output_path)
+    return {
+        "imagePath": output_path,
+        "dimensions": {"width": final_w, "height": final_h},
+        "bytes": final_size,
+        "pixelSize": pixel_size,
+        "maxBytes": max_bytes,
+    }
+
+
+def handle_window_layout(request):
+    if not bpy.context.window_manager.windows:
+        return {
+            "ok": False,
+            "layout": None,
+            "areas": [],
+            "activeObject": None,
+            "selection": None,
+            "captured": False,
+            "reason": "No Blender window is open.",
+        }
+
+    active_object = (
+        bpy.context.view_layer.objects.active
+        if bpy.context.view_layer
+        else getattr(bpy.context, "active_object", None)
+    )
+    active_object_ref = object_ref(active_object)
+    selected_objects = [object_ref(obj) for obj in getattr(bpy.context, "selected_objects", [])]
+    valid_selected = [obj for obj in selected_objects if obj is not None]
+
+    selection_data = {
+        "activeObject": active_object_ref,
+        "selectedObjects": valid_selected,
+        "selectedObjectCount": len(valid_selected),
+    }
+
+    windows_data = []
+    all_areas = []
+    screens_list = []
+    active_screen_name = None
+    active_workspace_name = None
+
+    wm = bpy.context.window_manager
+    active_win = getattr(bpy.context, "window", None) or (wm.windows[0] if wm.windows else None)
+
+    for window in wm.windows:
+        screen = window.screen
+        screen_name = screen.name if screen else None
+        if screen_name and screen_name not in screens_list:
+            screens_list.append(screen_name)
+        if window == active_win:
+            active_screen_name = screen_name
+            active_workspace_name = (
+                getattr(window.workspace, "name", None)
+                if hasattr(window, "workspace") and window.workspace
+                else None
+            )
+
+        win_areas = []
+        if screen:
+            for area in screen.areas:
+                active_space = area.spaces.active if area.spaces.active else None
+                space_type = active_space.type if active_space else area.type
+                spaces_types = [s.type for s in area.spaces]
+                regions_data = [
+                    {
+                        "type": r.type,
+                        "x": int(r.x),
+                        "y": int(r.y),
+                        "width": int(r.width),
+                        "height": int(r.height),
+                    }
+                    for r in area.regions
+                ]
+                area_info = {
+                    "type": area.type,
+                    "uiType": getattr(area, "ui_type", area.type),
+                    "x": int(area.x),
+                    "y": int(area.y),
+                    "width": int(area.width),
+                    "height": int(area.height),
+                    "spaceType": space_type,
+                    "spaces": spaces_types,
+                    "regions": regions_data,
+                }
+                win_areas.append(area_info)
+                if window == active_win:
+                    all_areas.append(area_info)
+
+        win_info = {
+            "x": int(getattr(window, "x", 0)),
+            "y": int(getattr(window, "y", 0)),
+            "width": int(window.width),
+            "height": int(window.height),
+            "screen": screen_name,
+            "workspace": (
+                getattr(window.workspace, "name", None)
+                if hasattr(window, "workspace") and window.workspace
+                else None
+            ),
+            "areas": win_areas,
+        }
+        windows_data.append(win_info)
+
+    if not all_areas and windows_data:
+        all_areas = windows_data[0]["areas"]
+
+    layout_data = {
+        "windows": windows_data,
+        "activeWindow": next(
+            (w for w in windows_data if w["screen"] == active_screen_name),
+            windows_data[0] if windows_data else None,
+        ),
+        "screens": screens_list,
+        "activeScreen": active_screen_name,
+        "activeWorkspace": active_workspace_name,
+    }
+
+    # Determine whether screenshot is requested
+    is_image = (
+        request.get("format") == "image"
+        or bool(request.get("screenshot"))
+        or bool(request.get("as_image"))
+        or request.get("type") == "window-screenshot"
+    )
+    if request.get("as_json") and not (request.get("format") == "image" or request.get("as_image")):
+        is_image = False
+
+    if not is_image:
+        return {
+            "ok": True,
+            "layout": layout_data,
+            "areas": all_areas,
+            "activeObject": active_object_ref,
+            "selection": selection_data,
+            "captured": False,
+        }
+
+    # Screenshot requested: capture area or window, downscale with pixel_size awareness
+    output_path = request.get("outputPath") or request.get("output_path")
+    if not output_path:
+        screenshot_dir = os.path.join(BRIDGE_DIR, "screenshots")
+        os.makedirs(screenshot_dir, exist_ok=True)
+        output_path = os.path.join(screenshot_dir, f"screenshot-{int(time.time() * 1000)}.png")
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+    raw_path = output_path + ".raw.png"
+    target_area_type = request.get("areaType") or request.get("area_type")
+    target_window = None
+    target_screen = None
+    target_area = None
+
+    if target_area_type and target_area_type != "window":
+        for window in wm.windows:
+            if window.screen:
+                for area in window.screen.areas:
+                    if area.type == target_area_type or getattr(area, "ui_type", None) == target_area_type:
+                        target_window = window
+                        target_screen = window.screen
+                        target_area = area
+                        break
+            if target_area:
+                break
+
+    try:
+        if target_area and target_window and target_screen:
+            with bpy.context.temp_override(window=target_window, screen=target_screen, area=target_area):
+                bpy.ops.screen.screenshot_area(filepath=raw_path, check_existing=False)
+        else:
+            win = target_window or active_win or wm.windows[0]
+            with bpy.context.temp_override(window=win, screen=win.screen):
+                bpy.ops.screen.screenshot(filepath=raw_path, check_existing=False)
+    except Exception as e:
+        return {
+            "ok": False,
+            "layout": layout_data,
+            "areas": all_areas,
+            "activeObject": active_object_ref,
+            "selection": selection_data,
+            "captured": False,
+            "reason": f"Screenshot operator failed: {e}",
+        }
+
+    if not os.path.exists(raw_path):
+        return {
+            "ok": False,
+            "layout": layout_data,
+            "areas": all_areas,
+            "activeObject": active_object_ref,
+            "selection": selection_data,
+            "captured": False,
+            "reason": f"Screenshot capture produced no file at {raw_path}",
+        }
+
+    max_bytes = int(request.get("maxBytes") or request.get("max_bytes") or (500 * 1024))
+    custom_pixel_size = request.get("pixelSize") or request.get("pixel_size")
+    downscale_result = downscale_image_to_size_limit(
+        raw_path,
+        output_path,
+        max_bytes=max_bytes,
+        pixel_size=float(custom_pixel_size) if custom_pixel_size else None,
+    )
+
+    if os.path.exists(raw_path) and os.path.abspath(raw_path) != os.path.abspath(output_path):
+        with contextlib.suppress(OSError):
+            os.remove(raw_path)
+
+    return {
+        "ok": True,
+        "layout": layout_data,
+        "areas": all_areas,
+        "activeObject": active_object_ref,
+        "selection": selection_data,
+        "captured": True,
+        "imagePath": downscale_result["imagePath"],
+        "dimensions": downscale_result["dimensions"],
+        "bytes": downscale_result["bytes"],
+        "pixelSize": downscale_result["pixelSize"],
+        "maxBytes": downscale_result["maxBytes"],
+    }
+
+
 GEOMETRY_PROBE_CHECKS = (
     "transform",
     "bounds",
@@ -3932,6 +4217,8 @@ def handle_request(request):
         return handle_render(request)
     if request_type == "set-mode":
         return set_mode_request(request)
+    if request_type in ("window-layout", "get-window-layout", "window-screenshot"):
+        return handle_window_layout(request)
     if request_type == "shutdown":
         return handle_shutdown(request)
     raise RuntimeError(f"Unsupported Blender bridge request type: {request_type}")
