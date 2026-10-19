@@ -95,4 +95,4 @@ Bump the version *before* tagging; the tag is not the place to bump.
 
 ## License
 
-MIT
+[GPL-3.0-or-later](LICENSE)
