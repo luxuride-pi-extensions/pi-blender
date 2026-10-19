@@ -336,6 +336,20 @@ Start pi in any project dir. The extension:
   dropped off that list dies quietly, and `test/shape-probe.py` did exactly
   that, failing silently for as long as it went unrun after the handlers began
   requiring the `blendPath` they were not passing
+- **Bounded probe verdicts and why they need labelling**. Pair checks and
+  clearance probes are parameterised by a caller-supplied tolerance or
+  clearance. Consequently, a `separated` or `clear` verdict only asserts that
+  no collision or contact was detected *within the tested ceiling*, not that the
+  geometry is unconditionally clear scene-wide. For example, if an agent queries
+  whether a shelf has room above it with a small `clearance: 0.004` (4 mm),
+  receiving `separated` means "clear to 4 mm" — it does not verify that a 300 mm
+  book will fit above the shelf. Without explicit bounding metadata, an agent
+  can misinterpret a local micro-clearance pass as general unobstructed
+  clearance. To prevent this reporting trap, every clear/separated verdict
+  explicitly carries the ceiling it was verified to (`clearanceChecked`,
+  `boundedBy`, `verifiedCeiling`, `checkedCeiling`) and names which check
+  produced it (`check: "pair" | "joint" | "clearance"`), distinguishing bounded
+  checks from unconstrained scene-wide settlement.
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
