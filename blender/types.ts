@@ -944,6 +944,65 @@ export interface AssetExportResult {
 }
 
 /**
+ * Interchange formats supported for asset ingress.
+ */
+export type ImportFormat = "glb" | "gltf" | "obj" | "stl" | "fbx";
+
+export interface ImportPrincipalAxes {
+	available: boolean;
+	reason?: string;
+	center?: [number, number, number];
+	primaryAxis?: [number, number, number];
+	secondaryAxis?: [number, number, number];
+	tertiaryAxis?: [number, number, number];
+	variances?: [number, number, number];
+	extents?: [number, number, number];
+}
+
+export interface ImportObjectReport {
+	name: string;
+	scale: [number, number, number];
+	worldScale?: [number, number, number];
+	isNonUniform: boolean;
+	dimensions: [number, number, number];
+	principalAxes: ImportPrincipalAxes;
+}
+
+export interface ImportReport {
+	hasNonUniformScale: boolean;
+	nonUniformScaleObjects: string[];
+	objects: Record<string, ImportObjectReport>;
+}
+
+export interface ImportAssetOptions {
+	cwd: string;
+	workspace: string;
+	/** Path to the asset file to import. */
+	path: string;
+	/** Format of the asset. If omitted, inferred from file extension. */
+	format?: ImportFormat;
+	/** Optional asset name or object name prefix. Sanitized before use. */
+	name?: string;
+	/** Allowed directories or files to guard against path traversal. Defaults to [cwd, workspace]. */
+	allowedPaths?: string[];
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}
+
+export interface ImportAssetResult {
+	success: boolean;
+	status?: "imported" | "unsupported_format" | "missing_addon" | "import_failed" | string;
+	format: ImportFormat | string;
+	sourcePath: string;
+	assetName: string;
+	workspacePath: string;
+	checkpointPath: string;
+	importedObjects: string[];
+	report?: ImportReport;
+	error?: string;
+}
+
+/**
  * A measured fact worth carrying into the next critic, kept with the run it was
  * established against so a later brief can be checked against it.
  */
