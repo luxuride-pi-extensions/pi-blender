@@ -35,6 +35,7 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
                             provider check, Blender resolution report
                             (`--check` is read-only and exits 1 on any problem)
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
+docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server)
 ```
 
 ## Flatpak fixes (vs. upstream)
@@ -57,7 +58,9 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `instance.json` to consult, the check falls back to whether the recorded
    owner's pid is still running, so a pinned dir is a promise you keep
    yourself — two pi processes on one pinned dir will both pass it. Pin the
-   dir only when you deliberately want one shared scene.
+   dir only when you deliberately want one shared scene. See
+   [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+   per-process bridge isolation is maintained rather than hosting a shared daemon.
 4. **Nothing is written until Blender is launched** — the instance dir claim
    and the sweep of other instances' dirs hang off the *first launch*
    (`launch.ts` `ensureInstanceClaimed`), not off `session_start`. A pi
@@ -159,6 +162,9 @@ Start pi in any project dir. The extension:
   IS the manager: there is no manager subagent and no router hop, so the
   build's task list and progress are visible in the session the user typed the
   command into, rather than inside a child they would have to open to watch
+  (see [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+  manager mode, task tracking, and prompt injection reside in-session rather than
+  behind an external server boundary)
 - registers `/blender-exit`, which lifts the manager gate without ending the
   session or touching `model.blend`. Manager mode otherwise lasts until
   `/new`, which breaks a session that interleaves Blender with other work (a
@@ -457,7 +463,11 @@ Start pi in any project dir. The extension:
   erroring immediately. A lock-wait timeout names the current holder, its pid,
   and how long it has been held, so it reads as "wait your turn" instead of a
   mysterious timeout. `blender_bridge_status` reports whether the UI is alive,
-  busy, and how many requests are pending
+  busy, and how many requests are pending. (See
+  [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+  this cross-process lock, live/headless fallback, and module iteration state
+  cannot be replaced by a remote or standalone MCP server without inventing
+  distributed locking and losing crash reclamation.)
 - **authoring parallelises, execution does not.** Workers writing separate
   `modules/<name>/script.py` files never interfere, so a multi-part build
   spawns one `blender-worker` per part in the same turn. Their *runs* all
