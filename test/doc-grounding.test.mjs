@@ -15,17 +15,31 @@ const {
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(TEST_DIR, "..");
-const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+const toolsSource = readFileSync(new URL("../core/tools.ts", import.meta.url), "utf8");
 const docGroundingSource = readFileSync(new URL("../blender/doc-grounding.ts", import.meta.url), "utf8");
+const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
 
+// #39 moved every registration into a `CoreToolDefinition` literal in
+// core/tools.ts and made index.ts a loop over BLENDER_TOOLS, so a
+// `pi.registerTool({` boundary no longer exists to search for. Find the
+// enclosing object literal by brace depth instead, which works for both shapes.
 function toolBlock(name) {
-	const start = indexSource.indexOf(`name: "${name}"`);
-	assert.notEqual(start, -1, `${name} is not registered in index.ts`);
-	const from = indexSource.lastIndexOf("pi.registerTool({", start);
-	assert.notEqual(from, -1, `${name} has no registerTool boundary`);
-	const end = indexSource.indexOf("});", start);
-	assert.notEqual(end, -1, `${name} registration does not close`);
-	return indexSource.slice(from, end + 3);
+	const start = toolsSource.indexOf(`name: "${name}"`);
+	assert.notEqual(start, -1, `${name} is not registered in core/tools.ts`);
+	const from = toolsSource.lastIndexOf("{", start);
+	assert.notEqual(from, -1, `${name} has no enclosing tool definition`);
+	let depth = 0;
+	let end = from;
+	for (; end < toolsSource.length; end += 1) {
+		const ch = toolsSource[end];
+		if (ch === "{") depth += 1;
+		else if (ch === "}") {
+			depth -= 1;
+			if (depth === 0) break;
+		}
+	}
+	assert.notEqual(end, from, `${name} definition does not close`);
+	return toolsSource.slice(from, end + 1);
 }
 
 function toolDescription(name) {
@@ -50,15 +64,31 @@ test("all three doc-grounding tools are registered in index.ts and added to LAZY
 
 	for (const tool of tools) {
 		const block = toolBlock(tool);
+		// Inertness is a property of registration, and after #39 registration
+		// happens once in index.ts's BLENDER_TOOLS loop. The default there is
+		// what makes every tool inert unless it explicitly opts in, so assert
+		// both halves: the shared default, and that this tool does not opt out.
 		assert.match(
+			indexSource,
+			/defaultActive:\s*tool\.defaultActive \?\? false/,
+			"index.ts must register every tool inert by default",
+		);
+		assert.doesNotMatch(
 			block,
-			/defaultActive:\s*false/,
-			`${tool} must be registered inert (defaultActive: false)`,
+			/defaultActive:\s*true/,
+			`${tool} must not opt into being active by default`,
 		);
 
 		// Assert tool is in LAZY_BLENDER_TOOL_NAMES array in index.ts
-		const lazyArrayMatch = indexSource.match(/const LAZY_BLENDER_TOOL_NAMES = \[([\s\S]*?)\];/);
-		assert.ok(lazyArrayMatch, "LAZY_BLENDER_TOOL_NAMES array must exist in index.ts");
+		// #39 replaced the hand-maintained array with a derivation from
+		// BLENDER_TOOLS, so membership is structural now: every registered tool
+		// is lazy by construction. Assert the derivation rather than a literal.
+		const lazyArrayMatch = toolsSource.match(/const LAZY_BLENDER_TOOL_NAMES = \[([\s\S]*?)\];/);
+		assert.ok(
+			lazyArrayMatch || /LAZY_BLENDER_TOOL_NAMES = BLENDER_TOOLS\.map\(/.test(indexSource),
+			"LAZY_BLENDER_TOOL_NAMES must exist in index.ts (literal or derived from BLENDER_TOOLS)",
+		);
+		if (!lazyArrayMatch) continue;
 		assert.match(
 			lazyArrayMatch[1],
 			new RegExp(`"${tool}"`),

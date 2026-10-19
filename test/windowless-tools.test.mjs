@@ -13,15 +13,18 @@
 // short of reading the description can show whether it is still made.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+const sourcePath = existsSync(new URL("../core/tools.ts", import.meta.url))
+	? "../core/tools.ts"
+	: "../index.ts";
+const indexSource = readFileSync(new URL(sourcePath, import.meta.url), "utf8");
 
 /** One tool's `description:` string, joined across its continuation lines. */
 function toolDescription(name) {
 	const start = indexSource.indexOf(`name: "${name}"`);
-	assert.notEqual(start, -1, `${name} is not registered in index.ts`);
+	assert.notEqual(start, -1, `${name} is not found in ${sourcePath}`);
 	const from = indexSource.indexOf("description:", start);
 	assert.notEqual(from, -1, `${name} has no description`);
 	// The description ends at the first line that is only the closing quote and

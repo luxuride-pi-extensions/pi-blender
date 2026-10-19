@@ -24,14 +24,17 @@
 // extension, which is not installed in a bare checkout).
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { Type } from "typebox";
 
-const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+const sourcePath = existsSync(new URL("../core/tools.ts", import.meta.url))
+	? "../core/tools.ts"
+	: "../index.ts";
+const indexSource = readFileSync(new URL(sourcePath, import.meta.url), "utf8");
 
 /**
- * index.ts with comment lines removed.
+ * Tool source with comment lines removed.
  *
  * Comments here DOCUMENT the ban, quoting the very call that is banned, so a
  * naive text scan fires on its own explanation. Only real code is checked.
@@ -89,7 +92,7 @@ test("blender_geometry_probe's points parameter uses the bounded-array form", ()
 	// Up to the next top-level parameter key, so the assertion cannot be satisfied
 	// by a bounded array belonging to some later parameter.
 	const rest = indexSource.slice(pointsStart);
-	const nextKey = rest.slice(1).search(/\n\t{4}[a-zA-Z_][a-zA-Z0-9_]*: Type\./);
+	const nextKey = rest.slice(1).search(/\n\t{2,4}[a-zA-Z_][a-zA-Z0-9_]*: Type\./);
 	const pointsBlock = nextKey === -1 ? rest : rest.slice(0, nextKey + 1);
 
 	assert.match(

@@ -14,7 +14,7 @@ const load = (name) => loadTs(join(REPO, name));
 const bridge = await load("blender/bridge.ts");
 const viewport = await load("blender/viewport.ts");
 
-const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+const toolsSource = readFileSync(new URL("../core/tools.ts", import.meta.url), "utf8");
 
 function initMockWorkspace(root) {
 	const manifestPath = join(root, "blender-workspace.json");
@@ -54,27 +54,30 @@ test("WINDOW_ONLY_REQUEST_TYPES registers switch-workspace and focus-view", () =
 
 test("index.ts registers blender_switch_workspace and blender_focus_view in LAZY_BLENDER_TOOL_NAMES", () => {
 	assert.match(
-		indexSource,
+		toolsSource,
 		/"blender_switch_workspace"/,
 		"blender_switch_workspace must be in LAZY_BLENDER_TOOL_NAMES",
 	);
 	assert.match(
-		indexSource,
+		toolsSource,
 		/"blender_focus_view"/,
 		"blender_focus_view must be in LAZY_BLENDER_TOOL_NAMES",
 	);
 });
 
 test("tool descriptions state window-only semantics and graceful refusal", () => {
-	const startSwitch = indexSource.indexOf('name: "blender_switch_workspace"');
+	const startSwitch = toolsSource.indexOf('name: "blender_switch_workspace"');
 	assert.notEqual(startSwitch, -1);
-	const switchSection = indexSource.slice(startSwitch, startSwitch + 800);
+	// The window is generous on purpose: it must cover the whole tool literal, and
+	// a description's length is not a contract. A tight slice silently turns a
+	// content assertion into a position assertion the day a sentence is added.
+	const switchSection = toolsSource.slice(startSwitch, startSwitch + 2000);
 	assert.match(switchSection, /switched:\s*false/);
 	assert.match(switchSection, /Window-only/i);
 
-	const startFocus = indexSource.indexOf('name: "blender_focus_view"');
+	const startFocus = toolsSource.indexOf('name: "blender_focus_view"');
 	assert.notEqual(startFocus, -1);
-	const focusSection = indexSource.slice(startFocus, startFocus + 800);
+	const focusSection = toolsSource.slice(startFocus, startFocus + 2000);
 	assert.match(focusSection, /moved:\s*false/);
 	assert.match(focusSection, /Window-only/i);
 });

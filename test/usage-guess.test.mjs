@@ -48,18 +48,18 @@ function scratchRoot() {
 }
 
 test("sourceBlend is documented with its rig/lighting consequences stated explicitly in index.ts", () => {
-	const indexSource = readFileSync(join(REPO, "index.ts"), "utf-8");
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8");
 
 	// blender_workspace_init tool description must mention discarding default studio template rig / lighting
 	assert.match(
-		indexSource,
+		toolsSource,
 		/discards the default studio/i,
 		"blender_workspace_init tool description must explicitly warn that adopting sourceBlend discards default studio rig",
 	);
 
 	// sourceBlend parameter description must explicitly state lighting / camera consequences
 	assert.match(
-		indexSource,
+		toolsSource,
 		/StudioKey|StudioFill|StudioRim|studio lighting rig/i,
 		"sourceBlend parameter description must state the rig/lighting consequences explicitly",
 	);

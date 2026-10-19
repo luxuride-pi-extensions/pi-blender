@@ -17,15 +17,15 @@ const workspace = await load("blender/workspace.ts");
 const utils = await load("blender/utils.ts");
 const launch = await load("launch.ts");
 
-const indexSource = readFileSync(join(REPO, "index.ts"), "utf8");
+const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf8");
 
 test("blender_object_detail description states it reads the saved blend", () => {
-	const toolStart = indexSource.indexOf('name: "blender_object_detail"');
+	const toolStart = toolsSource.indexOf('name: "blender_object_detail"');
 	assert.notEqual(toolStart, -1, "blender_object_detail is not registered in index.ts");
 
-	const descStart = indexSource.indexOf("description:", toolStart);
-	const descEnd = indexSource.indexOf('",', descStart);
-	const description = indexSource.slice(descStart, descEnd);
+	const descStart = toolsSource.indexOf("description:", toolStart);
+	const descEnd = toolsSource.indexOf('",', descStart);
+	const description = toolsSource.slice(descStart, descEnd);
 
 	assert.match(
 		description,
@@ -45,17 +45,17 @@ test("blender_object_detail description states it reads the saved blend", () => 
 });
 
 test("blender_scene_info declares object_detail category and targetObject parameter", () => {
-	const toolStart = indexSource.indexOf('name: "blender_scene_info"');
+	const toolStart = toolsSource.indexOf('name: "blender_scene_info"');
 	assert.notEqual(toolStart, -1, "blender_scene_info is not registered in index.ts");
 
-	const categoriesStart = indexSource.indexOf('Type.Literal("object_detail")', toolStart);
+	const categoriesStart = toolsSource.indexOf('Type.Literal("object_detail")', toolStart);
 	assert.notEqual(
 		categoriesStart,
 		-1,
 		"blender_scene_info must include object_detail in its categories schema",
 	);
 
-	const targetObjStart = indexSource.indexOf("targetObject: Type.Optional(", toolStart);
+	const targetObjStart = toolsSource.indexOf("targetObject: Type.Optional(", toolStart);
 	assert.notEqual(
 		targetObjStart,
 		-1,
