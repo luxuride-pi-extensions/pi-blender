@@ -53,6 +53,7 @@ import {
 	blenderLogCritique,
 	blenderRankAssets,
 	blenderIterationState,
+	blenderJobStatus,
 	blenderRecordIterationFact,
 	blenderExportAsset,
 	blenderModuleRevert,
@@ -291,6 +292,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_read_only_python",
 	"blender_montage",
 	"blender_compare",
+	"blender_job_status",
 ];
 
 /**
@@ -717,6 +719,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							"Optional render engine override for background renders only. Omit to keep the scene's current engine.",
 					}),
 				),
+				async: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true, dispatch the render as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+					}),
+				),
 			}),
 			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
 				const result = await blenderRender({
@@ -730,6 +738,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					viewSource: params.viewSource,
 					viewportShading: params.viewportShading,
 					renderEngine: params.renderEngine,
+					async: params.async,
 					signal,
 				});
 
@@ -1678,6 +1687,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							"Bridge timeout override in ms. Defaults to four times the single-render budget, because this is one render per panel.",
 					}),
 				),
+				async: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true, dispatch the montage as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+					}),
+				),
 			}),
 			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 				const result = await blenderMontage({
@@ -1689,8 +1704,16 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					columns: params.columns,
 					panelResolution: params.panelResolution,
 					timeoutMs: params.timeoutMs,
+					async: params.async,
 					signal: _signal,
 				});
+
+				if ("jobId" in result) {
+					return {
+						content: [{ type: "text", text: formatJsonResult(result) }],
+						details: result,
+					};
+				}
 
 				return {
 					content: [
@@ -1770,6 +1793,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							"Bridge timeout override in ms. Defaults to eight times the single-render budget: this renders every panel twice and opens a second blend.",
 					}),
 				),
+				async: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true, dispatch the compare as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+					}),
+				),
 			}),
 			execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 				const result = await blenderCompare({
@@ -1784,8 +1813,16 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					columns: params.columns,
 					panelResolution: params.panelResolution,
 					timeoutMs: params.timeoutMs,
+					async: params.async,
 					signal: _signal,
 				});
+
+				if ("jobId" in result) {
+					return {
+						content: [{ type: "text", text: formatJsonResult(result) }],
+						details: result,
+					};
+				}
 
 				const missing = result.baseline.missingSubjects;
 				return {
@@ -1807,6 +1844,26 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								.join("\n"),
 						},
 					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_job_status",
+			label: "Blender Job Status",
+			description:
+				"Check the state, execution progress, and result of a deferred background Blender job (such as a long render, montage, or compare dispatched with async: true). Reports state ('running', 'completed', or 'failed') along with timestamps and full result payload or failure error.",
+			parameters: Type.Object({
+				jobId: Type.String({
+					description: "The unique job identifier returned when the deferred job was dispatched.",
+				}),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderJobStatus({ jobId: params.jobId });
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
 			},

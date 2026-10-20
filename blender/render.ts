@@ -1,11 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NoWatchWindowError, requestLiveBlenderRender } from "./bridge.js";
+import { dispatchDeferredJob } from "./jobs.js";
 import type {
 	BlenderRenderEngine,
 	BlenderRenderMethod,
 	BlenderRenderViewSource,
 	BlenderViewportShading,
+	DeferredJobHandle,
 	RenderOptions,
 	RenderResult,
 } from "./types.js";
@@ -163,7 +165,22 @@ function mapBackgroundRenderEngine(engine: BlenderRenderEngine | null): string[]
 	}
 }
 
-export async function blenderRender(options: RenderOptions): Promise<RenderResult> {
+export async function blenderRender(options: RenderOptions): Promise<RenderResult | DeferredJobHandle> {
+	if (options.async) {
+		return await dispatchDeferredJob(
+			"render",
+			() => executeRender({ ...options, async: false }),
+			{
+				workspace: options.workspace,
+				view: options.view,
+				outputName: options.outputName,
+			},
+		);
+	}
+	return await executeRender(options);
+}
+
+async function executeRender(options: RenderOptions): Promise<RenderResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const iteration = manifest.latestIteration > 0 ? manifest.latestIteration : 1;
 	const { iterationDir, rendersDir } = getIterationPaths(manifest.workspacePath, iteration);

@@ -100,5 +100,6 @@ test("the schema parser is not vacuous", () => {
 		"viewSource",
 		"viewportShading",
 		"renderEngine",
+		"async",
 	]);
 });

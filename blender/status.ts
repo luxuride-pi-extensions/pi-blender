@@ -4,6 +4,7 @@ import { getBlenderBridgeDir } from "../config.js";
 import { isLiveBridgeAlive, isWatchWindowAuthorized } from "../launch.js";
 import { resolveRunBudget, WATCH_WINDOW_RSS_BYTES } from "./concurrency.js";
 import { countOpenHeadlessRuns } from "./run-leases.js";
+import { listInFlightJobs } from "./jobs.js";
 import type { BridgeStatusOptions, BridgeStatusResult } from "./types.js";
 import { readBridgeLock } from "./utils.js";
 
@@ -70,9 +71,15 @@ export async function blenderBridgeStatus(
 		` against ${headless.effective} slot${headless.effective === 1 ? "" : "s"}` +
 		`${open.staleSwept > 0 ? `; ${open.staleSwept} lease${open.staleSwept === 1 ? "" : "s"} from a killed run swept` : ""}.`;
 
+	const inFlightJobs = await listInFlightJobs();
+	const inFlightLine =
+		inFlightJobs.length > 0
+			? ` ${inFlightJobs.length} deferred job${inFlightJobs.length === 1 ? "" : "s"} in flight (${inFlightJobs.map((j) => `${j.type}#${j.id.slice(0, 8)}`).join(", ")}).`
+			: "";
+
 	return {
 		alive,
-		busy,
+		busy: busy || inFlightJobs.length > 0,
 		pendingRequests,
 		lock: lock
 			? {
@@ -82,10 +89,18 @@ export async function blenderBridgeStatus(
 					ageMs: lock.ageMs,
 				}
 			: null,
+		inFlightJobs: inFlightJobs.map((j) => ({
+			id: j.id,
+			type: j.type,
+			state: j.state,
+			createdAt: j.createdAt,
+			updatedAt: j.updatedAt,
+			error: j.error,
+		})),
 		bridgeDir,
 		requestsDir,
 		workspacePath: options.workspace ?? null,
-		recommendation: `${bridgeLine}${headlessLine}${openLine}${windowLine}`,
+		recommendation: `${bridgeLine}${headlessLine}${openLine}${windowLine}${inFlightLine}`,
 		headless: {
 			requested: headless.requested,
 			effective: headless.effective,
