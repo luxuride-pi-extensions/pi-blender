@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { requestLiveBlenderCompare } from "./bridge.js";
+import { dispatchDeferredJob } from "./jobs.js";
 import { normalizeViews } from "./montage.js";
-import type { CompareOptions, CompareResult } from "./types.js";
+import type { CompareOptions, CompareResult, DeferredJobHandle } from "./types.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
 
 /**
@@ -28,7 +29,22 @@ import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
  * make a part that grew read as a camera change — the exact confusion this
  * sheet exists to remove.
  */
-export async function blenderCompare(options: CompareOptions): Promise<CompareResult> {
+export async function blenderCompare(options: CompareOptions): Promise<CompareResult | DeferredJobHandle> {
+	if (options.async) {
+		return await dispatchDeferredJob(
+			"compare",
+			() => executeCompare({ ...options, async: false }),
+			{
+				workspace: options.workspace,
+				moduleName: options.moduleName,
+				views: options.views,
+			},
+		);
+	}
+	return await executeCompare(options);
+}
+
+async function executeCompare(options: CompareOptions): Promise<CompareResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const views = normalizeViews(options.views ?? []);
 	const moduleDir = join(manifest.workspacePath, "modules", options.moduleName);

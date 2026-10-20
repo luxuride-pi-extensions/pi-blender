@@ -41,6 +41,7 @@ export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";
 export { blenderSetMode } from "./set-mode.js";
+export { blenderJobStatus, getJob, listJobs, listInFlightJobs } from "./jobs.js";
 export type {
 	AddReferenceOptions,
 	AddReferenceResult,

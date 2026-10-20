@@ -670,6 +670,8 @@ export interface RenderOptions {
 	viewSource?: BlenderRenderViewSource;
 	viewportShading?: BlenderViewportShading;
 	renderEngine?: BlenderRenderEngine;
+	/** If true, dispatch the render as a deferred non-blocking job and return immediately with a job handle. */
+	async?: boolean;
 	signal?: AbortSignal;
 }
 
@@ -1035,6 +1037,8 @@ export interface BridgeStatusResult {
 	requestsDir: string;
 	workspacePath: string | null;
 	recommendation: string;
+	/** Deferred jobs currently in flight. */
+	inFlightJobs?: Array<{ id: string; type: string; state: string; createdAt: string; updatedAt?: string; error?: string }>;
 	/**
 	 * The headless run budget, so the number that governs fan-out is reported
 	 * next to the number that governs the bridge. A caller deciding how wide to
@@ -1819,6 +1823,8 @@ export interface MontageOptions {
 	columns?: number;
 	/** Per-panel pixel size. Defaults to 900x700. */
 	panelResolution?: { x: number; y: number };
+	/** If true, dispatch the montage as a deferred non-blocking job and return immediately with a job handle. */
+	async?: boolean;
 	timeoutMs?: number;
 	signal?: AbortSignal;
 }
@@ -1888,6 +1894,8 @@ export interface CompareOptions {
 	columns?: number;
 	/** Per-panel pixel size. Defaults to 900x700. */
 	panelResolution?: { x: number; y: number };
+	/** If true, dispatch the montage as a deferred non-blocking job and return immediately with a job handle. */
+	async?: boolean;
 	timeoutMs?: number;
 	signal?: AbortSignal;
 }
@@ -1907,3 +1915,22 @@ export interface CompareResult extends MontageResult {
 	};
 	framing: MontageFraming & { fromUnion: true };
 }
+
+export type DeferredJobState = "running" | "completed" | "failed";
+
+export interface DeferredJobHandle {
+	jobId: string;
+	state: DeferredJobState;
+}
+
+export interface DeferredJobRecord {
+	id: string;
+	type: string;
+	state: DeferredJobState;
+	createdAt: string;
+	updatedAt: string;
+	result?: unknown;
+	error?: string;
+	metadata?: Record<string, unknown>;
+}
+
