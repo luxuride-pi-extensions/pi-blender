@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -13,12 +13,36 @@ const load = (name) => loadTs(join(REPO, name));
 const render = await load("blender/render.ts");
 const jobs = await load("blender/jobs.ts");
 const status = await load("blender/status.ts");
-const workspace = await load("blender/workspace.ts");
 const utils = await load("blender/utils.js");
 
 function scratchRoot() {
 	const cacheDir = process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? tmpdir(), ".cache");
 	return mkdtempSync(join(cacheDir, "pi-blender-deferred-test-"));
+}
+
+function initMockWorkspace(root) {
+	const manifestPath = join(root, "blender-workspace.json");
+	const blendPath = join(root, "model.blend");
+	writeFileSync(blendPath, "");
+	writeFileSync(
+		manifestPath,
+		JSON.stringify(
+			{
+				version: 1,
+				workspacePath: root,
+				manifestPath,
+				blendPath,
+				template: "blank",
+				latestIteration: 1,
+				savedViews: {},
+				moduleRuns: {},
+				renderOutputs: [],
+			},
+			null,
+			2,
+		),
+	);
+	return { workspacePath: root, blendPath, manifestPath };
 }
 
 test("dispatchDeferredJob creates job record and tracks in-flight jobs", async () => {
@@ -100,7 +124,7 @@ test("deferred dispatch does not hold bridge.lock and allows concurrent fast ope
 test("blenderRender with async: true returns handle immediately without blocking", async () => {
 	const root = scratchRoot();
 	try {
-		const ws = await workspace.blenderWorkspaceInit({ cwd: root, template: "blank" });
+		const ws = initMockWorkspace(root);
 
 		const result = await render.blenderRender({
 			cwd: root,
