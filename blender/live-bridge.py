@@ -774,6 +774,99 @@ def set_mode_request(request):
     }
 
 
+def handle_switch_workspace(request):
+    ensure_requested_blend_open(request)
+    target_name = request.get("workspaceName")
+    space_type = request.get("spaceType")
+
+    if not target_name and not space_type:
+        raise RuntimeError("Either workspaceName or spaceType must be specified.")
+
+    windows = list(bpy.context.window_manager.windows)
+    if not windows:
+        raise RuntimeError("No Blender window is open.")
+    window = bpy.context.window or windows[0]
+
+    target_ws = None
+    if target_name:
+        for ws in bpy.data.workspaces:
+            if ws.name.strip().lower() == target_name.strip().lower():
+                target_ws = ws
+                break
+        if target_ws is None:
+            available = [ws.name for ws in bpy.data.workspaces]
+            raise RuntimeError(f'Workspace "{target_name}" was not found. Available: {", ".join(available)}')
+    elif space_type:
+        st_clean = space_type.strip().upper()
+        for ws in bpy.data.workspaces:
+            for screen in ws.screens:
+                for area in screen.areas:
+                    if area.type == st_clean or getattr(area, "ui_type", "") == st_clean:
+                        target_ws = ws
+                        break
+                if target_ws:
+                    break
+            if target_ws:
+                break
+        if target_ws is None:
+            raise RuntimeError(f'No workspace found containing space type "{space_type}".')
+
+    window.workspace = target_ws
+
+    active_spaces = []
+    if window.screen:
+        for area in window.screen.areas:
+            active_spaces.append(area.type)
+
+    return {
+        "switched": True,
+        "moved": True,
+        "workspaceName": target_ws.name,
+        "activeSpaces": active_spaces,
+    }
+
+
+def handle_focus_view(request):
+    ensure_requested_blend_open(request)
+    object_name = request.get("objectName")
+    if not object_name:
+        raise RuntimeError("objectName must be specified.")
+
+    target_object = bpy.data.objects.get(object_name)
+    if target_object is None:
+        for obj in bpy.data.objects:
+            if obj.data and getattr(obj.data, "name", None) == object_name:
+                target_object = obj
+                break
+    if target_object is None:
+        raise RuntimeError(f'Object "{object_name}" was not found.')
+
+    viewport = find_viewport_context()
+    scene = viewport["scene"]
+    window = viewport["window"]
+    view_layer = getattr(window, "view_layer", bpy.context.view_layer)
+
+    with bpy.context.temp_override(
+        window=window,
+        screen=viewport["screen"],
+        area=viewport["area"],
+        region=viewport["region"],
+        space_data=viewport["space"],
+        scene=scene,
+        view_layer=view_layer,
+    ):
+        bpy.ops.object.select_all(action="DESELECT")
+        target_object.select_set(True)
+        view_layer.objects.active = target_object
+        bpy.ops.view3d.view_selected(use_all_regions=False)
+
+    return {
+        "moved": True,
+        "focused": True,
+        "objectName": target_object.name,
+    }
+
+
 def handle_get_session_context(_request):
     viewport = find_optional_viewport_context()
     scene = viewport["scene"] if viewport is not None else bpy.context.scene
@@ -4219,6 +4312,10 @@ def handle_request(request):
         return set_mode_request(request)
     if request_type in ("window-layout", "get-window-layout", "window-screenshot"):
         return handle_window_layout(request)
+    if request_type == "switch-workspace":
+        return handle_switch_workspace(request)
+    if request_type == "focus-view":
+        return handle_focus_view(request)
     if request_type == "shutdown":
         return handle_shutdown(request)
     raise RuntimeError(f"Unsupported Blender bridge request type: {request_type}")

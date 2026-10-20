@@ -48,6 +48,7 @@ export {
 	blenderSearchApiDocs,
 	blenderSearchManualDocs,
 } from "./doc-grounding.js";
+export { blenderSwitchWorkspace, blenderFocusView } from "./viewport.js";
 export type {
 	BlenderApiDocResult,
 	BlenderDocParam,

@@ -850,6 +850,39 @@ export interface WindowLayoutResult {
 	reason?: string;
 }
 
+export interface SwitchWorkspaceOptions {
+	cwd: string;
+	workspace: string;
+	workspaceName?: string;
+	spaceType?: string;
+	signal?: AbortSignal;
+}
+
+export interface SwitchWorkspaceResult {
+	workspacePath: string;
+	blendPath: string;
+	switched: boolean;
+	moved: boolean;
+	workspaceName: string | null;
+	activeSpaces?: string[];
+	reason?: string;
+}
+
+export interface FocusViewOptions {
+	cwd: string;
+	workspace: string;
+	objectName: string;
+	signal?: AbortSignal;
+}
+
+export interface FocusViewResult {
+	workspacePath: string;
+	blendPath: string;
+	moved: boolean;
+	focused: boolean;
+	objectName: string;	reason?: string;
+}
+
 export type BlenderRenderMethod = "live" | "background";export type BlenderRenderViewSource = "camera" | "current-view";
 export type BlenderViewportShading = "wireframe" | "solid" | "material-preview" | "rendered";
 export type BlenderRenderEngine = "eevee" | "cycles" | "workbench";

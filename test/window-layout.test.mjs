@@ -31,9 +31,14 @@ function toolDescription(name) {
 
 test("blender_window_layout is registered with annotations", () => {
 	assert.ok(indexSource.includes('name: "blender_window_layout"'), "blender_window_layout is registered");
+	// Slice the array rather than anchoring on it ending with this name: other
+	// tool PRs append their own entries, and a name that is merely no longer
+	// last is still declared.
+	const lazyStart = indexSource.indexOf("LAZY_BLENDER_TOOL_NAMES = [");
+	const lazyEnd = indexSource.indexOf("];", lazyStart);
+	assert.ok(lazyStart !== -1 && lazyEnd !== -1, "LAZY_BLENDER_TOOL_NAMES array not found");
 	assert.ok(
-		indexSource.includes('"blender_window_layout",') &&
-		indexSource.indexOf('LAZY_BLENDER_TOOL_NAMES = [') < indexSource.indexOf('"blender_window_layout",\n];'),
+		indexSource.slice(lazyStart, lazyEnd).includes('"blender_window_layout"'),
 		"blender_window_layout is declared in LAZY_BLENDER_TOOL_NAMES",
 	);
 
