@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,9 +13,33 @@ const load = (name) => loadTs(join(REPO, name));
 
 const bridge = await load("blender/bridge.ts");
 const viewport = await load("blender/viewport.ts");
-const workspace = await load("blender/workspace.ts");
 
 const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+
+function initMockWorkspace(root) {
+	const manifestPath = join(root, "blender-workspace.json");
+	const blendPath = join(root, "model.blend");
+	writeFileSync(blendPath, "");
+	writeFileSync(
+		manifestPath,
+		JSON.stringify(
+			{
+				version: 1,
+				workspacePath: root,
+				manifestPath,
+				blendPath,
+				template: "blank",
+				latestIteration: 1,
+				savedViews: {},
+				moduleRuns: {},
+				renderOutputs: [],
+			},
+			null,
+			2,
+		),
+	);
+	return { workspacePath: root, blendPath, manifestPath };
+}
 
 test("WINDOW_ONLY_REQUEST_TYPES registers switch-workspace and focus-view", () => {
 	assert.ok(
@@ -59,7 +83,7 @@ test("without watch window, blenderSwitchWorkspace reports switched: false with 
 	const cacheDir = process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? tmpdir(), ".cache");
 	const root = mkdtempSync(join(cacheDir, "pi-blender-viewport-test-"));
 	try {
-		const ws = await workspace.blenderWorkspaceInit({ cwd: root, template: "blank" });
+		const ws = initMockWorkspace(root);
 		const result = await viewport.blenderSwitchWorkspace({
 			cwd: root,
 			workspace: ws.workspacePath,
@@ -78,7 +102,7 @@ test("without watch window, blenderFocusView reports moved: false with reason an
 	const cacheDir = process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? tmpdir(), ".cache");
 	const root = mkdtempSync(join(cacheDir, "pi-blender-viewport-test-"));
 	try {
-		const ws = await workspace.blenderWorkspaceInit({ cwd: root, template: "blank" });
+		const ws = initMockWorkspace(root);
 		const result = await viewport.blenderFocusView({
 			cwd: root,
 			workspace: ws.workspacePath,
