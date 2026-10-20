@@ -100,7 +100,6 @@ test("the schema parser is not vacuous", () => {
 		"viewSource",
 		"viewportShading",
 		"renderEngine",
-		// #44 adds the deferred-dispatch switch to blender_render.
 		"async",
 	]);
 });
