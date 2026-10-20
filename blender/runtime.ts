@@ -41,6 +41,7 @@ export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";
 export { blenderSetMode } from "./set-mode.js";
+export { blenderSwitchWorkspace, blenderFocusView } from "./viewport.js";
 export type {
 	AddReferenceOptions,
 	AddReferenceResult,

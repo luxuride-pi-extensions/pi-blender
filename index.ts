@@ -64,6 +64,8 @@ import {
 	blenderSceneInfo,
 	blenderSessionContext,
 	blenderSetMode,
+	blenderSwitchWorkspace,
+	blenderFocusView,
 	blenderWorkspaceInit,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
@@ -291,6 +293,8 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_read_only_python",
 	"blender_montage",
 	"blender_compare",
+	"blender_switch_workspace",
+	"blender_focus_view",
 ];
 
 /**
@@ -1005,6 +1009,74 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					workspace: params.workspace,
 					mode: params.mode,
+					objectName: params.objectName,
+					signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_switch_workspace",
+			label: "Blender Switch Workspace",
+			description:
+				"Switch the active workspace tab in the live Blender window by workspace name (e.g. 'Layout', 'Modeling', 'Sculpting', 'UV Editing', 'Shading', 'Animation', 'Rendering', 'Compositing', 'Geometry Nodes', 'Scripting') or by contained editor space_type (e.g. 'VIEW_3D', 'NODE_EDITOR', 'IMAGE_EDITOR', 'SEQUENCE_EDITOR'). This changes what editor and layout the user is currently looking at in the live UI. Window-only: this is a statement about the live UI window, so when no /blender-watch window is open this reports switched: false with an explicit reason rather than throwing.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				workspaceName: Type.Optional(
+					Type.String({
+						description:
+							"Name of workspace tab to switch to (e.g. 'Layout', 'Modeling', 'Shading', 'Geometry Nodes', 'Scripting').",
+					}),
+				),
+				spaceType: Type.Optional(
+					Type.String({
+						description:
+							"Editor space type to switch to (e.g. 'VIEW_3D', 'NODE_EDITOR', 'IMAGE_EDITOR', 'SEQUENCE_EDITOR'). Finds the first workspace containing an area of this type.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderSwitchWorkspace({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					workspaceName: params.workspaceName,
+					spaceType: params.spaceType,
+					signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_focus_view",
+			label: "Blender Focus View",
+			description:
+				"Center and frame the 3D viewport on a named object in the live Blender window. Focuses the view on the object's geometry (view_selected). Window-only: this is a statement about the live 3D viewport, so when no /blender-watch window is open this reports moved: false with an explicit reason rather than throwing.",
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				objectName: Type.String({
+					description: "Name of the target object (or object data) to frame and focus in the 3D viewport.",
+				}),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderFocusView({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
 					objectName: params.objectName,
 					signal,
 				});
