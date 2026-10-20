@@ -182,7 +182,12 @@ async function runHeadlessBridgeRequest<T>(options: {
  * is not listed and has no window still raises from its own handler, which is
  * the honest outcome: the tool found out by trying, and said why.
  */
-const WINDOW_ONLY_REQUEST_TYPES = new Set(["set-mode", "capture-view"]);
+export const WINDOW_ONLY_REQUEST_TYPES = new Set([
+	"set-mode",
+	"capture-view",
+	"switch-workspace",
+	"focus-view",
+]);
 
 export async function requestBridge<T>(options: {
 	payload: Record<string, unknown>;
@@ -532,6 +537,73 @@ export async function requestLiveBlenderSetMode(options: {
 		// nobody has to notice a missing field to know the mode never switched.
 		if (error instanceof NoWatchWindowError) {
 			return { ok: false, mode: options.mode, reason: error.message };
+		}
+		throw error;
+	}
+}
+
+export async function requestLiveBlenderSwitchWorkspace(options: {
+	blendPath: string;
+	workspaceName?: string;
+	spaceType?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<
+	| { ok: true; switched: boolean; moved: boolean; workspaceName: string; activeSpaces?: string[] }
+	| { ok: false; switched: false; moved: false; reason: string }
+> {
+	try {
+		const result = await requestLiveBlenderBridge<{
+			switched: boolean;
+			moved: boolean;
+			workspaceName: string;
+			activeSpaces?: string[];
+		}>({
+			payload: {
+				type: "switch-workspace",
+				blendPath: options.blendPath,
+				workspaceName: options.workspaceName,
+				spaceType: options.spaceType,
+			},
+			signal: options.signal,
+			timeoutMs: options.timeoutMs,
+		});
+		return { ok: true, ...result };
+	} catch (error) {
+		if (error instanceof NoWatchWindowError) {
+			return { ok: false, switched: false, moved: false, reason: error.message };
+		}
+		throw error;
+	}
+}
+
+export async function requestLiveBlenderFocusView(options: {
+	blendPath: string;
+	objectName: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<
+	| { ok: true; moved: boolean; focused: boolean; objectName: string }
+	| { ok: false; moved: false; focused: false; reason: string }
+> {
+	try {
+		const result = await requestLiveBlenderBridge<{
+			moved: boolean;
+			focused: boolean;
+			objectName: string;
+		}>({
+			payload: {
+				type: "focus-view",
+				blendPath: options.blendPath,
+				objectName: options.objectName,
+			},
+			signal: options.signal,
+			timeoutMs: options.timeoutMs,
+		});
+		return { ok: true, ...result };
+	} catch (error) {
+		if (error instanceof NoWatchWindowError) {
+			return { ok: false, moved: false, focused: false, reason: error.message };
 		}
 		throw error;
 	}
