@@ -400,6 +400,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_workspace_init",
 			label: "Blender Workspace Init",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available.",
 			parameters: Type.Object({
@@ -454,6 +460,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_execute_python",
 			label: "Blender Execute Python",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Copy a Blender Python script into a run directory, execute it inside the live bridge-enabled Blender session for the workspace, and persist the updated model.blend so the UI stays in sync. By default the run claims a numbered iteration slot; pass claimIteration=false for throwaway runs so it does not count as progress.",
 			parameters: Type.Object({
@@ -519,6 +531,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_session_context",
 			label: "Blender Session Context",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected objects, viewport state, unsaved changes, and whether another pi session holds the same blend. This is the only source of truth for present-tense Blender state — for 'what is selected', 'update it', 'render from what I'm looking at', or any claim about what Blender currently shows. `blender_scene_info` is NOT that: it reads the last SAVED blend file, so it never sees a worker's in-flight edits or a change made by hand and not saved. Call it before mutating anything.",
 			parameters: Type.Object({
@@ -564,6 +582,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_scene_info",
 			label: "Blender Scene Info",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			description:
 				'Read the workspace blend file as it was last SAVED, and return its structure: objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures and paint settings. Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, or `["cameras", "cameraSettings"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload.',
 			parameters: Type.Object({
@@ -613,6 +637,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_save_view",
 			label: "Blender Save View",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object. source=active-camera photographs what the UI currently shows, including unsaved edits, so with no window open it reports savedView:null with a reason rather than failing — binding the view to a camera name works headlessly and is the right source when there is no window. Nothing is written to the manifest when the capture is skipped, so a later render cannot pick up a view bound to a camera that was never created.",
 			parameters: Type.Object({
@@ -654,6 +684,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_render",
 			label: "Blender Render",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Render the workspace blend file and write outputs into the current iteration. Use renderMethod=`live` for viewport renders and renderMethod=`background` for normal headless scene renders. Live renders default to camera-based framing with viewportShading=`material-preview`; switch to viewSource=`current-view` only when the user explicitly wants the raw current viewport. Live viewport renders disable overlays automatically so grids, axes, and other viewport clutter are not captured. Background renders are camera-based and use renderEngine overrides such as `eevee`, `cycles`, or `workbench` instead of viewport shading modes.",
 			parameters: Type.Object({
@@ -744,6 +780,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_module_run",
 			label: "Blender Module Run",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. Prefer blender_branch_run + blender_branch_apply when you want to author several modules against the same state and merge them in one pass. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
 			parameters: Type.Object({
@@ -823,6 +865,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_branch_run",
 			label: "Blender Branch Run",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			description:
 				"Run a workspace module HEADLESSLY against its own private copy of model.blend (modules/<name>/branch.blend), then stage the result for a later blender_branch_apply. No live Blender session is touched and no bridge lock is taken, so several modules can run at once — the concurrency ceiling is the headless run budget, not the one live session. Reports exactly which objects and materials the script changed, which is what the apply uses to bring back only this module's work instead of reverting its siblings'. A failed run leaves model.blend untouched and there is nothing to revert.",
 			parameters: Type.Object({
@@ -888,6 +936,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_branch_apply",
 			label: "Blender Branch Apply",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Apply staged branch runs into model.blend, one at a time under a lock, so concurrent module runs can be merged in a fixed order. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
 			parameters: Type.Object({
@@ -925,6 +979,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_module_revert",
 			label: "Blender Module Revert",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Revert model.blend to a module's recorded pre-run checkpoint and reload it in the live Blender session. Uses the manifest's moduleRuns history, so it reverts the exact state before that run. Refuses when later module runs also modified the blend (pass force: true to accept discarding them). The reload DISCARDS any unsaved changes currently open in the live Blender UI, so save unrelated work in the UI before reverting.",
 			parameters: Type.Object({
@@ -969,6 +1029,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_set_mode",
 			label: "Blender Set Mode",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI. A viewport mode is a statement about a UI, so with no window open this reports switched:false and a reason instead of failing: the paint is applied as bpy data either way and nothing about the asset depends on this. Authoring does not need a window — blender_module_run and blender_branch_run work headlessly.",
 			parameters: Type.Object({
@@ -1020,6 +1086,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_log_critique",
 			label: "Blender Log Critique",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			description:
 				"Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric: five 0-2 craft axes plus a 0-2 category-validity axis, a 0-2 view adequacy that gates whether the judgement counts at all, and an optional rejectReason. Resolves a verdict (continue / present / reject) and records it, so blender_rank_assets can select across a batch without re-reading prose.",
 			parameters: Type.Object({
@@ -1121,6 +1193,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_rank_assets",
 			label: "Blender Rank Assets",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			description:
 				"Rank a batch against ITSELF and return the best slice. An absolute threshold can say whether an asset is good enough; it can never say whether it is the best of a thousand, and the gap between the 60th and 95th percentile is invisible to a rubric that only ever sees one asset at a time. Reads critique.log's STRUCTURE (never its prose), keeps each module's latest judgement, ranks only presented assets judged from a usable view, and returns the top fraction best-first plus per-verdict counts and batch-level warnings. Use this before shipping a batch for training or curation: when rejects outnumber presents, the brief is usually wrong rather than the assets.",
 			parameters: Type.Object({
@@ -1166,6 +1244,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_iteration_state",
 			label: "Blender Iteration State",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			description:
 				"What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict and score, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.",
 			parameters: Type.Object({
@@ -1208,6 +1292,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_record_iteration_fact",
 			label: "Blender Record Iteration Fact",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			description:
 				"Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold, and a crash. A fact without a record is re-measured by every fresh critic, which is how a loop spends three renders learning that the handle is the wrong thickness. Record what the probe actually returned and the tool that returned it, so the next critic can re-check the number rather than trusting a sentence. Re-recording the same statement updates it rather than duplicating it; the newest 24 facts per module are kept. Read blender_iteration_state to see what is already known before measuring anything.",
 			parameters: Type.Object({
@@ -1255,6 +1345,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_export_asset",
 			label: "Blender Export Asset",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			description:
 				"Export the workspace blend to an interchange format: glb or gltf (materials, scene graph, modifiers applied) or obj (geometry, UVs, materials) or stl. This is what makes the asset leave Blender at all -- .blend is not an interchange format and no training pipeline reads it. Works headlessly. Pass `objects` to export a named subset, which is how you keep the studio rig out of a dataset. Read-only with respect to model.blend: the exporter writes a new file and never saves back.",
 			parameters: Type.Object({
@@ -1314,6 +1410,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_add_reference",
 			label: "Blender Add Reference",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			description:
 				"Register a reference image with a workspace. Copies the image into <workspace>/references/ and records it in the manifest so it can be listed, addressed by a stable id in briefs, and handed to a critic that cannot read images. The `caption` is required and is the only description of the image available to the worker and critic, because the manager is blocked from reading image files.",
 			parameters: Type.Object({
@@ -1363,6 +1465,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_bridge_status",
 			label: "Blender Bridge Status",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, how many requests are pending, how many headless Blender runs may execute concurrently on this machine, and how many are open RIGHT NOW across this session's workers. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout. The open count is the one to read mid-fan-out: the budget says what is permitted, not what your workers already spent. A /blender-watch window is reported apart from the runs, because it is not one of them.",
 			parameters: Type.Object({
@@ -1389,6 +1497,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_geometry_probe",
 			label: "Blender Geometry Probe",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: true,
+			},
 			description:
 				"Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, a scene-wide sweep for parts that ought to meet and do not — or that share a surface and will z-fight, mesh island counts, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. Works with no window: it then measures model.blend on disk headlessly. With a window open it measures the live session instead, including unsaved edits, and warns when the two differ.",
 			parameters: Type.Object({
@@ -1536,6 +1650,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_image_probe",
 			label: "Blender Image Probe",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			description:
 				"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, and dominant subject colours. Read-only, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it. Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
 			parameters: Type.Object({
@@ -1596,6 +1716,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_read_only_python",
 			label: "Blender Read-Only Python",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with mutating bpy operations refused by the bridge itself — bpy.ops, bpy.data and bpy.data.<collection> removal (including batch_remove and orphans_purge), linking or unlinking in the scene collection, assigning to an object or its vectors, and saving. It never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. Two honest limits: this guards bpy, NOT the filesystem, so a read-only script may still read and write files with `os` and `open` — do not use it on anything you would mind losing. And it is a denylist of named entry points rather than a sandbox, so a bpy API this tool does not know about is not refused; if a measurement needs to change the scene, use blender_execute_python or blender_module_run. Works with no window: the script then runs headlessly against model.blend. With a window open it runs against the live session instead, so it can see unsaved edits.",
 			parameters: Type.Object({
@@ -1639,6 +1765,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_montage",
 			label: "Blender Montage",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Render several preset views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. Two families of preset, chosen per view name. ORBIT presets (front, three-quarter, …) frame the subject's bounding sphere at one fixed distance, so every panel frames identically and a difference between panels is the geometry rather than the camera. INTERIOR presets (interior-corner, interior-doorway, …) stand inside the subject at eye height — a room has no silhouette to orbit, and a 6x4x2.8m room has a bounding-sphere radius of 3.9m, so every orbit panel of it photographs the outside of a wall. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a room that reads as cluttered from one corner and open from another, a critic that keeps calling something vague. Name the views; do not ask for views. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. Works with no window: it then renders each panel headlessly from model.blend.",
 			parameters: Type.Object({
@@ -1714,6 +1846,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			defaultActive: false,
 			name: "blender_compare",
 			label: "Blender Compare",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			description:
 				"Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so a regression is visible. Each panel is labelled with which ITERATION it is (the baseline is the run before this module's latest, the current one is the latest; pass baselineLabel/currentLabel to say otherwise), and the two panels of one view sit side by side, which is what makes the sheet a comparison rather than a pair of pictures. Both generations are framed from the UNION of their extents, so the camera is identical in every panel and a difference between two panels of the same view is geometry — framing each generation on its own extent would make a part that grew read as a camera change. The baseline is rendered again from the checkpoint the earlier run started from (a checkpoint IS that generation's state, so no kept render is needed); pass baselineBlendPath to compare against a named earlier iteration instead. Two runs is the minimum: with only one there is no previous generation, and a sheet of identical pairs would read as proof of stability. Views are the same preset names as blender_montage. The baseline is a file on disk, never the session's own state: it is opened, rendered, and the workspace blend put back, so a comparison never replaces what you are looking at. A baseline missing subjects you named is reported as missingSubjects rather than rendered as an absence. Works with no window: both generations then render headlessly.",
 			parameters: Type.Object({
