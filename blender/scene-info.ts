@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { blenderObjectDetail } from "./object-detail.js";
 import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
 import { runBlenderJson } from "./utils.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
@@ -21,6 +22,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeArmatures: selected.has("armatures"),
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
+			includeObjectDetail: selected.has("object_detail"),
 		};
 	}
 
@@ -39,6 +41,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeArmatures: false,
 		includeTextures: false,
 		includePaintSettings: false,
+		includeObjectDetail: false,
 	};
 }
 
@@ -315,6 +318,16 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 	// was a second, redundant derivation of the same options.
 	const selection = resolveSceneInfoSelection(options);
 	const result = await getSceneInfoForSelection(options.cwd, manifest, selection, options.signal);
+	let objectDetailResult = null;
+	if (selection.includeObjectDetail && options.targetObject) {
+		objectDetailResult = await blenderObjectDetail({
+			cwd: options.cwd,
+			workspace: options.workspace,
+			objectName: options.targetObject,
+			signal: options.signal,
+		});
+	}
+
 	const sceneInfoResult: SceneInfoResult = {
 		workspacePath: manifest.workspacePath,
 		blendPath: manifest.blendPath,
@@ -334,6 +347,7 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		armatures: selection.includeArmatures ? result.armatures : [],
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
+		objectDetail: objectDetailResult,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;

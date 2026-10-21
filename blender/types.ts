@@ -446,7 +446,9 @@ export interface SceneInfoOptions {
 		| "armatures"
 		| "textures"
 		| "paintSettings"
+		| "object_detail"
 	>;
+	targetObject?: string;
 	signal?: AbortSignal;
 }
 
@@ -475,6 +477,7 @@ export interface SceneInfoResult {
 	armatures: Array<Record<string, unknown>>;
 	textures: Array<Record<string, unknown>>;
 	paintSettings: Record<string, unknown> | null;
+	objectDetail?: ObjectDetailResult | null;
 }
 
 export interface BlenderSceneUnits {
@@ -503,6 +506,89 @@ export interface SceneInfoSelection {
 	includeArmatures: boolean;
 	includeTextures: boolean;
 	includePaintSettings: boolean;
+	includeObjectDetail?: boolean;
+}
+
+export interface ObjectDetailOptions {
+	cwd: string;
+	workspace: string;
+	objectName?: string;
+	targetObject?: string;
+	name?: string;
+	signal?: AbortSignal;
+}
+
+export interface ObjectDetailTransform {
+	location: [number, number, number] | null;
+	rotation_euler: [number, number, number] | null;
+	rotationEuler: [number, number, number] | null;
+	scale: [number, number, number] | null;
+	is_non_uniform_scale: boolean;
+	isNonUniformScale: boolean;
+}
+
+export interface ObjectDetailModifier {
+	name: string;
+	type: string;
+	show_viewport: boolean;
+	show_render: boolean;
+	showViewport: boolean;
+	showRender: boolean;
+	is_viewport_disabled: boolean;
+	isViewportDisabled: boolean;
+	viewport_disabled: boolean;
+	settings: Record<string, unknown>;
+	settings_summary: Record<string, unknown>;
+}
+
+export interface ObjectDetailMaterialSlot {
+	slot_index: number;
+	slotIndex: number;
+	material_name: string | null;
+	materialName: string | null;
+}
+
+export interface ObjectDetailMeshStats {
+	vertices: number;
+	edges: number;
+	polygons: number;
+	faces: number;
+}
+
+export interface ObjectDetailResult {
+	workspacePath: string;
+	blendPath: string;
+	name: string;
+	type: string;
+	is_linked_to_scene: boolean;
+	isLinkedToScene: boolean;
+	is_orphan: boolean;
+	isOrphan: boolean;
+	users: number;
+	transform: ObjectDetailTransform;
+	location: [number, number, number] | null;
+	rotation_euler: [number, number, number] | null;
+	rotationEuler: [number, number, number] | null;
+	scale: [number, number, number] | null;
+	is_non_uniform_scale: boolean;
+	isNonUniformScale: boolean;
+	parent: string | null;
+	parent_name: string | null;
+	parentName: string | null;
+	children: string[];
+	children_names: string[];
+	childrenNames: string[];
+	modifiers: ObjectDetailModifier[];
+	material_slots: ObjectDetailMaterialSlot[];
+	materialSlots: ObjectDetailMaterialSlot[];
+	materials: string[];
+	mesh: ObjectDetailMeshStats | null;
+	mesh_statistics: ObjectDetailMeshStats | null;
+	meshStatistics: ObjectDetailMeshStats | null;
+	vertices: number | null;
+	edges: number | null;
+	polygons: number | null;
+	faces: number | null;
 }
 
 export interface SessionContextOptions {
