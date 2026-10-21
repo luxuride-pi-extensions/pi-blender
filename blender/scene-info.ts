@@ -21,6 +21,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeArmatures: selected.has("armatures"),
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
+			includeSceneStats: selected.has("scene_stats"),
 		};
 	}
 
@@ -39,6 +40,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeArmatures: false,
 		includeTextures: false,
 		includePaintSettings: false,
+		includeSceneStats: false,
 	};
 }
 
@@ -71,6 +73,8 @@ result = {
     "armatures": [],
     "textures": [],
     "paintSettings": None,
+    "scene_stats": None,
+    "sceneStats": None,
 }
 
 if payload.get("includeUv", False):
@@ -243,6 +247,85 @@ if payload.get("includeRenderSettings", True):
         "camera": scene.camera.name if scene.camera else None,
     }
 
+if payload.get("includeSceneStats", False):
+    def compute_stats_for_objects(objs):
+        by_type = {}
+        for obj in objs:
+            by_type[obj.type] = by_type.get(obj.type, 0) + 1
+
+        data_objs = [o for o in objs if o.data is not None]
+        unique_data = set(o.data for o in data_objs)
+        linked_dups = len(data_objs) - len(unique_data)
+        col_insts = sum(1 for o in objs if getattr(o, "instance_type", "NONE") != "NONE")
+        total_instances = linked_dups + col_insts
+
+        total_faces = 0
+        total_verts = 0
+        mesh_data_set = set()
+        for o in objs:
+            if o.type == "MESH" and o.data is not None:
+                mesh_data_set.add(o.data)
+                total_faces += len(o.data.polygons)
+                total_verts += len(o.data.vertices)
+
+        unique_faces = sum(len(m.polygons) for m in mesh_data_set)
+        unique_verts = sum(len(m.vertices) for m in mesh_data_set)
+
+        return {
+            "objectCount": len(objs),
+            "objects": len(objs),
+            "instanceCount": total_instances,
+            "instances": total_instances,
+            "uniqueDataBlockCount": len(unique_data),
+            "uniqueDataBlocks": len(unique_data),
+            "byType": by_type,
+            "types": by_type,
+            "polycount": total_faces,
+            "faces": total_faces,
+            "polygons": total_faces,
+            "vertices": total_verts,
+            "uniqueFaces": unique_faces,
+            "uniqueVertices": unique_verts,
+            "meshEvaluation": "unevaluated",
+            "meshEvaluationNote": "un-evaluated base mesh polycounts (raw mesh data-blocks before modifier stack evaluation)",
+        }
+
+    per_scene = []
+    for s in bpy.data.scenes:
+        s_stats = compute_stats_for_objects(list(s.objects))
+        s_render = {
+            "engine": s.render.engine,
+            "resolutionX": int(s.render.resolution_x),
+            "resolutionY": int(s.render.resolution_y),
+            "resolutionPercentage": int(s.render.resolution_percentage),
+            "samples": int(getattr(s.cycles, "samples", 0)) if hasattr(s, "cycles") else 0,
+            "camera": s.camera.name if s.camera else None,
+            "fps": int(s.render.fps) if hasattr(s.render, "fps") else None,
+        }
+        s_stats["name"] = s.name
+        s_stats["renderSettings"] = s_render
+        per_scene.append(s_stats)
+
+    file_objs = list(bpy.data.objects)
+    total_stats = compute_stats_for_objects(file_objs)
+    total_stats["label"] = "total"
+    total_stats["name"] = "total"
+    total_stats["isTotal"] = True
+    total_stats["sceneCount"] = len(bpy.data.scenes)
+
+    stats_result = {
+        "scenes": per_scene,
+        "perScene": per_scene,
+        "total": total_stats,
+        "meshEvaluation": "unevaluated",
+        "description": {
+            "counts": "objectCount reflects Object data-blocks; instanceCount reflects linked duplicates sharing data-blocks and collection instances; uniqueDataBlockCount reflects distinct underlying data-blocks",
+            "meshEvaluation": "un-evaluated mesh data (raw base mesh polycounts before modifier stack evaluation)",
+        },
+    }
+    result["scene_stats"] = stats_result
+    result["sceneStats"] = stats_result
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(result))
 print("__PI_BLENDER_JSON_END__")
@@ -282,6 +365,7 @@ async function getSceneInfoForSelection(
 			includeArmatures: selection.includeArmatures,
 			includeTextures: selection.includeTextures,
 			includePaintSettings: selection.includePaintSettings,
+			includeSceneStats: selection.includeSceneStats,
 		},
 		signal,
 		timeoutMs: 60_000,
@@ -334,6 +418,8 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		armatures: selection.includeArmatures ? result.armatures : [],
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
+		scene_stats: selection.includeSceneStats ? (result.scene_stats ?? null) : null,
+		sceneStats: selection.includeSceneStats ? (result.sceneStats ?? null) : null,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;

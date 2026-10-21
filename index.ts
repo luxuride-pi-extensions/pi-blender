@@ -565,7 +565,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_scene_info",
 			label: "Blender Scene Info",
 			description:
-				'Read the workspace blend file as it was last SAVED, and return its structure: objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures and paint settings. Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, or `["cameras", "cameraSettings"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload.',
+				'Read the workspace blend file as it was last SAVED, and return its structure: objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures, paint settings, or scene_stats. Use category `scene_stats` for aggregate metrics (object counts, instance counts, per-type breakdown, polycount and vertex totals, and render settings) per scene without pulling object-level detail. For `scene_stats`, object counts report Object data-blocks linked to each scene, instance counts report linked duplicate objects sharing data-blocks plus collection instances separately from unique data-blocks, polycounts and vertex totals reflect un-evaluated mesh data (raw base mesh polygons and vertices before modifier stack evaluation), and multi-scene files report a per-scene breakdown with the combined total labelled as a total. Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["scene_stats"]`, `["objects"]`, `["materials"]`, or `["cameras", "cameraSettings"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload.',
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -585,10 +585,11 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("armatures"),
 							Type.Literal("textures"),
 							Type.Literal("paintSettings"),
+							Type.Literal("scene_stats"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. Pass `scene_stats` for aggregate file metrics (object counts, instance counts, unique data-blocks, per-type breakdown, un-evaluated base mesh polycount/vertex totals, and per-scene render settings) without object detail. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),
