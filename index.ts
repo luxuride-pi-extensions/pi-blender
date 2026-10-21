@@ -65,6 +65,9 @@ import {
 	blenderSessionContext,
 	blenderSetMode,
 	blenderWorkspaceInit,
+	blenderGetPythonApiDocs,
+	blenderSearchApiDocs,
+	blenderSearchManualDocs,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
 	findNearestWorkspace,
@@ -246,6 +249,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// asset, so the manager may record what its own probes established.
 	"blender_record_iteration_fact",
 	"blender_export_asset",
+	"blender_search_api_docs",
+	"blender_search_manual_docs",
+	"blender_get_python_api_docs",
 ]);
 
 /** Image types `read` would attach to the request, mirroring pi's own sniffing. */
@@ -291,6 +297,9 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_read_only_python",
 	"blender_montage",
 	"blender_compare",
+	"blender_search_api_docs",
+	"blender_search_manual_docs",
+	"blender_get_python_api_docs",
 ];
 
 /**
@@ -1807,6 +1816,90 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								.join("\n"),
 						},
 					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_get_python_api_docs",
+			label: "Blender Get Python API Docs",
+			description:
+				"Look up authoritative documentation and signatures from the Blender 4.2 LTS Python API reference for a specific identifier (e.g. bpy.types.Modifier, bpy.ops.mesh.primitive_uv_sphere_add, bpy.data.objects) or list matching identifiers and submodules when ending with a wildcard * (e.g. bpy.ops.mesh.*, bpy.types.*). Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				identifier: Type.String({
+					description:
+						"The bpy identifier to look up (e.g. 'bpy.types.Modifier', 'bpy.ops.mesh.primitive_uv_sphere_add'), or a wildcard query (e.g. 'bpy.ops.mesh.*', 'bpy.types.*') to list available members.",
+				}),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderGetPythonApiDocs({
+					identifier: params.identifier,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_search_api_docs",
+			label: "Blender Search API Docs",
+			description:
+				"Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus (bpy.types, bpy.ops, bpy.data, bpy.context, bpy.props). Returns matching API signatures, descriptions, and parameter definitions. Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				query: Type.String({
+					description:
+						"Search query string to match against Blender 4.2 LTS API reference (types, operators, signatures, properties).",
+				}),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Maximum number of search results to return (default 10).",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderSearchApiDocs({
+					query: params.query,
+					limit: params.limit,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_search_manual_docs",
+			label: "Blender Search Manual Docs",
+			description:
+				"Perform full-text search across curated Blender 4.2 LTS user manual excerpts covering modeling, modifiers, rigging, shading, render, and geometry nodes. Returns matching topics, explanations, and workflows. Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				query: Type.String({
+					description:
+						"Search query string to match against Blender 4.2 LTS user manual excerpts (modeling, modifiers, rigging, shading, render, geometry nodes).",
+				}),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Maximum number of search results to return (default 10).",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderSearchManualDocs({
+					query: params.query,
+					limit: params.limit,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
 			},
