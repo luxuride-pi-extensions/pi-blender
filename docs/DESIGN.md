@@ -7,7 +7,7 @@ tool-by-tool usage reference.
 ## Layout
 
 ```
-index.ts            extension entry (23 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
+index.ts            extension entry (24 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
 launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
@@ -149,7 +149,7 @@ For full details on boundaries, recoverability, and measurement pitfalls, see [d
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (23 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_window_layout`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (24 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point sun rig (key/fill/rim, all aimed at the origin), a
@@ -433,6 +433,27 @@ Start pi in any project dir. The extension:
   and is put back afterwards, so a comparison never replaces what you are
   looking at. Two runs is the minimum, and with one there is no previous
   generation to compare against
+- `blender_window_layout` inspects the live Blender window layout, screens,
+  areas, space types, active object, and selection as JSON with zero image token
+  cost (`as_json`), or captures a byte-capped screenshot of an area or window
+  (`as_image` / `screenshot`). Why image captures are byte-capped rather than
+  raw: in conversational agent architectures, images persist across the
+  transcript and are re-transmitted on every subsequent turn, rapidly ballooning
+  context window weight and burning image token budgets. This repo already made
+  the deliberate architectural choice in `blender_image_probe` that "the pixels
+  never enter the model's context as an image" (returning numerical measurements
+  instead) and in `blender_montage` that "images persist in a conversation and
+  are re-sent every request" (combining views onto one sheet). For UI inspection,
+  `as_json` is the zero-cost primitive answering "what is on screen" without
+  spending a single image token. When an image capture is explicitly requested,
+  `blender_window_layout` downscales the screenshot honoring
+  `context.preferences.system.pixel_size` (so HiDPI/Retina displays do not
+  inflate resolution 2-4x) and binary-searches a scale factor to guarantee the
+  saved PNG lands strictly under an explicit byte cap (default 500 KB / 512,000
+  bytes), returning the saved file path and dimensions rather than emitting raw,
+  unbounded image bytes into the model's context. Window-only: like
+  `blender_set_mode`, it reports `layout: null` and `captured: false` with a
+  reason when no watch window is open rather than throwing.
 - `blender_iteration_state` / `blender_record_iteration_fact` carry a module's
   iteration state and its measured facts across critics. A fact a critic
   measured is worthless to the NEXT critic unless it is persisted, which is how
@@ -568,16 +589,17 @@ Start pi in any project dir. The extension:
   `blender_*` tool call alone never opens a window, and neither does the
   supervisor. Most tools need no window at all: with none open they run
   headlessly against `model.blend`, through the same bridge script the window
-  serves, so the two paths cannot drift apart. Only two things genuinely
-  require a window — `blender_set_mode` and `blender_save_view` with
-  `source=active-camera` — because both photograph or rearrange what a viewport
-  is showing, which has no meaning in a process with no screen. Neither opens
-  one. `blender_set_mode` reports `switched: false` with a reason, and
-  `blender_save_view` reports `savedView: null` and writes nothing, because a
-  viewport mode is a statement about a UI and a view bound to a camera that was
-  never created would make every later render through it wrong. An agent can
-  report that and carry on; only the user can run `/blender-watch`, and a build
-  never waits for one
+  serves, so the two paths cannot drift apart. Only three things genuinely
+  require a window — `blender_set_mode`, `blender_save_view` with
+  `source=active-camera`, and `blender_window_layout` — because they photograph
+  or rearrange what a live UI or viewport is showing, which has no meaning in a
+  process with no screen. None opens one. `blender_set_mode` reports
+  `switched: false` with a reason, `blender_save_view` reports
+  `savedView: null` and writes nothing, and `blender_window_layout` reports
+  `layout: null` and `captured: false` with a reason, because a viewport mode
+  or window layout is a statement about a UI that does not exist in headless
+  mode. An agent can report that and carry on; only the user can run
+  `/blender-watch`, and a build never waits for one
 - exports the workspace blend to an interchange format with
   `blender_export_asset` (`glb`, `gltf`, `obj`, `stl`), headlessly and
   read-only. USD is deliberately not offered: no exporter is guaranteed in a

@@ -54,7 +54,13 @@ export type {
 	BlenderSearchMatch,
 	BlenderSearchResult,
 } from "./doc-grounding.js";
+export { blenderWindowLayout } from "./window-layout.js";
 export type {
+	WindowLayoutArea,
+	WindowLayoutWindow,
+	WindowLayoutData,
+	WindowLayoutOptions,
+	WindowLayoutResult,
 	AddReferenceOptions,
 	AddReferenceResult,
 	BlenderBranchRunRecord,
