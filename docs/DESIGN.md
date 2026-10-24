@@ -34,6 +34,7 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
                             symlink, typebox link, agent install, todo
                             provider check, Blender resolution report
                             (`--check` is read-only and exits 1 on any problem)
+docs/SAFETY.md              read-only guarantees, guard boundaries, recoverability model, and measurement traps
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 ```
 
@@ -130,6 +131,16 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | `PI_BLENDER_MAX_PARALLEL_RUNS` | `16` — ceiling on concurrent **headless** Blender runs. A request, not a promise: the effective count is the smallest of this, the measured ceiling (4), the core count at 3 per run, and what free memory allows. The default is therefore normally clamped, and the clamp prints a warning naming the binding term. `blender_bridge_status` reports the resolved numbers **and how many headless Blenders are open right now**, counted across every process in the session tree, so a manager can see what its workers spent rather than only what the ceiling permits. A `/blender-watch` window is reported separately from that count: it is not one of these runs. |
 | `PI_HOME` | `~/.pi` — root of the pi installation |
 | `PI_AGENT_DIR` | `$PI_HOME/agent` — where extensions and agents are installed, and the base for every other path this table resolves against |
+
+## Safety and Read-Only Guarantees
+
+For full details on boundaries, recoverability, and measurement pitfalls, see [docs/SAFETY.md](SAFETY.md). The extension establishes three guarantee layers:
+
+1. **Layer 1: Runtime Guarded Scripting (`blender_read_only_python`)**: Enforced inside the Blender process by monkeypatching mutating entry points (`bpy.ops`, `bpy.data` collection removals/purges, vector/matrix attribute assignments, saves) in `blender/readonly_guard.py`. Refusals return a structured `{ refused: true, ... }` payload. It is a **denylist of named entry points, NOT a sandbox**: the host filesystem is unguarded (`os` and `open` are untouched).
+2. **Layer 2: Read-Only by Construction (`blender_geometry_probe`, `blender_image_probe`, `blender_session_context`, `blender_scene_info`)**: Analytical tools that build BVHs, cast rays, sample PNG buffers, and read saved/live state. They never mutate geometry, write files, save `.blend` scenes, or claim iterations.
+3. **Layer 3: Unguarded Writer Paths (`blender_execute_python`, `blender_module_run`, `blender_branch_run`, `blender_branch_apply`)**: Plainly **unguarded arbitrary Python execution** without runtime prevention or sandboxing. The mitigation is **recoverability, not prevention**: work is partitioned into modular scripts, private branch copies, and automated per-run checkpoints (`pre-NN.blend`) rolled back via `blender_module_revert`.
+
+**Measurement Pitfalls**: A coincident coplanar pair's `deepestPenetration` is not a measurement to trust because ray parity signs are arbitrary on shared planes; read `coincidentSurface` instead (see [docs/SAFETY.md](SAFETY.md)).
 
 ## Usage
 
@@ -289,7 +300,8 @@ Start pi in any project dir. The extension:
   The inside/outside sign behind it comes from ray parity, which is arbitrary
   when two surfaces lie in one plane: two coincident panels came back reporting
   a half-metre penetration while touching nowhere. Read `coincidentSurface`
-  instead, which asks the question directly
+  instead, which asks the question directly (see [docs/SAFETY.md](SAFETY.md)
+  for measurement pitfall details).
 - `topology`'s `connectedComponents` is the one topology number that catches a
   mesh split into drifting pieces, and it is there because every other count is
   blind to that case: each piece is a clean closed solid, so a head that has
@@ -357,7 +369,9 @@ Start pi in any project dir. The extension:
   returning a copy is not enough — that would let the assignment succeed and the
   script read back its own number), and saving. A refusal comes back as
   `refused: true` naming the operation rather than as an error, because
-  "your question needed a change" is an answer
+  "your question needed a change" is an answer. See [docs/SAFETY.md](SAFETY.md)
+  for full guarantee boundaries (denylist vs sandbox, unguarded filesystem,
+  and the three safety layers).
 - `blender_montage` renders several preset orbit angles of one subject and
   tiles them into a single labelled sheet at `modules/<name>/montage.png`,
   with each panel also written separately at full size. The cameras sit on one
