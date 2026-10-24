@@ -1307,7 +1307,7 @@ def _signed_distance_to_surface(point, target_bvh):
     return distance
 
 
-def _probe_pair_geometry(first, second, tolerance):
+def _probe_pair_geometry(first, second, tolerance, check="pair", bounded_by=None):
     """Measure the relationship between two objects.
 
     This is the measurement that answers the classic structural error: a
@@ -1353,6 +1353,11 @@ def _probe_pair_geometry(first, second, tolerance):
         # it got.
         return {
             "verdict": "unknown",
+            "check": check,
+            "clearanceChecked": _round(tolerance),
+            "boundedBy": _round(bounded_by) if bounded_by is not None else None,
+            "verifiedCeiling": _round(bounded_by) if bounded_by is not None else _round(tolerance),
+            "checkedCeiling": _round(bounded_by) if bounded_by is not None else _round(tolerance),
             "reason": "no surface distance samples available",
             "tolerance": _round(tolerance),
             "coincidentSurface": _coincident_surface(
@@ -1383,6 +1388,11 @@ def _probe_pair_geometry(first, second, tolerance):
 
     return {
         "verdict": verdict,
+        "check": check,
+        "clearanceChecked": _round(tolerance),
+        "boundedBy": _round(bounded_by) if bounded_by is not None else None,
+        "verifiedCeiling": _round(bounded_by) if bounded_by is not None else _round(tolerance),
+        "checkedCeiling": _round(bounded_by) if bounded_by is not None else _round(tolerance),
         "tolerance": _round(tolerance),
         "coincidentSurface": _coincident_surface(
             first, second, first_bvh, second_bvh, first_points, second_points, shared_min, shared_max
@@ -1737,6 +1747,11 @@ def _probe_clearance(objects, cell=None, body=None):
     if grid.get("refused"):
         refusal = {key: value for key, value in grid.items() if key != "refused"}
         refusal["sampled"] = False
+        refusal["check"] = "clearance"
+        refusal["clearanceChecked"] = _round(radius)
+        refusal["boundedBy"] = None
+        refusal["verifiedCeiling"] = _round(radius)
+        refusal["checkedCeiling"] = _round(radius)
         return refusal
 
     columns = grid["columns"]
@@ -1806,6 +1821,11 @@ def _probe_clearance(objects, cell=None, body=None):
 
     return {
         "sampled": True,
+        "check": "clearance",
+        "clearanceChecked": _round(radius),
+        "boundedBy": None,
+        "verifiedCeiling": _round(radius),
+        "checkedCeiling": _round(radius),
         "cellSize": _round(cell),
         "bodyRadius": _round(radius),
         "stride": _round(step),
@@ -2272,7 +2292,7 @@ def _probe_joints(objects, tolerance):
                 continue
             separation_axis = distance
 
-            measurement = _probe_pair_geometry(first, second, tolerance)
+            measurement = _probe_pair_geometry(first, second, tolerance, check="joint", bounded_by=JOINT_NEAR_MISS_MAX)
             # Copied into a plain dict so the access below is total: the pair
             # measurement returns "unknown" with no coincidence figure at all
             # when it could not sample any surface distance.
@@ -2402,6 +2422,12 @@ def _probe_joints(objects, tolerance):
                 {
                     "a": first.name,
                     "b": second.name,
+                    "check": measurement["check"],
+                    "clearanceChecked": measurement["clearanceChecked"],
+                    "boundedBy": measurement["boundedBy"],
+                    "verifiedCeiling": measurement["verifiedCeiling"],
+                    "checkedCeiling": measurement["checkedCeiling"],
+                    "verdict": measurement["verdict"],
                     "severity": severity,
                     "reason": reason,
                     "gap": surfaces,
@@ -2432,6 +2458,11 @@ def _probe_joints(objects, tolerance):
     ]
     near_misses = [entry for entry in candidates if entry["severity"] == "near-miss"]
     return {
+        "check": "joint",
+        "clearanceChecked": _round(tolerance),
+        "boundedBy": JOINT_NEAR_MISS_MAX,
+        "verifiedCeiling": JOINT_NEAR_MISS_MAX,
+        "checkedCeiling": JOINT_NEAR_MISS_MAX,
         "tolerance": _round(tolerance),
         "nearMissMax": JOINT_NEAR_MISS_MAX,
         "defectCount": len(defects),
@@ -3137,7 +3168,10 @@ def handle_geometry_probe(request):
             f"Available: {', '.join(GEOMETRY_PROBE_CHECKS)}"
         )
 
-    tolerance = _as_float(request.get("tolerance"), "tolerance", 0.002)
+    tolerance_val = request.get("tolerance")
+    if tolerance_val is None and isinstance(request.get("clearance"), (int, float)):
+        tolerance_val = request.get("clearance")
+    tolerance = _as_float(tolerance_val, "tolerance", 0.002)
     specifications = request.get("specifications") or None
     if specifications is not None and "scale" not in requested:
         # Naming the dimensions is the request; requiring the caller to also
@@ -3253,9 +3287,9 @@ def handle_geometry_probe(request):
                     raise RuntimeError(f'Pair references a missing object: "{first_name}", "{second_name}".')
                 if first.type != "MESH" or second.type != "MESH":
                     raise RuntimeError(f'Pair references a non-mesh object: "{first_name}", "{second_name}".')
-                pairs[f"{first_name}|{second_name}"] = _probe_pair_geometry(first, second, tolerance)
+                pairs[f"{first_name}|{second_name}"] = _probe_pair_geometry(first, second, tolerance, check="pair", bounded_by=None)
         elif len(targets) == 2:
-            pairs[f"{targets[0].name}|{targets[1].name}"] = _probe_pair_geometry(targets[0], targets[1], tolerance)
+            pairs[f"{targets[0].name}|{targets[1].name}"] = _probe_pair_geometry(targets[0], targets[1], tolerance, check="pair", bounded_by=None)
 
     joints = None
     if "joint" in requested:
