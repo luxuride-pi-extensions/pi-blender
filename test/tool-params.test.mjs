@@ -10,12 +10,15 @@
 // no call can express "this key was dropped on the way down".
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const lines = readFileSync(new URL("../index.ts", import.meta.url), "utf8").split("\n");
+const sourcePath = existsSync(new URL("../core/tools.ts", import.meta.url))
+	? "../core/tools.ts"
+	: "../core/tools.ts";
+const lines = readFileSync(new URL(sourcePath, import.meta.url), "utf8").split("\n");
 
-/** Each pi.registerTool({ ... }) block, split out by brace depth. */
+/** Each tool definition block, split out by brace depth. */
 function toolBlocks() {
 	const blocks = [];
 	let cur = null;
@@ -28,7 +31,7 @@ function toolBlocks() {
 		if (!cur) continue;
 		cur.lines.push(lines[i]);
 		depth += (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
-		if (depth <= 0 && /^\t\t\}\);/.test(lines[i])) {
+		if (depth <= 0 && (/^\t\t\}\);/.test(lines[i]) || /^\};$/.test(lines[i]))) {
 			blocks.push(cur);
 			cur = null;
 		}
@@ -37,9 +40,14 @@ function toolBlocks() {
 }
 
 /**
- * Top-level keys of a tool's parameters schema. The one-tab offset from
- * `parameters:` is the schema body; anything deeper is a nested object's own
- * field, which is not a parameter of this tool.
+ * Top-level keys of a tool's parameters schema.
+ *
+ * Depth, not indentation, decides what counts as a parameter: while we are still
+ * directly inside the `Type.Object({` body, a `Type.` member is a parameter of
+ * this tool; anything deeper belongs to a nested object. An indentation-based
+ * match cannot work here, because core/tools.ts contains both one-tab and
+ * two-tab member styles (the extracted definitions and the appended ones), and a
+ * regex tuned to one silently reports zero keys for the other.
  */
 function schemaKeys(block) {
 	const start = block.lines.findIndex((l) => /parameters: Type\.Object\(\{/.test(l));
@@ -49,8 +57,10 @@ function schemaKeys(block) {
 	for (let i = start + 1; i < block.lines.length; i++) {
 		const line = block.lines[i];
 		if (!line.trim()) continue;
-		const key = line.match(/^\t{4}([a-zA-Z_][a-zA-Z0-9_.]*): Type\./);
-		if (key) keys.push(key[1]);
+		if (depth === 1) {
+			const key = line.match(/^\s*([a-zA-Z_][a-zA-Z0-9_.]*): Type\./);
+			if (key) keys.push(key[1]);
+		}
 		depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
 		if (depth === 0) break;
 	}

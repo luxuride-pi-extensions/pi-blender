@@ -15,37 +15,69 @@ const bridge = await load("blender/bridge.ts");
 const windowLayout = await load("blender/window-layout.ts");
 const launch = await load("launch.ts");
 
+const toolsSource = readFileSync(new URL("../core/tools.ts", import.meta.url), "utf8");
 const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
 const designSource = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
 const bridgeSource = readFileSync(new URL("../blender/bridge.ts", import.meta.url), "utf8");
 
 function toolDescription(name) {
-	const start = indexSource.indexOf(`name: "${name}"`);
+	const start = toolsSource.indexOf(`name: "${name}"`);
 	assert.notEqual(start, -1, `${name} is not registered in index.ts`);
-	const from = indexSource.indexOf("description:", start);
+	const from = toolsSource.indexOf("description:", start);
 	assert.notEqual(from, -1, `${name} has no description`);
-	const end = indexSource.indexOf('",', from);
+	const end = toolsSource.indexOf('",', from);
 	assert.notEqual(end, -1, `${name}'s description never closes`);
-	return indexSource.slice(from, end);
+	return toolsSource.slice(from, end);
 }
 
 test("blender_window_layout is registered with annotations", () => {
-	assert.ok(indexSource.includes('name: "blender_window_layout"'), "blender_window_layout is registered");
+	assert.ok(toolsSource.includes('name: "blender_window_layout"'), "blender_window_layout is registered");
 	// Slice the array rather than anchoring on it ending with this name: other
 	// tool PRs append their own entries, and a name that is merely no longer
 	// last is still declared.
+	// #39 replaced the hand-written LAZY_BLENDER_TOOL_NAMES array with a
+	// derivation from BLENDER_TOOLS, so membership is now structural: every
+	// registered tool is lazy. Accept either shape, but require that this tool
+	// IS in BLENDER_TOOLS, which is what membership now means.
+	// The lazy list lives in index.ts (it is the pi registration surface), while
+	// the tool roster lives in core/tools.ts after #39's extraction.
 	const lazyStart = indexSource.indexOf("LAZY_BLENDER_TOOL_NAMES = [");
-	const lazyEnd = indexSource.indexOf("];", lazyStart);
-	assert.ok(lazyStart !== -1 && lazyEnd !== -1, "LAZY_BLENDER_TOOL_NAMES array not found");
-	assert.ok(
-		indexSource.slice(lazyStart, lazyEnd).includes('"blender_window_layout"'),
-		"blender_window_layout is declared in LAZY_BLENDER_TOOL_NAMES",
-	);
+	if (lazyStart !== -1) {
+		const lazyEnd = indexSource.indexOf("];", lazyStart);
+		assert.ok(lazyEnd !== -1, "LAZY_BLENDER_TOOL_NAMES array never closes");
+		assert.ok(
+			indexSource.slice(lazyStart, lazyEnd).includes('"blender_window_layout"'),
+			"blender_window_layout is declared in LAZY_BLENDER_TOOL_NAMES",
+		);
+	} else {
+		assert.match(
+			indexSource,
+			/LAZY_BLENDER_TOOL_NAMES = BLENDER_TOOLS\.map\(/,
+			"LAZY_BLENDER_TOOL_NAMES must be derived from BLENDER_TOOLS",
+		);
+		assert.match(
+			toolsSource,
+			/blenderWindowLayoutTool,/,
+			"blender_window_layout must be in the BLENDER_TOOLS roster",
+		);
+	}
 
 	// Find the tool registration block
-	const start = indexSource.indexOf('name: "blender_window_layout"');
-	const blockEnd = indexSource.indexOf("});", start);
-	const toolBlock = indexSource.slice(start, blockEnd);
+	// core/tools.ts holds `CoreToolDefinition` literals, not `pi.registerTool({`
+	// calls, so the block ends at the literal's closing brace at depth 0.
+	const start = toolsSource.indexOf('name: "blender_window_layout"');
+	assert.notEqual(start, -1, "blender_window_layout is defined in core/tools.ts");
+	const from = toolsSource.lastIndexOf("{", start);
+	let depth = 0;
+	let blockEnd = from;
+	for (; blockEnd < toolsSource.length; blockEnd += 1) {
+		if (toolsSource[blockEnd] === "{") depth += 1;
+		else if (toolsSource[blockEnd] === "}") {
+			depth -= 1;
+			if (depth === 0) break;
+		}
+	}
+	const toolBlock = toolsSource.slice(from, blockEnd + 1);
 
 	// readOnlyHint must be false: screenshot mode writes a PNG to a
 	// caller-supplied output_path (blender/live-bridge.py:836). pi gates the

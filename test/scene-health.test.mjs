@@ -65,10 +65,10 @@ function scratchRoot() {
 }
 
 test("blender_scene_info schema documents content vs file-health split", () => {
-	const indexSource = readFileSync(join(REPO, "index.ts"), "utf8");
-	const start = indexSource.indexOf('name: "blender_scene_info"');
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf8");
+	const start = toolsSource.indexOf('name: "blender_scene_info"');
 	assert.notEqual(start, -1, "blender_scene_info is registered in index.ts");
-	const block = indexSource.slice(start, indexSource.indexOf("pi.registerTool", start + 1));
+	const block = toolsSource.slice(start, toolsSource.indexOf("pi.registerTool", start + 1));
 
 	// Split between content and file-health stated in description
 	assert.match(

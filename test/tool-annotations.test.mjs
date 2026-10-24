@@ -11,23 +11,30 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const lines = readFileSync(new URL("../index.ts", import.meta.url), "utf8").split("\n");
+const lines = readFileSync(new URL("../core/tools.ts", import.meta.url), "utf8").split("\n");
 
-/** Each pi.registerTool({ ... }) block, split out by brace depth. */
+/**
+ * Each tool definition block, split out by brace depth.
+ *
+ * After the core extraction the tools are `export const xTool: CoreToolDefinition = { ... }`
+ * in core/tools.ts rather than `pi.registerTool({ ... })` calls, so both shapes are
+ * recognised here: this test asserts on the definitions, not on where they are registered.
+ */
 function toolBlocks() {
 	const blocks = [];
 	let cur = null;
 	let depth = 0;
 	for (let i = 0; i < lines.length; i++) {
-		if (!cur && lines[i].includes("pi.registerTool({")) {
+		if (!cur && /^(\t*)(pi\.registerTool\(\{|export const \w+Tool: CoreToolDefinition = \{)/.test(lines[i])) {
 			cur = { lines: [lines[i]] };
-			depth = 1;
+			depth = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
+			if (/pi\.registerTool/.test(lines[i])) depth = 1;
 			continue;
 		}
 		if (!cur) continue;
 		cur.lines.push(lines[i]);
 		depth += (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
-		if (depth <= 0 && /^\t\t\}\);/.test(lines[i])) {
+		if (depth <= 0) {
 			const text = cur.lines.join("\n");
 			const nameMatch = text.match(/name:\s*"(blender_[a-z0-9_]+)"/);
 			if (nameMatch) {
