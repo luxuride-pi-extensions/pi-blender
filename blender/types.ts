@@ -487,9 +487,65 @@ export interface SceneInfoOptions {
 		| "object_detail"
 		| "missingFiles"
 		| "linkedLibraries"
+		| "scene_stats"
 	>;
 	targetObject?: string;
 	signal?: AbortSignal;
+}
+
+export interface BlenderSceneStatsScene {
+	name: string;
+	objectCount: number;
+	objects: number;
+	instanceCount: number;
+	instances: number;
+	uniqueDataBlockCount: number;
+	uniqueDataBlocks: number;
+	byType: Record<string, number>;
+	types: Record<string, number>;
+	polycount: number;
+	faces: number;
+	polygons: number;
+	vertices: number;
+	uniqueFaces: number;
+	uniqueVertices: number;
+	meshEvaluation: string;
+	meshEvaluationNote: string;
+	renderSettings: Record<string, unknown>;
+}
+
+export interface BlenderSceneStatsTotal {
+	label: string;
+	name: string;
+	isTotal: boolean;
+	sceneCount: number;
+	objectCount: number;
+	objects: number;
+	instanceCount: number;
+	instances: number;
+	uniqueDataBlockCount: number;
+	uniqueDataBlocks: number;
+	byType: Record<string, number>;
+	types: Record<string, number>;
+	polycount: number;
+	faces: number;
+	polygons: number;
+	vertices: number;
+	uniqueFaces: number;
+	uniqueVertices: number;
+	meshEvaluation: string;
+	meshEvaluationNote: string;
+}
+
+export interface BlenderSceneStats {
+	scenes: BlenderSceneStatsScene[];
+	perScene?: BlenderSceneStatsScene[];
+	total: BlenderSceneStatsTotal;
+	meshEvaluation: string;
+	description?: {
+		counts: string;
+		meshEvaluation: string;
+	};
 }
 
 export interface SceneInfoResult {
@@ -520,6 +576,8 @@ export interface SceneInfoResult {
 	objectDetail?: ObjectDetailResult | null;
 	missingFiles?: MissingFilesSummary | null;
 	linkedLibraries?: LinkedLibrariesResult | null;
+	scene_stats?: BlenderSceneStats | null;
+	sceneStats?: BlenderSceneStats | null;
 }
 
 export interface BlenderSceneUnits {
@@ -551,6 +609,7 @@ export interface SceneInfoSelection {
 	includeObjectDetail?: boolean;
 	includeMissingFiles: boolean;
 	includeLinkedLibraries: boolean;
+	includeSceneStats: boolean;
 }
 
 export interface ObjectDetailOptions {
