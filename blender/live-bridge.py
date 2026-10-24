@@ -39,6 +39,10 @@ import montage  # pyright: ignore[reportMissingImports]
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import export_asset  # pyright: ignore[reportMissingImports]
 
+# The interchange importers.
+# pi-lens-ignore: ast-grep:unresolved-import-python
+import import_asset  # pyright: ignore[reportMissingImports]
+
 # Hand-off fidelity checks for joint probe findings.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import joint_probe  # pyright: ignore[reportMissingImports]
@@ -3912,6 +3916,8 @@ def handle_request(request):
         # outside it (the exporter's own tests), where there is no opener to
         # import from.
         return export_asset.handle_export(request, ensure_requested_blend_open)
+    if request_type == "import":
+        return import_asset.handle_import(request, ensure_requested_blend_open)
     if request_type == "open-blend":
         return handle_open_blend(request)
     if request_type == "reload-blend":

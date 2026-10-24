@@ -32,6 +32,7 @@ export { requestLiveBlenderOpenBlend } from "./bridge.js";
 export { ensureWorkspaceInitialized, findNearestWorkspace, loadWorkspaceManifest, readRecordedWorkspace } from "./workspace.js";
 
 export { blenderExportAsset } from "./export-asset.js";
+export { blenderImportAsset } from "./import.js";
 
 export { blenderRankAssets, parseCritiqueLog } from "./ranking.js";
 export { blenderIterationState } from "./iteration-state.js";
@@ -95,6 +96,12 @@ export type {
 	GeometryProbeTopology,
 	GeometryProbeTransform,
 	GeometryProbeWorkspaceResult,
+	ImportAssetOptions,
+	ImportAssetResult,
+	ImportFormat,
+	ImportObjectReport,
+	ImportPrincipalAxes,
+	ImportReport,
 	ModuleRevertOptions,
 	ModuleRevertResult,
 	ModuleRunOptions,
