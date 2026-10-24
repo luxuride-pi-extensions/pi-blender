@@ -62,6 +62,7 @@ import {
 	blenderRender,
 	blenderSaveView,
 	blenderSceneInfo,
+	blenderObjectDetail,
 	blenderSessionContext,
 	blenderSetMode,
 	blenderWorkspaceInit,
@@ -238,6 +239,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// Blender inspection. Read-only: the manager may look, not author.
 	"blender_workspace_init",
 	"blender_scene_info",
+	"blender_object_detail",
 	"blender_add_reference",
 	"blender_module_revert",
 	"blender_session_context",
@@ -278,6 +280,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_execute_python",
 	"blender_session_context",
 	"blender_scene_info",
+	"blender_object_detail",
 	"blender_save_view",
 	"blender_render",
 	"blender_module_run",
@@ -594,13 +597,20 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("armatures"),
 							Type.Literal("textures"),
 							Type.Literal("paintSettings"),
+							Type.Literal("object_detail"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),
+				),
+				targetObject: Type.Optional(
+					Type.String({
+						description:
+							"Optional target object name when inspecting object detail in the saved blend file.",
+					}),
 				),
 			}),
 			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
@@ -608,10 +618,61 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					workspace: params.workspace,
 					categories: params.categories,
+					targetObject: params.targetObject,
 					signal,
-					});
+				});
 
-						return {
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_object_detail",
+			label: "Blender Object Detail",
+			description:
+				'Read the workspace blend file as it was last SAVED, and return detailed inspection data for a single object: transforms (with non-uniform scale flag), modifier stack (marking viewport-disabled modifiers), material slots, mesh counts (vertices, edges, polygons/faces), parent and child relationships, and orphan/unlinked-to-scene status. Does not pull the entire scene; payload is bounded to the specified object. Reads the saved blend file headlessly, matching blender_scene_info.',
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				objectName: Type.Optional(
+					Type.String({
+						description:
+							"Name of the object in the saved blend file to inspect.",
+					}),
+				),
+				targetObject: Type.Optional(
+					Type.String({
+						description:
+							"Alias for objectName. Name of the object in the saved blend file to inspect.",
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description:
+							"Alias for objectName. Name of the object in the saved blend file to inspect.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const objectName = params.objectName ?? params.targetObject ?? params.name;
+				if (!objectName) {
+					throw new Error("objectName (or targetObject, name) is required for blender_object_detail.");
+				}
+				const result = await blenderObjectDetail({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					objectName,
+					targetObject: params.targetObject,
+					name: params.name,
+					signal,
+				});
+
+				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
