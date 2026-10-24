@@ -84,12 +84,18 @@ Authoring in `pi-blender` parallelizes across workers, but execution remains str
 
 ## Licensing and Security Considerations
 
-### License Incompatibility
+### Provenance and Licensing
+
+Both projects are **GPL-3.0-or-later**:
 
 * `blender_mcp` is licensed under **GPL-3.0-or-later**.
-* `pi-blender` is licensed under the permissive **MIT License**.
+* `pi-blender` is licensed under **GPL-3.0-or-later**.
 
-Vendoring `blender_mcp` code, linking directly to it, or deriving a rewrite from it would impose copyleft restrictions across the project. Maintaining a clean MIT codebase is an explicit project goal.
+So the licenses are compatible, and copyleft is no longer an obstacle: GPLv3 code may be combined with GPLv3 code. The reason not to vendor, link or derive from `blender_mcp` is provenance, not permission.
+
+Keeping this codebase self-derived keeps every line in it attributable to this project's own authorship or to a clearly-identified, compatibly-licensed source (the MIT-licensed BlenderAgent extraction recorded in `README.md`, and the Blender reference material under `docs/reference/` whose terms are stated in `docs/reference/NOTICE`). That is what makes the license status of any given file answerable without a chain-of-custody audit, and it is an explicit project goal.
+
+It also keeps the design independent. An MCP-server architecture carries assumptions -- process model, transport, tool granularity, state ownership -- that this project has deliberately rejected (see the Decision section). Inheriting an implementation would import those assumptions along with it.
 
 ### Security and Sandboxing Posture
 
@@ -117,5 +123,5 @@ Any future proposal to rewrite `pi-blender` as an external MCP server must direc
 2. Reliable live vs. headless fallback that never misdiagnoses a busy UI.
 3. Disk-based iteration and revert state guarantees without in-memory state drift.
 4. Per-session dynamic concurrency budgeting based on measured system memory.
-5. Strict adherence to MIT licensing without GPL contamination.
+5. Preservation of GPL-3.0-or-later licensing, with clear attribution for any vendored or third-party code.
 6. Preservation of reversible, guarded branch execution.
