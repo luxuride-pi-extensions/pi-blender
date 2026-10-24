@@ -2,7 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { blenderObjectDetail } from "./object-detail.js";
-import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
+import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection, UsageGuessResult } from "./types.js";
+import { blenderUsageGuess } from "./usage-guess.js";
 import { runBlenderJson } from "./utils.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
 
@@ -27,6 +28,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeMissingFiles: selected.has("missingFiles"),
 			includeLinkedLibraries: selected.has("linkedLibraries"),
 			includeSceneStats: selected.has("scene_stats"),
+			includeUsageGuess: selected.has("usage_guess") || selected.has("usageGuess"),
 		};
 	}
 
@@ -49,6 +51,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeMissingFiles: false,
 		includeLinkedLibraries: false,
 		includeSceneStats: false,
+		includeUsageGuess: false,
 	};
 }
 
@@ -442,6 +445,14 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		});
 	}
 
+	let usageGuessResult: UsageGuessResult | null = null;
+	if (selection.includeUsageGuess) {
+		usageGuessResult = await blenderUsageGuess({
+			cwd: options.cwd,
+			workspace: manifest.workspacePath,
+			signal: options.signal,
+		});
+	}
 	const sceneInfoResult: SceneInfoResult = {
 		workspacePath: manifest.workspacePath,
 		blendPath: manifest.blendPath,
@@ -466,6 +477,7 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		linkedLibraries: selection.includeLinkedLibraries ? result.linkedLibraries ?? null : null,
 		scene_stats: selection.includeSceneStats ? result.scene_stats ?? null : null,
 		sceneStats: selection.includeSceneStats ? result.sceneStats ?? null : null,
+		usageGuess: selection.includeUsageGuess ? usageGuessResult ?? null : null,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;

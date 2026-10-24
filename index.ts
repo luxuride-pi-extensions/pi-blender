@@ -66,6 +66,7 @@ import {
 	blenderSceneInfo,
 	blenderObjectDetail,
 	blenderSessionContext,
+	blenderUsageGuess,
 	blenderSetMode,
 	blenderWindowLayout,
 	blenderSwitchWorkspace,
@@ -245,6 +246,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_workspace_init",
 	"blender_scene_info",
 	"blender_object_detail",
+	"blender_usage_guess",
 	"blender_add_reference",
 	"blender_module_revert",
 	"blender_session_context",
@@ -287,6 +289,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_session_context",
 	"blender_scene_info",
 	"blender_object_detail",
+	"blender_usage_guess",
 	"blender_save_view",
 	"blender_render",
 	"blender_module_run",
@@ -430,7 +433,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 				openWorldHint: true,
 			},
 			description:
-				"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available.",
+				"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available. When sourceBlend is given, the source scene is adopted wholesale as model.blend: this discards the default studio template rig and camera (StudioCamera, StudioKey, StudioFill, StudioRim), so the workspace inherits whatever lighting and cameras exist in the source file, or has none if none were defined.",
 			parameters: Type.Object({
 				workspace: Type.Optional(
 					Type.String({
@@ -439,7 +442,8 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 				),
 				sourceBlend: Type.Optional(
 					Type.String({
-						description: "Optional source .blend file to copy into the workspace as the starting model.blend.",
+						description:
+							"Optional source .blend file to copy into the workspace as the starting model.blend. WARNING: adopting an external source scene wholesale discards the default studio lighting rig (StudioKey, StudioFill, StudioRim) and studio camera; the workspace inherits the source file's existing lighting and cameras, or lacks them entirely if the source defined none.",
 					}),
 				),
 				template: Type.Optional(
@@ -450,7 +454,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 						],
 						{
 							description:
-								'Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender\'s startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since the source scene brings its own setup.',
+								'Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender\'s startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since adopting a source blend wholesale discards the studio rig/lighting.',
 							default: "studio",
 						},
 					),
@@ -720,10 +724,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("missingFiles"),
 							Type.Literal("linkedLibraries"),
 							Type.Literal("scene_stats"),
+							Type.Literal("usage_guess"),
+							Type.Literal("usageGuess"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Pass `scene_stats` for aggregate file metrics (object counts, instance counts, unique data-blocks, per-type breakdown, un-evaluated base mesh polycount/vertex totals, and per-scene render settings) without object detail. Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Pass `scene_stats` for aggregate file metrics (object counts, instance counts, unique data-blocks, per-type breakdown, un-evaluated base mesh polycount/vertex totals, and per-scene render settings) without object detail. Pass `usage_guess` for an orientation heuristic over data-block signals. Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),
@@ -741,6 +747,47 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					workspace: params.workspace,
 					categories: params.categories,
 					targetObject: params.targetObject,
+					signal,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_usage_guess",
+			label: "Blender Usage Guess",
+			description:
+				"Inspect a saved .blend file headlessly (no live UI bridge lock needed) and guess what it is for. Evaluates signals across data-blocks for animation (actions, armatures), rendering (render engines, output paths, compositor), shading (materials, shader node trees, textures), procedural (geometry nodes, procedural modifiers), and modeling (mesh geometry complexity, curves, vertex groups, shape keys, with default cube check). Returns normalized score (0-100) and certainty (0-100) per category along with named contributing signals. If no signals are found in the file, returns zeroed scores rather than guessing a default.",
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
+			parameters: Type.Object({
+				workspace: Type.Optional(
+					Type.String({
+						description:
+							"Optional workspace path containing model.blend to analyze. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+					}),
+				),
+				blendPath: Type.Optional(
+					Type.String({
+						description:
+							"Optional direct path to a .blend file to analyze headlessly. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const result = await blenderUsageGuess({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					blendPath: params.blendPath,
 					signal,
 				});
 

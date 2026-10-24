@@ -133,8 +133,9 @@ export type {
 	BlenderSceneStatsTotal,
 	SessionContextOptions,
 	SessionContextResult,
-	SetModeOptions,
-	SetModeResult,
+	UsageCategoryResult,
+	UsageGuessOptions,
+	UsageGuessResult,
 	WorkspaceInitOptions,
 	WorkspaceInitResult,
 	WorkspaceOwner,
@@ -142,3 +143,5 @@ export type {
 export { claimWorkspace } from "./workspace.js";
 export { getBundledBlenderAgentsDir, getBundledBlenderSkillsDir } from "./utils.js";
 export { blenderWorkspaceInit } from "./workspace.js";
+export { blenderUsageGuess } from "./usage-guess.js";
+
