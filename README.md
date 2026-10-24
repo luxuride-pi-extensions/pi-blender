@@ -15,7 +15,7 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_execute_python` | run bpy Python in live Blender, optionally saving |
 | `blender_read_only_python` | inline read-only Python that cannot touch the file |
 | `blender_session_context` | current workspace, mode, selection, last render |
-| `blender_scene_info` | scene inventory (extra categories: uv, armatures, textures, paintSettings) |
+| `blender_scene_info` | scene inventory (extra categories: uv, armatures, textures, paintSettings, object_detail, missingFiles, linkedLibraries) |
 | `blender_geometry_probe` | shape/clearance/path/joint/topology checks, read-only |
 | `blender_image_probe` | sample a rendered PNG on disk (mean brightness, color stats) |
 | `blender_montage` | render several preset orbit angles of one subject |

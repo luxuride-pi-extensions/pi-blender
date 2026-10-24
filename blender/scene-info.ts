@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { getBlenderAssetsDir } from "../config.js";
 import { blenderObjectDetail } from "./object-detail.js";
 import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
 import { runBlenderJson } from "./utils.js";
@@ -23,10 +24,12 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
 			includeObjectDetail: selected.has("object_detail"),
+			includeMissingFiles: selected.has("missingFiles"),
+			includeLinkedLibraries: selected.has("linkedLibraries"),
 		};
 	}
 
-	// Full payload by default; the new paint/UV/rig sections stay opt-in to
+	// Full payload by default; the new paint/UV/rig/health sections stay opt-in to
 	// keep the plain default response compact.
 	return {
 		includeObjects: true,
@@ -42,6 +45,8 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeTextures: false,
 		includePaintSettings: false,
 		includeObjectDetail: false,
+		includeMissingFiles: false,
+		includeLinkedLibraries: false,
 	};
 }
 
@@ -49,9 +54,22 @@ function buildSceneInfoScript(): string {
 	return `
 import bpy
 import json
+import os
 import sys
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
+
+_assets_dir = payload.get("assetsDir")
+if _assets_dir and _assets_dir not in sys.path:
+    sys.path.insert(0, _assets_dir)
+
+# Deliberately NOT wrapped in try/except ImportError. scene_info ships alongside
+# this file, so an ImportError means the extension is broken or assetsDir is
+# wrong -- not that the feature is unavailable. Substituting None here made every
+# caller below report totalCount: 0, i.e. "this blend file is healthy", which is
+# the single worst answer a health probe can give: it is indistinguishable from a
+# file with no missing references. Let the traceback reach the caller instead.
+from scene_info import extract_missing_files, extract_linked_libraries
 
 def maybe_vector(value):
     if value is None:
@@ -74,6 +92,8 @@ result = {
     "armatures": [],
     "textures": [],
     "paintSettings": None,
+    "missingFiles": None,
+    "linkedLibraries": None,
 }
 
 if payload.get("includeUv", False):
@@ -246,6 +266,12 @@ if payload.get("includeRenderSettings", True):
         "camera": scene.camera.name if scene.camera else None,
     }
 
+if payload.get("includeMissingFiles", False):
+    result["missingFiles"] = extract_missing_files(payload.get("blendPath"))
+
+if payload.get("includeLinkedLibraries", False):
+    result["linkedLibraries"] = extract_linked_libraries(payload.get("blendPath"))
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(result))
 print("__PI_BLENDER_JSON_END__")
@@ -273,6 +299,8 @@ async function getSceneInfoForSelection(
 		blendPath: manifest.blendPath,
 		scriptSource: buildSceneInfoScript(),
 		payload: {
+			assetsDir: getBlenderAssetsDir(),
+			blendPath: manifest.blendPath,
 			includeObjects: selection.includeObjects,
 			includeCollections: selection.includeCollections,
 			includeMaterials: selection.includeMaterials,
@@ -285,6 +313,8 @@ async function getSceneInfoForSelection(
 			includeArmatures: selection.includeArmatures,
 			includeTextures: selection.includeTextures,
 			includePaintSettings: selection.includePaintSettings,
+			includeMissingFiles: selection.includeMissingFiles,
+			includeLinkedLibraries: selection.includeLinkedLibraries,
 		},
 		signal,
 		timeoutMs: 60_000,
@@ -348,6 +378,8 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
 		objectDetail: objectDetailResult,
+		missingFiles: selection.includeMissingFiles ? result.missingFiles ?? null : null,
+		linkedLibraries: selection.includeLinkedLibraries ? result.linkedLibraries ?? null : null,
 	};
 	await writeFile(sceneInfoResult.sceneInfoPath, JSON.stringify(sceneInfoResult, null, 2), "utf-8");
 	return sceneInfoResult;

@@ -577,7 +577,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_scene_info",
 			label: "Blender Scene Info",
 			description:
-				'Read the workspace blend file as it was last SAVED, and return its structure: objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures and paint settings. Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, or `["cameras", "cameraSettings"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).',
+'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures, paint settings), single-object detail (object_detail), or file health (missingFiles, linkedLibraries). Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"), for per-object detail ("what is this object\'s transform, parent, modifiers"), and for file-health diagnostics ("is this file broken", missing external asset files, direct and indirect linked library trees). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, `["cameras", "cameraSettings"]`, `["object_detail"]`, or `["missingFiles", "linkedLibraries"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).',
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -598,10 +598,12 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("textures"),
 							Type.Literal("paintSettings"),
 							Type.Literal("object_detail"),
+							Type.Literal("missingFiles"),
+							Type.Literal("linkedLibraries"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),

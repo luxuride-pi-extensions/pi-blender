@@ -201,7 +201,10 @@ Start pi in any project dir. The extension:
   silently disappearing, so the agent refreshes with `blender_session_context`
   rather than guessing
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
-  `textures`, and `paintSettings` for paint/UV/rig planning
+  `textures`, and `paintSettings` for paint/UV/rig planning, `object_detail` for
+  a single object's transform/parenting/modifiers/mesh stats (requires
+  `targetObject`), and `missingFiles` plus `linkedLibraries` for off-line
+  file-health diagnostics of the saved blend
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
   `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, and `topology`. `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis

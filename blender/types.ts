@@ -430,6 +430,44 @@ export interface ReadOnlyPythonResult {
 	refused: boolean;
 }
 
+export interface MissingFileItem {
+	name: string;
+	filepath: string;
+	resolvedPath: string;
+	path: string;
+	strip?: string;
+}
+
+export interface MissingFilesSummary {
+	images: MissingFileItem[];
+	libraries: MissingFileItem[];
+	fonts: MissingFileItem[];
+	sounds: MissingFileItem[];
+	movieClips: MissingFileItem[];
+	caches: MissingFileItem[];
+	sequences: MissingFileItem[];
+	totalCount: number;
+	movie_clips?: MissingFileItem[];
+}
+
+export interface LinkedLibraryNode {
+	name: string;
+	filepath: string;
+	resolvedPath: string | null;
+	isIndirect: boolean;
+	parentName: string | null;
+	parentFilePath: string | null;
+	exists: boolean;
+	children: LinkedLibraryNode[];
+}
+
+export interface LinkedLibrariesResult {
+	tree: LinkedLibraryNode[];
+	list: LinkedLibraryNode[];
+	totalCount: number;
+	hasIndirect: boolean;
+}
+
 export interface SceneInfoOptions {
 	cwd: string;
 	workspace: string;
@@ -447,6 +485,8 @@ export interface SceneInfoOptions {
 		| "textures"
 		| "paintSettings"
 		| "object_detail"
+		| "missingFiles"
+		| "linkedLibraries"
 	>;
 	targetObject?: string;
 	signal?: AbortSignal;
@@ -478,6 +518,8 @@ export interface SceneInfoResult {
 	textures: Array<Record<string, unknown>>;
 	paintSettings: Record<string, unknown> | null;
 	objectDetail?: ObjectDetailResult | null;
+	missingFiles?: MissingFilesSummary | null;
+	linkedLibraries?: LinkedLibrariesResult | null;
 }
 
 export interface BlenderSceneUnits {
@@ -507,6 +549,8 @@ export interface SceneInfoSelection {
 	includeTextures: boolean;
 	includePaintSettings: boolean;
 	includeObjectDetail?: boolean;
+	includeMissingFiles: boolean;
+	includeLinkedLibraries: boolean;
 }
 
 export interface ObjectDetailOptions {
