@@ -1438,6 +1438,18 @@ export interface GeometryProbeJoint {
 	overlapping: boolean;
 	/** Distance between the boxes: 0 when they overlap, else the widest axis gap. */
 	boundingBoxDistance: number;
+	/** Signed world-space offset vector and target part to move for fixable findings. */
+	handoff?: GeometryProbeHandoff | null;
+	handOff?: GeometryProbeHandoff | null;
+}
+
+export interface GeometryProbeHandoff {
+	/** True when the two parts are of near-equal extent (< 1.5x) or displacement is indeterminate. */
+	ambiguous?: boolean;
+	/** Identity of the part to move (the smaller one). Omitted when ambiguous. */
+	partToMove?: string;
+	/** Signed world-space offset vector to close the gap. Omitted when ambiguous. */
+	offset?: number[];
 }
 
 export interface GeometryProbeJoints {
