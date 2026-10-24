@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { requestLiveBlenderMontage } from "./bridge.js";
-import type { MontageOptions, MontageResult } from "./types.js";
+import { dispatchDeferredJob } from "./jobs.js";
+import type { DeferredJobHandle, MontageOptions, MontageResult } from "./types.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
 
 /**
@@ -24,7 +25,22 @@ import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
  * inside the bridge, and the temporary cameras are removed.
  */
 
-export async function blenderMontage(options: MontageOptions): Promise<MontageResult> {
+export async function blenderMontage(options: MontageOptions): Promise<MontageResult | DeferredJobHandle> {
+	if (options.async) {
+		return await dispatchDeferredJob(
+			"montage",
+			() => executeMontage({ ...options, async: false }),
+			{
+				workspace: options.workspace,
+				moduleName: options.moduleName,
+				views: options.views,
+			},
+		);
+	}
+	return await executeMontage(options);
+}
+
+async function executeMontage(options: MontageOptions): Promise<MontageResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 	const views = normalizeViews(options.views);
 	const outputDir = join(manifest.workspacePath, "modules", options.moduleName);
