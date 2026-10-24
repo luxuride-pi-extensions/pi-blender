@@ -17,7 +17,22 @@ import { fileURLToPath } from "node:url";
 
 import { loadTs } from "./paths.mjs";
 
-process.env.PI_MANAGER_CORE_DIR = process.env.PI_MANAGER_CORE_DIR ?? "/home/lux/Projects/pi-manager-core";
+// Resolve the manager-core sibling only if it actually exists, mirroring
+// test/scene-health.test.mjs. A hardcoded fallback would point every other
+// machine at a directory that is not there, and an env var naming a missing
+// path is worse than no env var: code that checks "is it configured?" gets a
+// yes and then fails on use.
+if (!process.env.PI_MANAGER_CORE_DIR) {
+	for (const candidate of [
+		"/home/lux/Projects/pi-manager-core",
+		join(homedir(), "Projects", "pi-manager-core"),
+	]) {
+		if (existsSync(candidate)) {
+			process.env.PI_MANAGER_CORE_DIR = candidate;
+			break;
+		}
+	}
+}
 
 const REPO = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const load = (name) => loadTs(join(REPO, name));
