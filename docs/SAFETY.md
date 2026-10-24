@@ -131,3 +131,76 @@ When using probe tools, callers must be aware of geometric measurement limits wh
 | `blender_execute_python` | Layer 3 | Unguarded execution | None | Arbitrary script errors, scene changes, filesystem writes | Ad-hoc execution; relies on external backups or git. |
 | `blender_module_run` | Layer 3 | Unguarded execution | Concurrent UI races (via `bridge.lock`) | Module bugs, cross-object contamination | Checkpoints (`pre-NN.blend`) and `blender_module_revert`. |
 | `blender_branch_run` | Layer 3 | Unguarded execution | Contamination of `model.blend` | Branch-level script bugs | Isolated branch files merged selectively with `blender_branch_apply`. |
+
+---
+
+## MCP Tool Annotations
+
+Every `blender_*` tool declares MCP-style annotations. These are not decoration: a client uses them to decide whether to prompt the user before a call, so a wrong hint is a wrong permission decision.
+
+### The four hints
+
+`pi-blender` tools declare MCP-style tool annotations (`ToolAnnotations`):
+- `readOnlyHint`: whether the tool performs only read operations without altering scene data or writing new workspace files.
+- `destructiveHint`: whether the tool mutates state destructively (e.g. overwriting/modifying `model.blend`, applying branches, or reverting checkpoints).
+- `idempotentHint`: whether repeated calls with identical arguments leave system state unchanged.
+- `openWorldHint`: local definition: `true` if the tool interacts with the live Blender process or external environment; `false` for workspace-file-only operations.
+
+#### Local definition of openWorldHint
+
+In `pi-blender`:
+- **`openWorldHint: true`**: The tool interacts with an open-ended external runtime: either the live interactive Blender process (via the live bridge socket/polling mechanism), the active viewport, or host machine processes.
+- **`openWorldHint: false`**: The tool performs workspace-file-only operations (reading or writing workspace manifests, disk-based `.blend` checkpoints, references, or critique logs headlessly).
+
+---
+
+### Disposition of blender_read_only_python
+
+`blender_read_only_python` is annotated with:
+```typescript
+annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+}
+```
+
+#### Rationale
+
+1. **Why `readOnlyHint: false`**:
+   The live bridge intercepts mutating `bpy` operations through an in-process denylist (blocking `bpy.ops`, object vector/matrix modifications, datablock removals, collections linking/unlinking, and `save_as_mainfile`). However, `blender_read_only_python` runs arbitrary Python bytecode in the Blender environment. Python scripts retain access to built-in modules (`os`, `sys`, `pathlib`, `open`, etc.) and can read or mutate the host filesystem or communicate over networks.
+   Annotating `blender_read_only_python` as `readOnlyHint: true` would falsely assure client permission gates and CI security policies that execution has no side effects. The honest disposition is `readOnlyHint: false`.
+
+2. **Why `destructiveHint: false`**:
+   Within the Blender scene graph itself, mutating `bpy` operations are refused by the bridge with `refused: true`. It does not overwrite `model.blend` or discard scene state.
+
+---
+
+### Complete tool annotations matrix
+
+| Tool Name | readOnlyHint | destructiveHint | idempotentHint | openWorldHint | Notes |
+|:---|:---:|:---:|:---:|:---:|:---|
+| `blender_workspace_init` | `false` | `false` | `true` | `true` | Initializes workspace files; auto-opens in live Blender session. |
+| `blender_execute_python` | `false` | `true` | `false` | `true` | Mutates scene in live Blender session and updates `model.blend`. |
+| `blender_session_context` | `true` | `false` | `true` | `true` | Reads live UI state (selection, mode, open blend). |
+| `blender_scene_info` | `false` | `false` | `true` | `false` | Reads saved `model.blend` on disk headlessly **and writes `scene-info.json` into the iteration directory**, so it is not read-only. `destructiveHint: false` because it never touches the blend file. |
+| `blender_save_view` | `false` | `false` | `true` | `true` | Captures viewport/camera view and writes to manifest. |
+| `blender_render` | `false` | `false` | `false` | `true` | Renders viewport or background; writes render image files. |
+| `blender_module_run` | `false` | `true` | `false` | `true` | Mutates workspace module and `model.blend` in live/headless Blender. |
+| `blender_branch_run` | `false` | `true` | `false` | `false` | Headless execution against isolated private `branch.blend`; workspace-file-only. |
+| `blender_branch_apply` | `false` | `true` | `false` | `true` | Merges staged branch into `model.blend` and reloads live UI. |
+| `blender_module_revert` | `false` | `true` | `false` | `true` | Reverts `model.blend` checkpoint and reloads live UI, discarding unsaved edits. |
+| `blender_set_mode` | `false` | `false` | `true` | `true` | Switches viewport mode (OBJECT, EDIT, SCULPT, etc.) in live UI. |
+| `blender_log_critique` | `false` | `false` | `false` | `false` | Appends critique entry to `critique.log`; workspace-file-only. |
+| `blender_rank_assets` | `true` | `false` | `true` | `false` | Reads and ranks `critique.log`; workspace-file-only. |
+| `blender_iteration_state` | `true` | `false` | `true` | `false` | Queries manifest and critique history; workspace-file-only. |
+| `blender_record_iteration_fact` | `false` | `false` | `true` | `false` | Records measured fact in manifest; workspace-file-only. |
+| `blender_export_asset` | `false` | `false` | `false` | `false` | Headless export to glb/gltf/obj/stl. Read-only w.r.t `model.blend`, but it **creates files at a caller-supplied `outputDir`**, which is an unrestricted filesystem write. |
+| `blender_add_reference` | `false` | `false` | `false` | `false` | Copies reference image to workspace directory and updates manifest. |
+| `blender_bridge_status` | `true` | `false` | `true` | `true` | Inspects live Blender bridge and process status. |
+| `blender_geometry_probe` | `false` | `false` | `true` | `true` | Non-mutating BVH measurements, but **writes `geometry-probe.json`** into the iteration directory. `destructiveHint: false` because the scene is untouched. |
+| `blender_image_probe` | `false` | `false` | `true` | `false` | Pixel measurements on a rendered PNG; **writes `image-probe.json`** into the iteration directory. |
+| `blender_read_only_python` | `false` | `false` | `false` | `true` | Guards `bpy` in live scene, but has un-sandboxed filesystem access. |
+| `blender_montage` | `false` | `false` | `false` | `true` | Multi-angle orbit/interior renders tiled to disk; interacts with live session. |
+| `blender_compare` | `false` | `false` | `false` | `true` | Side-by-side generational comparison renders; interacts with live session. |
