@@ -15,7 +15,7 @@
       "./index.ts"
     ]
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "files": [
     "index.ts",
     "config.ts",
@@ -23,7 +23,8 @@
     "manager-core.ts",
     "core/",
     "blender/",
-    "scripts/"
+    "scripts/",
+    "docs/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

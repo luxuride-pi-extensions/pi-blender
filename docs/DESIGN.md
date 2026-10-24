@@ -34,7 +34,9 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
                             symlink, typebox link, agent install, todo
                             provider check, Blender resolution report
                             (`--check` is read-only and exits 1 on any problem)
+docs/SAFETY.md              read-only guarantees, guard boundaries, recoverability model, and measurement traps
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
+docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server)
 ```
 
 ## Flatpak fixes (vs. upstream)
@@ -57,7 +59,9 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
    `instance.json` to consult, the check falls back to whether the recorded
    owner's pid is still running, so a pinned dir is a promise you keep
    yourself — two pi processes on one pinned dir will both pass it. Pin the
-   dir only when you deliberately want one shared scene.
+   dir only when you deliberately want one shared scene. See
+   [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+   per-process bridge isolation is maintained rather than hosting a shared daemon.
 4. **Nothing is written until Blender is launched** — the instance dir claim
    and the sweep of other instances' dirs hang off the *first launch*
    (`launch.ts` `ensureInstanceClaimed`), not off `session_start`. A pi
@@ -131,6 +135,16 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 | `PI_HOME` | `~/.pi` — root of the pi installation |
 | `PI_AGENT_DIR` | `$PI_HOME/agent` — where extensions and agents are installed, and the base for every other path this table resolves against |
 
+## Safety and Read-Only Guarantees
+
+For full details on boundaries, recoverability, and measurement pitfalls, see [docs/SAFETY.md](SAFETY.md). The extension establishes three guarantee layers:
+
+1. **Layer 1: Runtime Guarded Scripting (`blender_read_only_python`)**: Enforced inside the Blender process by monkeypatching mutating entry points (`bpy.ops`, `bpy.data` collection removals/purges, vector/matrix attribute assignments, saves) in `blender/readonly_guard.py`. Refusals return a structured `{ refused: true, ... }` payload. It is a **denylist of named entry points, NOT a sandbox**: the host filesystem is unguarded (`os` and `open` are untouched).
+2. **Layer 2: Read-Only by Construction (`blender_geometry_probe`, `blender_image_probe`, `blender_session_context`, `blender_scene_info`)**: Analytical tools that build BVHs, cast rays, sample PNG buffers, and read saved/live state. They never mutate geometry, write files, save `.blend` scenes, or claim iterations.
+3. **Layer 3: Unguarded Writer Paths (`blender_execute_python`, `blender_module_run`, `blender_branch_run`, `blender_branch_apply`)**: Plainly **unguarded arbitrary Python execution** without runtime prevention or sandboxing. The mitigation is **recoverability, not prevention**: work is partitioned into modular scripts, private branch copies, and automated per-run checkpoints (`pre-NN.blend`) rolled back via `blender_module_revert`.
+
+**Measurement Pitfalls**: A coincident coplanar pair's `deepestPenetration` is not a measurement to trust because ray parity signs are arbitrary on shared planes; read `coincidentSurface` instead (see [docs/SAFETY.md](SAFETY.md)).
+
 ## Usage
 
 Start pi in any project dir. The extension:
@@ -159,6 +173,9 @@ Start pi in any project dir. The extension:
   IS the manager: there is no manager subagent and no router hop, so the
   build's task list and progress are visible in the session the user typed the
   command into, rather than inside a child they would have to open to watch
+  (see [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+  manager mode, task tracking, and prompt injection reside in-session rather than
+  behind an external server boundary)
 - registers `/blender-exit`, which lifts the manager gate without ending the
   session or touching `model.blend`. Manager mode otherwise lasts until
   `/new`, which breaks a session that interleaves Blender with other work (a
@@ -184,7 +201,10 @@ Start pi in any project dir. The extension:
   silently disappearing, so the agent refreshes with `blender_session_context`
   rather than guessing
 - `blender_scene_info` accepts the extra categories `uv`, `armatures`,
-  `textures`, and `paintSettings` for paint/UV/rig planning
+  `textures`, and `paintSettings` for paint/UV/rig planning, `object_detail` for
+  a single object's transform/parenting/modifiers/mesh stats (requires
+  `targetObject`), and `missingFiles` plus `linkedLibraries` for off-line
+  file-health diagnostics of the saved blend
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
   `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, and `topology`. `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
@@ -289,7 +309,8 @@ Start pi in any project dir. The extension:
   The inside/outside sign behind it comes from ray parity, which is arbitrary
   when two surfaces lie in one plane: two coincident panels came back reporting
   a half-metre penetration while touching nowhere. Read `coincidentSurface`
-  instead, which asks the question directly
+  instead, which asks the question directly (see [docs/SAFETY.md](SAFETY.md)
+  for measurement pitfall details).
 - `topology`'s `connectedComponents` is the one topology number that catches a
   mesh split into drifting pieces, and it is there because every other count is
   blind to that case: each piece is a clean closed solid, so a head that has
@@ -336,6 +357,16 @@ Start pi in any project dir. The extension:
   dropped off that list dies quietly, and `test/shape-probe.py` did exactly
   that, failing silently for as long as it went unrun after the handlers began
   requiring the `blendPath` they were not passing
+- **Hand-off offset vectors for fixable joints**. When a critic identifies a
+  detached riser or broken join, reporting only a scalar magnitude (e.g. an 11 mm
+  gap) forces the downstream worker to re-derive the direction and guess which
+  part to move. To eliminate guessing, the `joint` probe computes a signed
+  world-space `handoff` offset vector (`{ partToMove: "HeadPipe", offset: [0, 0, -0.011] }`)
+  for fixable findings (`near-miss`, `broken-continuation`, `overlapping-but-apart`,
+  `detached`). The part to move is chosen as the smaller part by bounding
+  extent, reusing the container rule. When the two parts have near-equal extent
+  (< 1.5x ratio) or displacement is indeterminate, `ambiguous: true` is reported
+  rather than hazarding an ungrounded guess.
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
@@ -357,7 +388,9 @@ Start pi in any project dir. The extension:
   returning a copy is not enough — that would let the assignment succeed and the
   script read back its own number), and saving. A refusal comes back as
   `refused: true` naming the operation rather than as an error, because
-  "your question needed a change" is an answer
+  "your question needed a change" is an answer. See [docs/SAFETY.md](SAFETY.md)
+  for full guarantee boundaries (denylist vs sandbox, unguarded filesystem,
+  and the three safety layers).
 - `blender_montage` renders several preset orbit angles of one subject and
   tiles them into a single labelled sheet at `modules/<name>/montage.png`,
   with each panel also written separately at full size. The cameras sit on one
@@ -457,7 +490,11 @@ Start pi in any project dir. The extension:
   erroring immediately. A lock-wait timeout names the current holder, its pid,
   and how long it has been held, so it reads as "wait your turn" instead of a
   mysterious timeout. `blender_bridge_status` reports whether the UI is alive,
-  busy, and how many requests are pending
+  busy, and how many requests are pending. (See
+  [ADR 0001](adr/0001-do-not-rewrite-pi-blender-as-an-mcp-server.md) for why
+  this cross-process lock, live/headless fallback, and module iteration state
+  cannot be replaced by a remote or standalone MCP server without inventing
+  distributed locking and losing crash reclamation.)
 - **authoring parallelises, execution does not.** Workers writing separate
   `modules/<name>/script.py` files never interfere, so a multi-part build
   spawns one `blender-worker` per part in the same turn. Their *runs* all

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
+import { blenderObjectDetail } from "./object-detail.js";
 import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection } from "./types.js";
 import { runBlenderJson } from "./utils.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
@@ -22,6 +23,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 			includeArmatures: selected.has("armatures"),
 			includeTextures: selected.has("textures"),
 			includePaintSettings: selected.has("paintSettings"),
+			includeObjectDetail: selected.has("object_detail"),
 			includeMissingFiles: selected.has("missingFiles"),
 			includeLinkedLibraries: selected.has("linkedLibraries"),
 		};
@@ -42,6 +44,7 @@ function resolveSceneInfoSelection(options: SceneInfoOptions): SceneInfoSelectio
 		includeArmatures: false,
 		includeTextures: false,
 		includePaintSettings: false,
+		includeObjectDetail: false,
 		includeMissingFiles: false,
 		includeLinkedLibraries: false,
 	};
@@ -60,11 +63,13 @@ _assets_dir = payload.get("assetsDir")
 if _assets_dir and _assets_dir not in sys.path:
     sys.path.insert(0, _assets_dir)
 
-try:
-    from scene_info import extract_missing_files, extract_linked_libraries
-except ImportError:
-    extract_missing_files = None
-    extract_linked_libraries = None
+# Deliberately NOT wrapped in try/except ImportError. scene_info ships alongside
+# this file, so an ImportError means the extension is broken or assetsDir is
+# wrong -- not that the feature is unavailable. Substituting None here made every
+# caller below report totalCount: 0, i.e. "this blend file is healthy", which is
+# the single worst answer a health probe can give: it is indistinguishable from a
+# file with no missing references. Let the traceback reach the caller instead.
+from scene_info import extract_missing_files, extract_linked_libraries
 
 def maybe_vector(value):
     if value is None:
@@ -262,32 +267,10 @@ if payload.get("includeRenderSettings", True):
     }
 
 if payload.get("includeMissingFiles", False):
-    blend_path = payload.get("blendPath")
-    if extract_missing_files is not None:
-        result["missingFiles"] = extract_missing_files(blend_path)
-    else:
-        result["missingFiles"] = {
-            "images": [],
-            "libraries": [],
-            "fonts": [],
-            "sounds": [],
-            "movieClips": [],
-            "caches": [],
-            "sequences": [],
-            "totalCount": 0,
-        }
+    result["missingFiles"] = extract_missing_files(payload.get("blendPath"))
 
 if payload.get("includeLinkedLibraries", False):
-    blend_path = payload.get("blendPath")
-    if extract_linked_libraries is not None:
-        result["linkedLibraries"] = extract_linked_libraries(blend_path)
-    else:
-        result["linkedLibraries"] = {
-            "tree": [],
-            "list": [],
-            "totalCount": 0,
-            "hasIndirect": False,
-        }
+    result["linkedLibraries"] = extract_linked_libraries(payload.get("blendPath"))
 
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(result))
@@ -365,6 +348,16 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 	// was a second, redundant derivation of the same options.
 	const selection = resolveSceneInfoSelection(options);
 	const result = await getSceneInfoForSelection(options.cwd, manifest, selection, options.signal);
+	let objectDetailResult = null;
+	if (selection.includeObjectDetail && options.targetObject) {
+		objectDetailResult = await blenderObjectDetail({
+			cwd: options.cwd,
+			workspace: options.workspace,
+			objectName: options.targetObject,
+			signal: options.signal,
+		});
+	}
+
 	const sceneInfoResult: SceneInfoResult = {
 		workspacePath: manifest.workspacePath,
 		blendPath: manifest.blendPath,
@@ -384,6 +377,7 @@ export async function blenderSceneInfo(options: SceneInfoOptions): Promise<Scene
 		armatures: selection.includeArmatures ? result.armatures : [],
 		textures: selection.includeTextures ? result.textures : [],
 		paintSettings: selection.includePaintSettings ? result.paintSettings : null,
+		objectDetail: objectDetailResult,
 		missingFiles: selection.includeMissingFiles ? result.missingFiles ?? null : null,
 		linkedLibraries: selection.includeLinkedLibraries ? result.linkedLibraries ?? null : null,
 	};

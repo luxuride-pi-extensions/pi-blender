@@ -39,8 +39,20 @@ export { blenderRecordIterationFact } from "./iteration-note.js";
 export { LIVE_BRIDGE_COLD_START_TIMEOUT_MS } from "./utils.js";
 export { blenderSaveView } from "./save-view.js";
 export { blenderSceneInfo } from "./scene-info.js";
+export { blenderObjectDetail } from "./object-detail.js";
 export { blenderSessionContext, formatCompactSessionContextPrompt } from "./session-context.js";
 export { blenderSetMode } from "./set-mode.js";
+export {
+	blenderGetPythonApiDocs,
+	blenderSearchApiDocs,
+	blenderSearchManualDocs,
+} from "./doc-grounding.js";
+export type {
+	BlenderApiDocResult,
+	BlenderDocParam,
+	BlenderSearchMatch,
+	BlenderSearchResult,
+} from "./doc-grounding.js";
 export type {
 	AddReferenceOptions,
 	AddReferenceResult,
@@ -89,6 +101,12 @@ export type {
 	ModuleRunResult,
 	MontageOptions,
 	MontageResult,
+	ObjectDetailOptions,
+	ObjectDetailResult,
+	ObjectDetailTransform,
+	ObjectDetailModifier,
+	ObjectDetailMaterialSlot,
+	ObjectDetailMeshStats,
 	RenderOptions,
 	RenderResult,
 	SaveViewOptions,

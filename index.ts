@@ -62,9 +62,13 @@ import {
 	blenderRender,
 	blenderSaveView,
 	blenderSceneInfo,
+	blenderObjectDetail,
 	blenderSessionContext,
 	blenderSetMode,
 	blenderWorkspaceInit,
+	blenderGetPythonApiDocs,
+	blenderSearchApiDocs,
+	blenderSearchManualDocs,
 	describeMachineLimits,
 	ensureWorkspaceInitialized,
 	findNearestWorkspace,
@@ -235,6 +239,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// Blender inspection. Read-only: the manager may look, not author.
 	"blender_workspace_init",
 	"blender_scene_info",
+	"blender_object_detail",
 	"blender_add_reference",
 	"blender_module_revert",
 	"blender_session_context",
@@ -246,6 +251,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// asset, so the manager may record what its own probes established.
 	"blender_record_iteration_fact",
 	"blender_export_asset",
+	"blender_search_api_docs",
+	"blender_search_manual_docs",
+	"blender_get_python_api_docs",
 ]);
 
 /** Image types `read` would attach to the request, mirroring pi's own sniffing. */
@@ -272,6 +280,7 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_execute_python",
 	"blender_session_context",
 	"blender_scene_info",
+	"blender_object_detail",
 	"blender_save_view",
 	"blender_render",
 	"blender_module_run",
@@ -291,6 +300,9 @@ const LAZY_BLENDER_TOOL_NAMES = [
 	"blender_read_only_python",
 	"blender_montage",
 	"blender_compare",
+	"blender_search_api_docs",
+	"blender_search_manual_docs",
+	"blender_get_python_api_docs",
 ];
 
 /**
@@ -520,7 +532,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_session_context",
 			label: "Blender Session Context",
 			description:
-				"Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected objects, viewport state, unsaved changes, and whether another pi session holds the same blend. This is the only source of truth for present-tense Blender state — for 'what is selected', 'update it', 'render from what I'm looking at', or any claim about what Blender currently shows. `blender_scene_info` is NOT that: it reads the last SAVED blend file, so it never sees a worker's in-flight edits or a change made by hand and not saved. Call it before mutating anything.",
+				"Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected objects, viewport state, unsaved changes, and whether another pi session holds the same blend. This is the only source of truth for present-tense Blender state — for 'what is selected', 'update it', 'render from what I'm looking at', or any claim about what Blender currently shows. `blender_scene_info` is NOT that: it reads the last SAVED blend file, so it never sees a worker's in-flight edits or a change made by hand and not saved. Call it before mutating anything. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).",
 			parameters: Type.Object({
 				workspace: Type.Optional(
 					Type.String({
@@ -565,7 +577,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_scene_info",
 			label: "Blender Scene Info",
 			description:
-				'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures, paint settings) or file health (missingFiles, linkedLibraries). Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned") and for file-health diagnostics ("is this file broken", missing external asset files, direct and indirect linked library trees). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, `["cameras", "cameraSettings"]`, or `["missingFiles", "linkedLibraries"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload.',
+'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures, paint settings), single-object detail (object_detail), or file health (missingFiles, linkedLibraries). Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"), for per-object detail ("what is this object\'s transform, parent, modifiers"), and for file-health diagnostics ("is this file broken", missing external asset files, direct and indirect linked library trees). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, `["cameras", "cameraSettings"]`, `["object_detail"]`, or `["missingFiles", "linkedLibraries"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).',
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -585,15 +597,22 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 							Type.Literal("armatures"),
 							Type.Literal("textures"),
 							Type.Literal("paintSettings"),
+							Type.Literal("object_detail"),
 							Type.Literal("missingFiles"),
 							Type.Literal("linkedLibraries"),
 						]),
 						{
 							description:
-								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+								"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
 							uniqueItems: true,
 						},
 					),
+				),
+				targetObject: Type.Optional(
+					Type.String({
+						description:
+							"Optional target object name when inspecting object detail in the saved blend file.",
+					}),
 				),
 			}),
 			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
@@ -601,10 +620,61 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					workspace: params.workspace,
 					categories: params.categories,
+					targetObject: params.targetObject,
 					signal,
-					});
+				});
 
-						return {
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_object_detail",
+			label: "Blender Object Detail",
+			description:
+				'Read the workspace blend file as it was last SAVED, and return detailed inspection data for a single object: transforms (with non-uniform scale flag), modifier stack (marking viewport-disabled modifiers), material slots, mesh counts (vertices, edges, polygons/faces), parent and child relationships, and orphan/unlinked-to-scene status. Does not pull the entire scene; payload is bounded to the specified object. Reads the saved blend file headlessly, matching blender_scene_info.',
+			parameters: Type.Object({
+				workspace: Type.String({
+					description: "Explicit workspace path for the Blender task.",
+				}),
+				objectName: Type.Optional(
+					Type.String({
+						description:
+							"Name of the object in the saved blend file to inspect.",
+					}),
+				),
+				targetObject: Type.Optional(
+					Type.String({
+						description:
+							"Alias for objectName. Name of the object in the saved blend file to inspect.",
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description:
+							"Alias for objectName. Name of the object in the saved blend file to inspect.",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+				const objectName = params.objectName ?? params.targetObject ?? params.name;
+				if (!objectName) {
+					throw new Error("objectName (or targetObject, name) is required for blender_object_detail.");
+				}
+				const result = await blenderObjectDetail({
+					cwd: ctx.cwd,
+					workspace: params.workspace,
+					objectName,
+					targetObject: params.targetObject,
+					name: params.name,
+					signal,
+				});
+
+				return {
 					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
@@ -1392,7 +1462,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_geometry_probe",
 			label: "Blender Geometry Probe",
 			description:
-				"Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, a scene-wide sweep for parts that ought to meet and do not — or that share a surface and will z-fight, mesh island counts, and non-manifold/loose/duplicate geometry counts. Read-only — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight. Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. Works with no window: it then measures model.blend on disk headlessly. With a window open it measures the live session instead, including unsaved edits, and warns when the two differ.",
+				"Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, a scene-wide sweep for parts that ought to meet and do not — or that share a surface and will z-fight, mesh island counts, and non-manifold/loose/duplicate geometry counts. Read-only by construction — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight (see docs/SAFETY.md for full guarantee boundary and measurement pitfalls like coincident deepestPenetration). Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. Works with no window: it then measures model.blend on disk headlessly. With a window open it measures the live session instead, including unsaved edits, and warns when the two differ.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1539,7 +1609,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_image_probe",
 			label: "Blender Image Probe",
 			description:
-				"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, and dominant subject colours. Read-only, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it. Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
+				"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, and dominant subject colours. Read-only by construction, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it (see docs/SAFETY.md for full guarantee boundary). Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1599,7 +1669,7 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 			name: "blender_read_only_python",
 			label: "Blender Read-Only Python",
 			description:
-				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with mutating bpy operations refused by the bridge itself — bpy.ops, bpy.data and bpy.data.<collection> removal (including batch_remove and orphans_purge), linking or unlinking in the scene collection, assigning to an object or its vectors, and saving. It never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. Two honest limits: this guards bpy, NOT the filesystem, so a read-only script may still read and write files with `os` and `open` — do not use it on anything you would mind losing. And it is a denylist of named entry points rather than a sandbox, so a bpy API this tool does not know about is not refused; if a measurement needs to change the scene, use blender_execute_python or blender_module_run. Works with no window: the script then runs headlessly against model.blend. With a window open it runs against the live session instead, so it can see unsaved edits.",
+				"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with mutating bpy operations refused by the bridge itself — bpy.ops, bpy.data and bpy.data.<collection> removal (including batch_remove and orphans_purge), linking or unlinking in the scene collection, assigning to an object or its vectors, and saving. It never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. Two honest limits: this guards bpy, NOT the filesystem, so a read-only script may still read and write files with `os` and `open` — do not use it on anything you would mind losing. And it is a denylist of named entry points rather than a sandbox, so a bpy API this tool does not know about is not refused; see docs/SAFETY.md for the full guarantee boundary. If a measurement needs to change the scene, use blender_execute_python or blender_module_run. Works with no window: the script then runs headlessly against model.blend. With a window open it runs against the live session instead, so it can see unsaved edits.",
 			parameters: Type.Object({
 				workspace: Type.String({
 					description: "Explicit workspace path for the Blender task.",
@@ -1809,6 +1879,90 @@ export default function piBlenderExtension(pi: ExtensionAPI) {
 								.join("\n"),
 						},
 					],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_get_python_api_docs",
+			label: "Blender Get Python API Docs",
+			description:
+				"Look up authoritative documentation and signatures from the Blender 4.2 LTS Python API reference for a specific identifier (e.g. bpy.types.Modifier, bpy.ops.mesh.primitive_uv_sphere_add, bpy.data.objects) or list matching identifiers and submodules when ending with a wildcard * (e.g. bpy.ops.mesh.*, bpy.types.*). Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				identifier: Type.String({
+					description:
+						"The bpy identifier to look up (e.g. 'bpy.types.Modifier', 'bpy.ops.mesh.primitive_uv_sphere_add'), or a wildcard query (e.g. 'bpy.ops.mesh.*', 'bpy.types.*') to list available members.",
+				}),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderGetPythonApiDocs({
+					identifier: params.identifier,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_search_api_docs",
+			label: "Blender Search API Docs",
+			description:
+				"Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus (bpy.types, bpy.ops, bpy.data, bpy.context, bpy.props). Returns matching API signatures, descriptions, and parameter definitions. Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				query: Type.String({
+					description:
+						"Search query string to match against Blender 4.2 LTS API reference (types, operators, signatures, properties).",
+				}),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Maximum number of search results to return (default 10).",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderSearchApiDocs({
+					query: params.query,
+					limit: params.limit,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
+					details: result,
+				};
+			},
+		});
+
+		pi.registerTool({
+			defaultActive: false,
+			name: "blender_search_manual_docs",
+			label: "Blender Search Manual Docs",
+			description:
+				"Perform full-text search across curated Blender 4.2 LTS user manual excerpts covering modeling, modifiers, rigging, shading, render, and geometry nodes. Returns matching topics, explanations, and workflows. Offline and fast; does not require a running Blender instance or bridge lock.",
+			parameters: Type.Object({
+				query: Type.String({
+					description:
+						"Search query string to match against Blender 4.2 LTS user manual excerpts (modeling, modifiers, rigging, shading, render, geometry nodes).",
+				}),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Maximum number of search results to return (default 10).",
+					}),
+				),
+			}),
+			execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+				const result = await blenderSearchManualDocs({
+					query: params.query,
+					limit: params.limit,
+				});
+
+				return {
+					content: [{ type: "text", text: formatJsonResult(result) }],
 					details: result,
 				};
 			},
