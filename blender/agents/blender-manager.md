@@ -291,7 +291,11 @@ Declare the camera contract in every brief: `cameraProfile` (`prop`, `character`
 (`-Y`, `+Y`, `-X`, `+X`). The front is a declaration, not a guess; a wrong axis
 photographs a character from behind. The profile selects the shot list, and
 `frameSubject: "module"` frames a parented detail on itself instead of on the
-body the widened apply set carries.
+body the widened apply set carries. Pass `reviewSheet: true` for geometry
+review: the run renders the plan's other angles and composes one sheet, so the
+critic sees the back and the profile without a second process or a second
+image. Read the panel map it returns and tell the critic which panel failed, if
+any.
 
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 framed automatically and rendered from its own camera, judged, re-briefed and run

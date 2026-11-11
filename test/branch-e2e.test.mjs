@@ -921,6 +921,40 @@ test("a portrait frame fits a tall subject instead of cropping it", { skip }, as
 	}
 });
 
+test("a review sheet renders the plan's other angles in the same run", { skip }, async () => {
+	// One 3/4 image cannot show a collapsed back or left/right asymmetry. The
+	// sheet is composed inside the run process from panels rendered there, so it
+	// costs renders but no second Blender start, and the hero image stays where
+	// every earlier consumer expects it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "sheet", box("SheetPart", 2, 2, 2));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "sheet",
+			render: false,
+			reviewSheet: true,
+			cameraProfile: "character",
+			timeoutSeconds: 300,
+		});
+		const sheet = result.reviewSheet;
+		assert.ok(sheet, `reviewSheet: true returns the sheet it wrote: ${JSON.stringify(result)}`);
+		assert.ok(result.renderOutputPath, "a sheet implies a hero render");
+		assert.equal(sheet.panels.length, 4, "character has front, left, back and hero");
+		assert.equal(sheet.panels[0].file, result.renderOutputPath, "the hero panel is the ordinary render");
+		assert.ok(existsSync(sheet.path), `the sheet file exists: ${JSON.stringify(sheet)}`);
+		for (const panel of sheet.panels) {
+			assert.ok(existsSync(panel.file), `panel ${panel.name} exists at ${panel.file}`);
+			assert.ok(panel.cameraName, `panel ${panel.name} records its camera`);
+		}
+		assert.ok(sheet.width <= 1600 && sheet.height <= 1200, "the sheet stays inside the bounded size");
+		assert.equal(sheet.width, 2 * 640 + 3 * 8);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("re-framing follows the part when it changes", { skip }, async () => {
 	// A camera fitted once is the defect this replaced, so the test is that the
 	// SECOND run moves it. Without this the feature is "creates a camera", which

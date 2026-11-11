@@ -126,6 +126,7 @@ test("module_run names the camera options only the headless path honours", () =>
 		"cameraShots",
 		"frameSubject",
 		"cameraDistance",
+		"reviewSheet",
 		"resolution",
 		"samples",
 		"timeoutSeconds",

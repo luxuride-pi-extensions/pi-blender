@@ -111,3 +111,69 @@ def render_scene(payload):
             "percentage": int(scene.render.resolution_percentage),
         },
     }
+
+def compose_review_sheet(panels, output_path, columns=2, gutter=8):
+    """Tile rendered panels into one sheet without leaving Blender.
+
+    NumPy and `bpy.data.images` ship with Blender, so this needs no dependency
+    the extension does not already have. Panels are loaded as scene-linear
+    pixels and written back through an sRGB image, which is the round trip a
+    saved PNG takes; reading and writing the same buffer keeps the colours the
+    renders had. A panel that cannot be read is reported by name, not silently
+    replaced with a blank tile.
+    """
+    # pi-lens-ignore: ast-grep:unresolved-import-python (NumPy ships with Blender)
+    import numpy as np  # pyright: ignore[reportMissingImports]
+
+    if not panels:
+        raise RuntimeError("a review sheet needs at least one panel")
+    loaded = []
+    try:
+        for panel in panels:
+            path = panel["file"]
+            image = bpy.data.images.load(path, check_existing=False)
+            pixels = np.array(image.pixels[:], dtype=np.float32).reshape(
+                image.size[1], image.size[0], 4
+            )
+            loaded.append((panel, pixels))
+            bpy.data.images.remove(image)
+    except (OSError, RuntimeError) as error:
+        raise RuntimeError(f"could not read a review panel: {error}") from error
+
+    panel_width, panel_height = 640, 480
+    resized = []
+    for panel, pixels in loaded:
+        if pixels.shape[0] != panel_height or pixels.shape[1] != panel_width:
+            # The hero keeps the caller's resolution; the sheet has one panel
+            # size. Nearest-neighbour is enough for a review tile and avoids an
+            # image library just to resample one picture.
+            row_index = np.linspace(0, pixels.shape[0] - 1, panel_height).astype(np.int32)
+            column_index = np.linspace(0, pixels.shape[1] - 1, panel_width).astype(np.int32)
+            pixels = pixels[np.ix_(row_index, column_index)]
+        resized.append((panel, pixels))
+    loaded = resized
+    rows = (len(loaded) + columns - 1) // columns
+    sheet_width = columns * panel_width + (columns + 1) * gutter
+    sheet_height = rows * panel_height + (rows + 1) * gutter
+    sheet = np.full((sheet_height, sheet_width, 4), 0.06, dtype=np.float32)
+    sheet[:, :, 3] = 1.0
+    for index, (_panel, pixels) in enumerate(loaded):
+        column = index % columns
+        row = index // columns
+        x = gutter + column * (panel_width + gutter)
+        y_from_top = gutter + row * (panel_height + gutter)
+        y = sheet_height - y_from_top - panel_height
+        sheet[y : y + panel_height, x : x + panel_width] = pixels
+
+    image = bpy.data.images.new(
+        "pi_review_sheet", width=sheet_width, height=sheet_height, alpha=True
+    )
+    image.colorspace_settings.name = "sRGB"
+    image.pixels.foreach_set(sheet.ravel())
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    image.filepath_raw = output_path
+    image.file_format = "PNG"
+    image.save()
+    bpy.data.images.remove(image)
+    return {"path": output_path, "width": sheet_width, "height": sheet_height}
+

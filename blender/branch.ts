@@ -43,6 +43,7 @@ import type {
 	BranchCameraFraming,
 	BranchConflict,
 	ResolvedCameraPlan,
+	ReviewSheetResult,
 	BranchRunOptions,
 	BranchRunResult,
 } from "./types.js";
@@ -136,7 +137,7 @@ from module_state import (
     state_digest as compute_state_digest,
     widen_apply_objects,
 )
-from render_scene import render_scene
+from render_scene import compose_review_sheet, render_scene
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
@@ -442,6 +443,80 @@ def _frame_module_camera(module, plan):
     }
 
 
+
+
+def _render_review_sheet(plan, framing, render_request):
+    """Render the plan's remaining shots and tile them beside the hero render.
+
+    The hero image is the already-rendered picture, not a fourth render: the
+    sheet exists to show the angles one image cannot, so re-rendering the angle
+    the critic already has would spend a render on no new information. Every
+    panel shares the hero's distance and lens so a difference between panels is
+    geometry, not framing. A failed panel is named and the others still compose;
+    the branch was saved before any of this ran.
+    """
+    shots = list(plan.get("shots") or [])
+    if len(shots) < 2:
+        return {"error": "a review sheet needs at least two shots"}
+    output_path = os.path.join(os.path.dirname(render_request["outputPath"]), "review.png")
+    panel_width, panel_height = 640, 480
+    panels_dir = os.path.join(payload["runDir"], "panels")
+    os.makedirs(panels_dir, exist_ok=True)
+    center = Vector(framing["center"])
+    distance = float(framing["distance"] or 1.0)
+    ortho_scale = framing.get("orthoScale") or 1.0
+    panels = [{
+        "name": "hero",
+        "file": render_request["outputPath"],
+        "cameraName": framing["cameraName"],
+        "shot": shots[0].get("kind", "hero"),
+    }]
+    errors = []
+    for shot in shots[1:4]:
+        name = shot.get("name", "shot")
+        camera_name = f"{module_name}Review{name.title().replace('_', '')}"
+        camera_data = bpy.data.cameras.new(camera_name)
+        camera_object = bpy.data.objects.new(camera_name, camera_data)
+        bpy.context.scene.collection.objects.link(camera_object)
+        try:
+            direction = Vector(shot["direction"]).normalized()
+            camera_object.location = center + direction * distance
+            camera_object.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
+            camera_data.lens = float(shot.get("lensMm", 50.0))
+            camera_data.sensor_width = 36.0
+            if shot.get("orthographic"):
+                camera_data.type = "ORTHO"
+                camera_data.ortho_scale = ortho_scale
+            panel_path = os.path.join(panels_dir, f"{name}.png")
+            render_scene({
+                "outputPath": panel_path,
+                "cameraName": camera_name,
+                "resolution": {"x": panel_width, "y": panel_height, "percentage": 100},
+                "samples": render_request.get("samples"),
+            })
+            panels.append({
+                "name": name,
+                "file": panel_path,
+                "cameraName": camera_name,
+                "shot": shot.get("kind", name),
+            })
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+        finally:
+            bpy.data.objects.remove(camera_object, do_unlink=True)
+            bpy.data.cameras.remove(camera_data)
+    if len(panels) < 2:
+        return {"error": "; ".join(errors) or "no panel rendered"}
+    try:
+        composed = compose_review_sheet(panels, output_path)
+    except Exception as exc:
+        return {"error": f"sheet composition failed: {exc}", "panels": panels}
+    result = dict(composed)
+    result["panels"] = panels
+    if errors:
+        result["error"] = "panels failed: " + "; ".join(errors)
+    return result
+
 camera_plan = payload.get("cameraPlan") or {}
 camera_framing = _frame_module_camera(module_name, camera_plan)
 cameras = [camera_framing] if camera_framing is not None else []
@@ -523,6 +598,12 @@ if exit_code == 0 and render_request:
     except Exception as exc:
         render_error = str(exc)
 
+review_sheet = None
+if exit_code == 0 and render_result and payload.get("reviewSheet"):
+    review_sheet = _render_review_sheet(camera_plan, camera_framing, render_request)
+    if cameras:
+        bpy.context.scene.camera = bpy.data.objects.get(cameras[0]["cameraName"])
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
     "stdout": stdout_buffer.getvalue(),
@@ -539,6 +620,7 @@ print(json.dumps({
     "stateDigest": state_digest,
     "cameras": cameras,
     "cameraPlan": camera_plan_report,
+    "reviewSheet": review_sheet,
     "render": render_result,
     "renderError": render_error,
 }))
@@ -578,6 +660,8 @@ interface BranchRunPayload {
 	render: BranchRenderPayload | null;
 	/** Why the render failed, when the run itself succeeded. */
 	renderError: string | null;
+	/** The multi-panel sheet, when the run was asked for one. */
+	reviewSheet: ReviewSheetResult | null;
 }
 
 interface BranchRenderPayload {
@@ -664,7 +748,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
-	const renderRequested = options.render !== false;
+	const renderRequested = options.render !== false || options.reviewSheet === true;
 	// A saved view or a named camera is resolved here, before the run, because it
 	// belongs in the render payload. The module's own auto-framed camera is not
 	// known until the script has run, so it is chosen inside that same process
@@ -726,6 +810,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				ownedObjects: priorOwnership.objects,
 				ownedMaterials: priorOwnership.materials,
 				cameraPlan,
+				reviewSheet: options.reviewSheet === true,
 				render: renderRequested
 					? {
 							outputPath: join(moduleDir, RENDER_FILE),
@@ -810,6 +895,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		renderOutputPath,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
+		reviewSheet: payload.reviewSheet ?? undefined,
 	};
 
 	await updateManifest(
@@ -856,6 +942,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
+		reviewSheet: payload.reviewSheet ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
