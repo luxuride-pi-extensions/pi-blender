@@ -89,7 +89,10 @@ report = build_material("BrushedSteel", {
 
 1. Build the material with `build_material` (or hand-author nodes).
 2. Blueprint the scene with `apply_studio_rig(kind)` before rendering; the rig is
-   deterministic and rebuilds only its own `PI_STUDIO` lights. Pass
+   deterministic, rebuilds the `Studio` collection's rig lights (including the
+   bootstrap `StudioKey`/`StudioFill`/`StudioRim`) and scales energy, size and
+   distance with the subject, so a prop and a 60 m set get the same exposure.
+   Pass
    `film_transparent` and `world_strength` deliberately: a montage and an export
    preview want different answers, and `scene_info` reports both.
 3. Render. The same blend order is what makes two modules comparable.

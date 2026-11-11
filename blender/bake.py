@@ -276,19 +276,36 @@ def _with_emission_source(material, socket):
     return restore
 
 
+def _attach_ao(tree, node):
+    group = bpy.data.node_groups.get("glTF Material Output")
+    if group is None:
+        group = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        group.interface.new_socket(name="Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    holder = tree.nodes.get("BakedAO")
+    if holder is None:
+        holder = tree.nodes.new("ShaderNodeGroup")
+        holder.name = "BakedAO"
+        holder.node_tree = group
+        holder.location = (-620, -220)
+    tree.links.new(node.outputs["Color"], holder.inputs["Occlusion"])
+
+
 def _attach_baked(material, nodes):
     tree = material.node_tree
     for channel, node in nodes.items():
         if channel == "ao":
+            _attach_ao(tree, node)
             continue
         if channel == "normal":
-            normal_map = tree.nodes.get("Baked_NormalMap")
+            normal_map = tree.nodes.get("BakedNormalMap")
             if normal_map is None:
                 normal_map = tree.nodes.new("ShaderNodeNormalMap")
-                normal_map.name = "Baked_NormalMap"
+                normal_map.name = "BakedNormalMap"
             tree.links.new(node.outputs["Color"], normal_map.inputs["Color"])
             bsdf = _principled(material)
             if bsdf is not None:
+                for link in list(bsdf.inputs["Normal"].links):
+                    tree.links.remove(link)
                 tree.links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
             continue
         socket = CHANNEL_SOCKET.get(channel)
@@ -312,6 +329,11 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         raise ValueError(f"unknown bake channel(s) {unknown}; expected {sorted(CHANNEL_COLOR_SPACE)}")
     if target is None or target.type != "MESH":
         raise ValueError("bake_textures needs a mesh target")
+    if len(target.data.materials) > 1:
+        raise ValueError(
+            f"bake_textures bakes one material and {target.name} has {len(target.data.materials)}; "
+            "split the mesh or make the target single-material before baking"
+        )
     if not target.data.uv_layers:
         raise ValueError(
             f"bake_textures needs UVs on {target.name}: unwrap it first "
@@ -334,7 +356,7 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         material = bpy.data.materials.new(f"{target.name}_baked")
         target.data.materials.append(material)
     material.use_nodes = True
-    output_dir = os.path.abspath(output_dir or os.path.join(bpy.app.tempdir or ".", "textures"))
+    output_dir = os.path.abspath(output_dir or os.path.join(os.getcwd(), "textures"))
     try:
         os.makedirs(output_dir, exist_ok=True)
     except OSError as error:
@@ -359,7 +381,8 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
     active = bpy.context.view_layer.objects.active
     results = []
     nodes = {}
-    switched = True
+    switched = previous_engine != "CYCLES"
+    started_all = time.monotonic()
     try:
         for other in bpy.context.selected_objects:
             other.select_set(False)
@@ -375,6 +398,12 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         bake.use_pass_color = True
 
         for channel in channels:
+            if time_budget_seconds is not None and time.monotonic() - started_all > float(time_budget_seconds):
+                done = ", ".join(entry["channel"] for entry in results) or "none"
+                raise RuntimeError(
+                    f"bake exceeded its {float(time_budget_seconds):.0f}s budget after {done}; "
+                    "lower resolution, samples or channel count"
+                )
             image, path = _bake_image(target, channel, resolution, output_dir)
             node = _target_node(material, channel, image)
             nodes[channel] = node
@@ -382,7 +411,11 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
             started = time.monotonic()
             try:
                 if channel == "base_color":
-                    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"})
+                    bsdf = _principled(material)
+                    if bsdf is None:
+                        raise RuntimeError("the material has no Principled BSDF")
+                    restore = _with_emission_source(material, bsdf.inputs.get("Base Color"))
+                    bpy.ops.object.bake(type="EMIT")
                 elif channel == "roughness":
                     bpy.ops.object.bake(type="ROUGHNESS")
                 elif channel == "normal":
@@ -416,6 +449,7 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
                 "imageName": image.name,
                 "resolution": resolution,
                 "colorSpace": image.colorspace_settings.name,
+                "linked": True,
                 "elapsedSeconds": elapsed,
             })
         _attach_baked(material, nodes)
@@ -433,6 +467,7 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         for obj in selected:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = active
+        restored = scene.render.engine == previous_engine
 
     return {
         "materialName": material.name,
@@ -441,7 +476,7 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         "samples": samples,
         "uvCreated": False,
         "engineSwitched": switched,
-        "engineRestored": scene.render.engine == previous_engine,
+        "engineRestored": restored,
         "estimatedSeconds": round(estimate, 1),
         "channels": results,
     }

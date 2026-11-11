@@ -99,17 +99,22 @@ def _read_gltf_json(path):
 
 def _verify_textures(fmt, export_path, materials):
     """A GLB that silently drops its images must fail the tool, not the user."""
-    uses_images = any(
-        node.type == "TEX_IMAGE" and node.image is not None
+    image_nodes = [
+        node
         for material in materials
         if material.use_nodes and material.node_tree is not None
         for node in material.node_tree.nodes
-    )
+        if node.type == "TEX_IMAGE" and node.image is not None
+    ]
+    uses_images = any(any(output.is_linked for output in node.outputs) for node in image_nodes)
     if fmt not in {"glb", "gltf"}:
         return {"images": 0, "textures": 0, "verified": None}
+    if os.path.getsize(export_path) < 12:
+        raise RuntimeError("the exporter wrote an empty file, so no glTF JSON can be read")
     document = _read_gltf_json(export_path)
     images = document.get("images") or []
     textures = document.get("textures") or []
+    materials_out = document.get("materials") or []
     if uses_images and not images:
         raise RuntimeError(
             "the exported glTF contains no images although the material samples an "
@@ -117,13 +122,36 @@ def _verify_textures(fmt, export_path, materials):
         )
     if uses_images and not textures:
         raise RuntimeError("the exported glTF has images but no textures referencing them")
+    if images and fmt == "glb":
+        for index, image in enumerate(images):
+            if "bufferView" not in image or "uri" in image:
+                raise RuntimeError(
+                    f"the exported glb image {index} is not embedded; it has no bufferView "
+                    "and would need an external file at load time"
+                )
+    for index, texture in enumerate(textures):
+        source = texture.get("source")
+        if source is not None and (source < 0 or source >= len(images)):
+            raise RuntimeError(f"the exported glTF texture {index} points at image {source}, which does not exist")
+    if uses_images:
+        referenced = False
+        for material in materials_out:
+            pbr = material.get("pbrMetallicRoughness") or {}
+            if any(
+                key in pbr or key in material
+                for key in ("baseColorTexture", "metallicRoughnessTexture", "normalTexture", "occlusionTexture", "emissiveTexture")
+            ):
+                referenced = True
+                break
+        if not referenced:
+            raise RuntimeError("the exported glTF has textures but no material references any of them")
     if fmt == "gltf":
         base = os.path.dirname(export_path)
         for image in images:
             uri = image.get("uri")
             if uri and not os.path.exists(os.path.join(base, uri)):
                 raise RuntimeError(f"the exported glTF points at a missing image file: {uri}")
-    return {"images": len(images), "textures": len(textures), "verified": True}
+    return {"images": len(images), "textures": len(textures), "verified": True if uses_images else None}
 
 
 def handle_export(request, open_blend):

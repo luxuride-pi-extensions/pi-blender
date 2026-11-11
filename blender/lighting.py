@@ -12,7 +12,8 @@ caller decides whether the rig belongs in the deliverable.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
 
-STUDIO_COLLECTION = "PI_STUDIO"
+STUDIO_COLLECTION = "Studio"
+LEGACY_RIG_NAMES = {"StudioKey", "StudioFill", "StudioRim"}
 RIG_PROPERTY = "pi_studio_rig"
 
 # Fixed key/fill/rim geometry per rig. Values are deliberately unequal: a flat
@@ -60,6 +61,8 @@ def _neutral_world(scene, strength):
             output = world.node_tree.nodes.new("ShaderNodeOutputWorld")
             output.name = "World Output"
         world.node_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+    for link in list(background.inputs["Color"].links):
+        world.node_tree.links.remove(link)
     background.inputs["Color"].default_value = (0.05, 0.05, 0.05, 1.0)
     background.inputs["Strength"].default_value = float(strength)
     return world
@@ -79,8 +82,16 @@ def vector_difference(target, location):
 
 def _clear_rig(collection):
     for obj in list(collection.objects):
-        if obj.get(RIG_PROPERTY):
+        if obj.get(RIG_PROPERTY) or obj.name in LEGACY_RIG_NAMES:
+            data = obj.data
             bpy.data.objects.remove(obj, do_unlink=True)
+            if data is not None and data.users == 0:
+                bpy.data.lights.remove(data)
+
+
+def _subject_scale(scene):
+    dimensions = [max(obj.dimensions) for obj in scene.objects if obj.type == "MESH"]
+    return max(1.0, max(dimensions) if dimensions else 1.0)
 
 
 def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None):
@@ -102,16 +113,17 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
 
     strength = preset["world"] if world_strength is None else float(world_strength)
     _neutral_world(scene, strength)
+    scale = _subject_scale(scene)
     for spec in preset["lights"]:
         name = f"PI_{kind}_{spec['role']}"
         light_data = bpy.data.lights.new(name, type="SUN" if kind == "sun_dome" else "AREA")
-        light_data.energy = spec["energy"]
+        light_data.energy = spec["energy"] * (scale * scale if kind != "sun_dome" else 1.0)
         if kind != "sun_dome":
             light_data.shape = "DISK"
-            light_data.size = spec["size"]
+            light_data.size = spec["size"] * scale
         light_data.color = (1.0, 1.0, 1.0)
         obj = bpy.data.objects.new(name, light_data)
-        obj.location = spec["location"]
+        obj.location = tuple(component * scale for component in spec["location"])
         obj[RIG_PROPERTY] = kind
         obj["pi_studio_role"] = spec["role"]
         collection.objects.link(obj)
@@ -131,4 +143,5 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
         "worldStrength": strength,
         "viewTransform": scene.view_settings.view_transform,
         "exposure": float(scene.view_settings.exposure),
+        "subjectScale": round(scale, 4),
     }

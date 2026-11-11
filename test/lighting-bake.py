@@ -7,14 +7,14 @@ import sys
 import tempfile
 
 # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender)
+# pyright: reportMissingImports=false
 import bpy  # pyright: ignore[reportMissingImports]
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "blender"))
 
-# pi-lens-ignore: ast-grep:unresolved-import-python (local Blender modules)
-from bake import bake_textures  # noqa: E402  # pyright: ignore[reportMissingImports]
-from export_asset import handle_export  # noqa: E402  # pyright: ignore[reportMissingImports]
-from lighting import STUDIO_COLLECTION, apply_studio_rig  # noqa: E402  # pyright: ignore[reportMissingImports]
+from bake import bake_textures  # noqa: E402
+from export_asset import handle_export  # noqa: E402
+from lighting import STUDIO_COLLECTION, apply_studio_rig  # noqa: E402
 
 checks = {}
 
@@ -57,6 +57,7 @@ scene = bpy.context.scene
 rig_objects = [obj for obj in bpy.data.collections[STUDIO_COLLECTION].objects if obj.get("pi_studio_rig")]
 checks["rig is idempotent"] = first["lightCount"] == second["lightCount"] == 3 and len(rig_objects) == 3
 checks["user light survives rebuild"] = bpy.data.objects.get("UserLamp") is not None
+checks["rebuild does not leak light data-blocks"] = len([light for light in bpy.data.lights if light.name.startswith("PI_")]) == 3
 checks["rig sets view transform and exposure"] = scene.view_settings.view_transform == "Standard" and scene.view_settings.exposure == 0.0
 checks["film transparency is explicit"] = scene.render.film_transparent is False
 
@@ -72,6 +73,9 @@ nodes = material.node_tree.nodes
 bsdf = next(node for node in nodes if node.type == "BSDF_PRINCIPLED")
 checker = nodes.new("ShaderNodeTexChecker")
 checker.inputs["Scale"].default_value = 8.0
+# A fully metallic surface has no diffuse pass; baking base colour through
+# DIFFUSE would make this image uniformly black and the stddev check would fail.
+bsdf.inputs["Metallic"].default_value = 1.0
 material.node_tree.links.new(checker.outputs["Color"], bsdf.inputs["Base Color"])
 
 studio_camera(scene)
@@ -90,6 +94,7 @@ apply_studio_rig("studio")
 lit = mean_luma(scene)
 checks["rig moves mean luma in the expected direction"] = lit > dark + 0.02
 
+scene.render.engine = "BLENDER_WORKBENCH"
 output_dir = tempfile.mkdtemp(prefix="bake-review-")
 baked = bake_textures(subject, ["base_color", "roughness", "metallic", "ao", "normal"], resolution=128, samples=8, output_dir=output_dir)
 channels = {entry["channel"]: entry for entry in baked["channels"]}

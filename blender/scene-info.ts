@@ -247,14 +247,17 @@ if payload.get("includeCameraSettings", True):
         })
 
 if payload.get("includeLights", True):
-    for light in bpy.data.lights:
-        obj = next((candidate for candidate in bpy.data.objects if candidate.data == light), None)
+    for obj in bpy.data.objects:
+        if obj.type != "LIGHT" or obj.data is None:
+            continue
+        light = obj.data
         result["lights"].append({
-            "name": light.name,
+            "name": obj.name,
+            "dataName": light.name,
             "type": light.type,
             "energy": float(light.energy),
             "color": [float(channel) for channel in light.color],
-            "location": maybe_vector(obj.location) if obj is not None else None,
+            "location": maybe_vector(obj.location),
             "size": float(getattr(light, "size", 0.0)),
             "shape": str(getattr(light, "shape", "")),
             "angle": float(getattr(light, "angle", 0.0)),
