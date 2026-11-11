@@ -384,7 +384,8 @@ Start pi in any project dir. The extension:
 - `blender_image_probe` samples a rendered PNG that is already on disk and
   returns numbers rather than an image: subject bounds and coverage, an
   nx-by-ny mean-luma grid, per-row silhouette occupancy, edge sharpness, mean
-  colour and a dominant-colour palette. `background` is a required input
+  colour, a dominant-colour palette, per-channel clipped fractions and luma
+  p1/p50/p99 over the subject. `background` is a required input
   rather than an inferred one, because a wrong backdrop is read as subject and
   empties the whole measurement. It decodes PNG in-process (bit depths 1-16,
   colour types 0/2/3/4/6, all five filters) with no new dependency, and

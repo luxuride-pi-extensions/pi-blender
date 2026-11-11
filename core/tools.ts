@@ -1635,7 +1635,7 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, and dominant subject colours. Read-only by construction, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it (see docs/SAFETY.md for full guarantee boundary). Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
+	"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, dominant subject colours, clipped fractions and luma percentiles over the subject. Read-only by construction, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it (see docs/SAFETY.md for full guarantee boundary). Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",

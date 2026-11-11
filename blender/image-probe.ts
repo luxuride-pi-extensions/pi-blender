@@ -101,8 +101,30 @@ export async function blenderImageProbe(options: ImageProbeOptions): Promise<Ima
 		},
 		edgeSharpness: measureEdgeSharpness(image, subject.mask),
 		palette: dominantPalette(image, subject.mask, paletteLimit),
+		exposure: measureExposure(image, subject.mask),
 		warnings,
 	};
+
+	const { exposure } = result;
+	// A single saturated channel is a coloured highlight, not a blown one:
+	// only all three channels pinned at the same end hide material detail.
+	const clippedHigh = round(exposure.clippedHigh.all * 100, 1);
+	const clippedLow = round(exposure.clippedLow.all * 100, 1);
+	const overClipped = round((clippedHigh + clippedLow) / 100, 4);
+	const range = exposure.lumaPercentiles.p99 - exposure.lumaPercentiles.p1;
+	// A uniformly white (or black) subject is flat because it is clipped, and
+	// the clipped warning below says so. Calling that flat LIGHTING would tell
+	// a critic to relight a legitimately white object.
+	if (exposure.sampleCount > 0 && range < 0.05 && overClipped <= 0.02) {
+		warnings.push(
+			`The subject's luma spans only ${round(range, 3)} from p1 to p99. If the subject is not a single flat material, this is a flat-light render: a shadow, a highlight and a material change are all nearly the same value, so a critic cannot judge shape or material until the lighting changes.`,
+		);
+	}
+	if (exposure.sampleCount > 0 && overClipped > 0.02) {
+		warnings.push(
+			`${round(overClipped * 100, 1)}% of the ${exposure.sampleCount} sampled subject pixels are clipped (${clippedHigh}% white on all channels, ${clippedLow}% black). If the subject is not itself pure white or black, this is an exposure or lighting problem and detail there cannot be judged from this render.`,
+		);
+	}
 
 	const iteration = manifest.latestIteration > 0 ? manifest.latestIteration : 1;
 	const { iterationDir } = getIterationPaths(manifest.workspacePath, iteration);
@@ -227,6 +249,74 @@ function runsOfOccupiedRows(image: DecodedImage, mask: Uint8Array): { from: numb
 		}
 	}
 	return runs;
+}
+
+/**
+ * Exposure over the subject, on a bounded deterministic sample.
+ *
+ * Whole-image clipping fractions would count the backdrop: a white cyclorama
+ * is 100% clipped and says nothing about the subject. Sampling keeps a 4K
+ * render linear-ish while still letting the result say it sampled.
+ */
+function measureExposure(image: DecodedImage, mask: Uint8Array): {
+	sampled: boolean;
+	sampleCount: number;
+	clippedHigh: { r: number; g: number; b: number; any: number; all: number };
+	clippedLow: { r: number; g: number; b: number; any: number; all: number };
+	lumaPercentiles: { p1: number; p50: number; p99: number };
+} {
+	const subjectCount = mask.reduce((sum, value) => sum + value, 0);
+	const stride = Math.max(1, Math.floor(subjectCount / 8192));
+	let seen = 0;
+	let sampledPixels = 0;
+	let highR = 0;
+	let highG = 0;
+	let highB = 0;
+	let highAny = 0;
+	let highAll = 0;
+	let lowR = 0;
+	let lowG = 0;
+	let lowB = 0;
+	let lowAny = 0;
+	let lowAll = 0;
+	const lumas: number[] = [];
+
+	for (let index = 0; index < mask.length; index++) {
+		if (!mask[index]) continue;
+		seen++;
+		if (seen % stride !== 0) continue;
+		const base = index * 4;
+		const r = image.pixels[base] ?? 0;
+		const g = image.pixels[base + 1] ?? 0;
+		const b = image.pixels[base + 2] ?? 0;
+		sampledPixels++;
+		if (r >= 255) highR++;
+		if (g >= 255) highG++;
+		if (b >= 255) highB++;
+		if (r >= 255 || g >= 255 || b >= 255) highAny++;
+		if (r >= 255 && g >= 255 && b >= 255) highAll++;
+		if (r <= 0) lowR++;
+		if (g <= 0) lowG++;
+		if (b <= 0) lowB++;
+		if (r <= 0 || g <= 0 || b <= 0) lowAny++;
+		if (r <= 0 && g <= 0 && b <= 0) lowAll++;
+		lumas.push((LUMA_R * r + LUMA_G * g + LUMA_B * b) / 255);
+	}
+
+	lumas.sort((a, b) => a - b);
+	const at = (fraction: number): number => {
+		if (lumas.length === 0) return 0;
+		const index = Math.min(lumas.length - 1, Math.max(0, Math.round((lumas.length - 1) * fraction)));
+		return round(lumas[index] ?? 0, 4);
+	};
+	const divisor = sampledPixels > 0 ? sampledPixels : 1;
+	return {
+		sampled: stride > 1,
+		sampleCount: sampledPixels,
+		clippedHigh: { r: round(highR / divisor, 5), g: round(highG / divisor, 5), b: round(highB / divisor, 5), any: round(highAny / divisor, 5), all: round(highAll / divisor, 5) },
+		clippedLow: { r: round(lowR / divisor, 5), g: round(lowG / divisor, 5), b: round(lowB / divisor, 5), any: round(lowAny / divisor, 5), all: round(lowAll / divisor, 5) },
+		lumaPercentiles: { p1: at(0.01), p50: at(0.5), p99: at(0.99) },
+	};
 }
 
 function lumaGrid(image: DecodedImage, mask: Uint8Array, grid: { nx: number; ny: number }): (number | null)[][] {
