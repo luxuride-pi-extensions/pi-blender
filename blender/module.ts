@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
+import { collectModuleOwnership, isComparableStateDigest, previousModuleGeneration } from "./generations.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
 import type {
 	BlenderModuleRunRecord,
@@ -137,7 +138,11 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
-		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, branchResult)),
+		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+			iteration: branchResult.iteration,
+			sequence: branchResult.sequence,
+			stateDigest: branchResult.stateDigest,
+		})),
 	};
 }
 
@@ -154,26 +159,26 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
  *
  * Only a digest is compared, never a run count: two runs of an unchanged script
  * are expected to match, while two runs of a script being edited under a failing
- * iteration are not. Comparison is against the most recent PRIOR run only, and
- * it is skipped when either side lacks a digest (a pre-digest workspace) rather
- * than guessed.
+ * iteration are not. Comparison is against the most recent PRIOR APPLIED
+ * generation only, and it is skipped when either side lacks a comparable digest
+ * (a pre-digest workspace, an empty subject, or a 32-hex MD5 legacy value)
+ * rather than guessed.
  */
 async function compareWithPreviousDigest(
 	cwd: string,
 	workspace: string,
 	moduleName: string,
-	result: { iteration: number; stateDigest?: string },
+	result: { iteration: number; sequence: number; stateDigest?: string },
 ): Promise<{ stateDigest?: string; unchangedSinceLastRun?: boolean; comparedWithIteration?: number }> {
 	if (!result.stateDigest) return {};
 	const manifest = await loadWorkspaceManifest(cwd, workspace);
-	const previous = (manifest.branchRuns ?? [])
-		.filter((run) => run.module === moduleName && run.iteration < result.iteration && run.stateDigest)
-		.sort((a, b) => a.iteration - b.iteration)
-		.at(-1);
+	const previous = previousModuleGeneration(manifest, moduleName, result.sequence);
 	// No earlier digest means the comparison is simply unavailable, and saying
 	// "unchanged" about a run nothing was compared against would be a false
 	// all-clear on the one number the loop is about to trust.
-	if (!previous) return { stateDigest: result.stateDigest };
+	if (!previous || !isComparableStateDigest(previous.stateDigest)) {
+		return { stateDigest: result.stateDigest };
+	}
 	return {
 		stateDigest: result.stateDigest,
 		comparedWithIteration: previous.iteration,
@@ -185,6 +190,10 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 	const moduleName = normalizeModuleName(options.moduleName);
 
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
+	// A live-built module must keep its digest subject when it later switches to
+	// the headless path, so ownership is read from the manifest and written back
+	// with the run, exactly as the branch runner does.
+	const ownership = collectModuleOwnership(manifest, moduleName);
 	const moduleDir = getModuleDir(manifest.workspacePath, moduleName);
 	const scriptPath = getModuleScriptPath(manifest.workspacePath, moduleName);
 	if (!(await fileExists(scriptPath))) {
@@ -268,6 +277,8 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		userScriptPath: effectiveScriptPath,
 		saveBeforePath: undefined,
 		saveAfter: true,
+		ownedObjects: ownership.objects,
+		ownedMaterials: ownership.materials,
 		label: `module:${moduleName}`,
 		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
 		signal: options.signal,
@@ -317,13 +328,14 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		renderOutputPath = renderPayload.outputPath;
 	}
 
+	const stateDigest = result.stateDigest ?? undefined;
 	// Publish success: iteration counter, run history, and render output all
 	// land in one manifest write, applied to the state on disk (not this
 	// snapshot) so a concurrent render or save-view is merged, not lost.
 	await updateManifest(manifest.manifestPath, (current) => {
 		applySuccessfulRun(
 			current,
-			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode },
+			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode, ownedObjects: result.ownedObjects, ownedMaterials: result.ownedMaterials, stateDigest },
 			renderOutputPath ? { path: renderOutputPath, view: viewLabel } : null,
 		);
 	});
@@ -342,7 +354,40 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		renderOutputPath,
 		changed: result.changed,
 		executionMode: "live-session",
+		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+			iteration,
+			sequence,
+			stateDigest,
+		})),
 	};
+}
+
+/**
+ * Retire the history a revert made false.
+ *
+ * Both record kinds are generations: a live run and an applied branch run. A
+ * revert removes their content from model.blend, so leaving them behind would
+ * let the next digest comparison pick a state that is gone — and report the
+ * reverted-away content as the current baseline. Staged branch records survive:
+ * their work is still in a branch blend and can be applied after the revert.
+ */
+export function pruneRevertedGenerations(
+	current: Pick<BlenderWorkspaceManifest, "moduleRuns" | "branchRuns">,
+	target: { name: string; sequence: number } | undefined,
+): void {
+	if (!target) return;
+	// Records written before `sequence` existed use the iteration they claimed;
+	// both counters only ever go up, so treating the missing field as its
+	// iteration keeps the comparison the same instead of silently pruning or
+	// silently ignoring the record.
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => sequence(run) < target.sequence);
+	// Not scoped to the target module: the checkpoint is a whole-file restore,
+	// so every module's applied generation at or after this point is gone, not
+	// just the one being reverted.
+	current.branchRuns = (current.branchRuns ?? []).filter(
+		(run) => sequence(run) < target.sequence || run.status !== "applied",
+	);
 }
 
 /**
@@ -379,6 +424,9 @@ export function applySuccessfulRun(
 		sequence: number;
 		checkpointPath: string;
 		exitCode: number;
+		ownedObjects?: string[];
+		ownedMaterials?: string[];
+		stateDigest?: string;
 	},
 	renderOutput?: { path: string; view: string } | null,
 ): void {
@@ -393,6 +441,9 @@ export function applySuccessfulRun(
 			sequence: record.sequence,
 			exitCode: record.exitCode,
 			status: "ok",
+			ownedObjects: record.ownedObjects,
+			ownedMaterials: record.ownedMaterials,
+			stateDigest: record.stateDigest,
 		},
 	];
 	if (renderOutput) {
@@ -446,13 +497,15 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	// Guard against the destructive case: reverting module A after module B ran
 	// throws away B's work too, because they share one model.blend. Sequence
 	// order alone is not enough: a sibling that claimed a LOWER sequence can
-	// apply after this checkpoint was taken, so a run that landed after the
-	// checkpoint is "later" whatever number it claimed.
+	// apply after this checkpoint was taken, so a run that landed after it is
+	// "later" whatever number it claimed. A pre-`sequence` record still blocks:
+	// `undefined > n` is false, which would let the revert discard it silently.
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
 	const checkpointTakenAt = (await stat(checkpointPath)).mtimeMs;
 	const laterRuns = moduleRuns.filter(
 		(run) =>
 			run !== target &&
-			(run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER) || Date.parse(run.at) > checkpointTakenAt),
+			(sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER) || Date.parse(run.at) > checkpointTakenAt),
 	);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
@@ -481,9 +534,7 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.moduleRuns = target
-				? (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence)
-				: (current.moduleRuns ?? []);
+			pruneRevertedGenerations(current, target);
 		},
 		{ signal: options.signal },
 	);

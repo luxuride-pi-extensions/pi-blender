@@ -23,6 +23,13 @@ from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
 from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 
 from fingerprint import content_changed, snapshot
+from module_state import (  # noqa: E402
+    diff_snapshots,
+    owned_after,
+    owned_materials_after,
+    state_digest as compute_state_digest,
+    widen_apply_objects,
+)
 
 # Sits beside this file so a read-only run is refused in the bridge rather than
 # in the prompt that asked for it.
@@ -510,21 +517,7 @@ def handle_execute_python(request):
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     exit_code = 0
-    changed = False
     before = snapshot(bpy)
-
-    def sample_change():
-        """Record whether this execution changed the scene's content.
-
-        Sampled immediately after exec returns, and again when it raises, so a
-        mutation made before the exception still counts. Content hashes rather
-        than `bpy.data.is_dirty`: that flag is a UI-facing notion of unsaved
-        work, it reads False in background mode, and reading it after the save
-        would report the file clean precisely when the run did the most work.
-        """
-        nonlocal changed
-        if not changed and content_changed(before, snapshot(bpy)):
-            changed = True
 
     previous_cwd = os.getcwd()
     workspace_path = request.get("workspacePath")
@@ -537,21 +530,48 @@ def handle_execute_python(request):
                 code = handle.read()
             # pi-lens-ignore: ast-grep:no-compile-call, S102, eval-exec
             exec(compile(code, request["userScriptPath"], "exec"), globals_dict)
-            sample_change()
             if request.get("saveAfter", True):
                 bpy.ops.wm.save_mainfile()
         except Exception:
-            sample_change()
             exit_code = 1
             traceback.print_exc()
         finally:
             os.chdir(previous_cwd)
 
+    # The same accounting the headless branch runner reports, from the same
+    # shared module: what changed (content fingerprint, not is_dirty), what an
+    # apply would move, and what this module owns so the next run has a digest
+    # subject even after a live-built module switches to the headless path.
+    after = snapshot(bpy)
+    delta = diff_snapshots(before, after)
+    apply_objects, removed_objects = widen_apply_objects(
+        bpy,
+        delta["touchedObjects"],
+        delta["removedObjects"],
+    )
+    owned_objects = owned_after(
+        request.get("ownedObjects") or [],
+        apply_objects,
+        removed_objects,
+    )
+    owned_materials = owned_materials_after(
+        request.get("ownedMaterials") or [],
+        delta["touchedMaterials"],
+    )
+
     return {
         "stdout": stdout_buffer.getvalue(),
         "stderr": stderr_buffer.getvalue(),
         "exitCode": exit_code,
-        "changed": changed,
+        "changed": content_changed(before, after),
+        "touchedObjects": delta["touchedObjects"],
+        "touchedMaterials": delta["touchedMaterials"],
+        "addedObjects": delta["addedObjects"],
+        "removedObjects": removed_objects,
+        "applyObjects": apply_objects,
+        "ownedObjects": owned_objects,
+        "ownedMaterials": owned_materials,
+        "stateDigest": compute_state_digest(after, owned_objects, owned_materials),
     }
 
 
