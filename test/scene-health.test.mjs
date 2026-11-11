@@ -136,7 +136,7 @@ print("__PI_BLENDER_JSON_START__" + json.dumps({"ok": True}) + "__PI_BLENDER_JSO
 			cwd: root,
 			blendPath: ws.blendPath,
 			scriptSource: `
-import bpy, os, json
+import bpy, glob, os, json
 
 # 1. Image
 img = bpy.data.images.new("broken_texture", 32, 32)
@@ -154,7 +154,16 @@ if mesh_ref:
 
 # 3. Font (reassign path to nonexistent font)
 try:
-    font = bpy.data.fonts.load("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf")
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]
+    candidates += sorted(glob.glob("/usr/share/fonts/**/*.ttf", recursive=True))
+    font_path = next((path for path in candidates if os.path.exists(path)), None)
+    if font_path is None:
+        raise FileNotFoundError("no system font to build a broken font reference from")
+    font = bpy.data.fonts.load(font_path)
     font.name = "broken_font"
     font.filepath = "//fonts/missing_font.ttf"
     font.use_fake_user = True
@@ -182,7 +191,8 @@ if bpy.data.cache_files:
 # 7. Sequence strip
 bpy.context.scene.sequence_editor_create()
 se = bpy.context.scene.sequence_editor
-se.strips.new_sound("broken_audio_strip", "//sequences/missing_soundtrack.wav", 1, 1)
+strips = se.strips if hasattr(se, "strips") else se.sequences
+strips.new_sound("broken_audio_strip", "//sequences/missing_soundtrack.wav", 1, 1)
 
 bpy.ops.wm.save_mainfile()
 
