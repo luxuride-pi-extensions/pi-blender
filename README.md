@@ -6,7 +6,7 @@ vision-informed iteration, render loop) in stock pi, with fixes for a
 
 ## Tools
 
-Registered tools (`blender_*`, 33). Usage detail, per-tool notes and the
+Registered tools (`blender_*`, 35). Usage detail, per-tool notes and the
 verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Tool | What it does |

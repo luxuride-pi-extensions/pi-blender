@@ -7,7 +7,7 @@ tool-by-tool usage reference.
 ## Layout
 
 ```
-index.ts            extension entry (33 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
+index.ts            extension entry (35 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
 launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
