@@ -21,6 +21,7 @@ export interface ModuleGeneration {
 	sequence: number;
 	stateDigest?: string;
 	ownedObjects?: string[];
+	ownedMaterials?: string[];
 	/** Where the generation ran, for the iteration report. */
 	executionMode: "branch" | "live";
 }
@@ -38,6 +39,7 @@ export function collectModuleGenerations(manifest: RunManifest, moduleName: stri
 			sequence: run.sequence,
 			stateDigest: run.stateDigest,
 			ownedObjects: run.ownedObjects,
+			ownedMaterials: run.ownedMaterials,
 			executionMode: "branch",
 		});
 	}
@@ -49,6 +51,7 @@ export function collectModuleGenerations(manifest: RunManifest, moduleName: stri
 			sequence: run.sequence,
 			stateDigest: run.stateDigest,
 			ownedObjects: run.ownedObjects,
+			ownedMaterials: run.ownedMaterials,
 			executionMode: "live",
 		});
 	}
@@ -75,15 +78,33 @@ export function previousModuleGeneration(
  * ownership of earlier generations rather than restarting the digest subject at
  * empty and reporting the next unchanged run as a change.
  */
-export function collectModuleOwnership(manifest: RunManifest, moduleName: string): string[] {
+export function collectModuleOwnership(
+	manifest: RunManifest,
+	moduleName: string,
+): { objects: string[]; materials: string[] } {
 	const generations = collectModuleGenerations(manifest, moduleName);
-	for (let index = generations.length - 1; index >= 0; index -= 1) {
-		const owned = generations[index]?.ownedObjects;
-		if (owned !== undefined) return [...owned].sort();
-	}
+	const latest = (pick: (generation: ModuleGeneration) => string[] | undefined): string[] | undefined => {
+		for (let index = generations.length - 1; index >= 0; index -= 1) {
+			const owned = pick(generations[index]!);
+			if (owned !== undefined) return [...owned].sort();
+		}
+		return undefined;
+	};
+	const objects = latest((generation) => generation.ownedObjects);
+	const materials = latest((generation) => generation.ownedMaterials);
+	return {
+		objects: objects ?? union(generations, (generation) => generation.ownedObjects),
+		materials: materials ?? union(generations, (generation) => generation.ownedMaterials),
+	};
+}
+
+function union(
+	generations: ModuleGeneration[],
+	pick: (generation: ModuleGeneration) => string[] | undefined,
+): string[] {
 	const known = new Set<string>();
 	for (const generation of generations) {
-		for (const name of generation.ownedObjects ?? []) known.add(name);
+		for (const name of pick(generation) ?? []) known.add(name);
 	}
 	return [...known].sort();
 }

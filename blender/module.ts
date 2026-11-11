@@ -170,9 +170,7 @@ async function compareWithPreviousDigest(
 	moduleName: string,
 	result: { iteration: number; sequence: number; stateDigest?: string },
 ): Promise<{ stateDigest?: string; unchangedSinceLastRun?: boolean; comparedWithIteration?: number }> {
-	if (!isComparableStateDigest(result.stateDigest)) {
-		return result.stateDigest ? { stateDigest: result.stateDigest } : {};
-	}
+	if (!result.stateDigest) return {};
 	const manifest = await loadWorkspaceManifest(cwd, workspace);
 	const previous = previousModuleGeneration(manifest, moduleName, result.sequence);
 	// No earlier digest means the comparison is simply unavailable, and saying
@@ -195,7 +193,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 	// A live-built module must keep its digest subject when it later switches to
 	// the headless path, so ownership is read from the manifest and written back
 	// with the run, exactly as the branch runner does.
-	const ownedObjects = collectModuleOwnership(manifest, moduleName);
+	const ownership = collectModuleOwnership(manifest, moduleName);
 	const moduleDir = getModuleDir(manifest.workspacePath, moduleName);
 	const scriptPath = getModuleScriptPath(manifest.workspacePath, moduleName);
 	if (!(await fileExists(scriptPath))) {
@@ -279,7 +277,8 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		userScriptPath: effectiveScriptPath,
 		saveBeforePath: undefined,
 		saveAfter: true,
-		ownedObjects,
+		ownedObjects: ownership.objects,
+		ownedMaterials: ownership.materials,
 		label: `module:${moduleName}`,
 		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
 		signal: options.signal,
@@ -336,7 +335,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 	await updateManifest(manifest.manifestPath, (current) => {
 		applySuccessfulRun(
 			current,
-			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode, ownedObjects: result.ownedObjects, stateDigest },
+			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode, ownedObjects: result.ownedObjects, ownedMaterials: result.ownedMaterials, stateDigest },
 			renderOutputPath ? { path: renderOutputPath, view: viewLabel } : null,
 		);
 	});
@@ -378,8 +377,11 @@ export function pruneRevertedGenerations(
 ): void {
 	if (!target) return;
 	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence);
+	// Not scoped to the target module: the checkpoint is a whole-file restore,
+	// so every module's applied generation at or after this point is gone, not
+	// just the one being reverted.
 	current.branchRuns = (current.branchRuns ?? []).filter(
-		(run) => run.module !== target.name || run.sequence < target.sequence || run.status !== "applied",
+		(run) => run.sequence < target.sequence || run.status !== "applied",
 	);
 }
 
@@ -418,6 +420,7 @@ export function applySuccessfulRun(
 		checkpointPath: string;
 		exitCode: number;
 		ownedObjects?: string[];
+		ownedMaterials?: string[];
 		stateDigest?: string;
 	},
 	renderOutput?: { path: string; view: string } | null,
@@ -434,6 +437,7 @@ export function applySuccessfulRun(
 			exitCode: record.exitCode,
 			status: "ok",
 			ownedObjects: record.ownedObjects,
+			ownedMaterials: record.ownedMaterials,
 			stateDigest: record.stateDigest,
 		},
 	];

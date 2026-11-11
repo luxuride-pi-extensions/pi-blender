@@ -131,6 +131,8 @@ export interface BlenderModuleRunRecord {
 	 * keeps a digest subject instead of restarting from empty.
 	 */
 	ownedObjects?: string[];
+	/** Materials this module owns, for the same reason. */
+	ownedMaterials?: string[];
 	/** Content hash of the state this run left in model.blend, when it produced one. */
 	stateDigest?: string;
 }
@@ -188,6 +190,8 @@ export interface BlenderBranchRunRecord {
 	 * say what a module is responsible for.
 	 */
 	ownedObjects?: string[];
+	/** Materials this module owns after this run; carried into the next run. */
+	ownedMaterials?: string[];
 	/**
 	 * Content hash of the applied datablocks, so the next iteration can be
 	 * compared against this one without spending a render or a critic on the
@@ -244,6 +248,8 @@ export interface BranchRunResult {
 	applyObjects: string[];
 	/** Everything this module owns after this run; carried into the next run. */
 	ownedObjects: string[];
+	/** Materials this module owns after this run; carried into the next run. */
+	ownedMaterials: string[];
 	renderOutputPath: string | null;
 	status: BranchRunStatus;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */

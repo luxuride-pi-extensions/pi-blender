@@ -98,6 +98,30 @@ print(json.dumps({
 	assert.deepEqual(outcome.shrunk, ["Mug"]);
 });
 
+test("material ownership carries, so a paint module's next run still has a subject", { skip }, () => {
+	const outcome = runPython(`
+import json
+import module_state
+
+after = {"objects": {"Mug": "hash"}, "materials": {"Glaze": "gloss"}}
+owned_materials = module_state.owned_materials_after(["Glaze"], [])
+print(json.dumps({
+    "carried": owned_materials,
+    "grown": module_state.owned_materials_after(["Glaze"], ["Rim"]),
+    "untouched_run": module_state.state_digest(after, ["Mug"], owned_materials),
+    "paint_run": module_state.state_digest(after, ["Mug"], ["Glaze"]),
+}))
+`);
+
+	assert.deepEqual(outcome.carried, ["Glaze"]);
+	assert.deepEqual(outcome.grown, ["Glaze", "Rim"]);
+	assert.equal(
+		outcome.untouched_run,
+		outcome.paint_run,
+		"a run that touched no material must still hash the one the module owns",
+	);
+});
+
 test("an empty subject has no digest instead of the digest of an empty string", { skip }, () => {
 	const outcome = runPython(`
 import json

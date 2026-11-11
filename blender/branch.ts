@@ -123,6 +123,7 @@ from fingerprint import content_changed, snapshot
 from module_state import (
     diff_snapshots,
     owned_after,
+    owned_materials_after,
     state_digest as compute_state_digest,
     widen_apply_objects,
 )
@@ -133,6 +134,7 @@ iteration_path = payload["iterationPath"]
 script_path = payload["scriptPath"]
 module_name = payload["moduleName"]
 owned_objects = list(payload.get("ownedObjects") or [])
+owned_materials = list(payload.get("ownedMaterials") or [])
 
 
 before = snapshot(bpy)
@@ -180,10 +182,10 @@ touched_materials = delta["touchedMaterials"]
 # is reported in the record, rather than being discovered at apply time — a
 # widened apply set is exactly what turns into a conflict against a sibling.
 #
-# A deleted object that was only a relative of something touched is NOT counted
-# as deleted by this module: it never asked for its removal, and dropping a
-# sibling because a parent moved would be the module's apply destroying another
-# module's work. Only objects the module itself removed are applied as removals.
+# A removal is exactly a name that disappeared between the two snapshots. A
+# cascade deletion reports every object it took with it, so the apply removes
+# them together; a relative that merely MOVED is not a removal, and the apply
+# never takes one out because a parent changed.
 apply_objects, removed_objects = widen_apply_objects(
     bpy,
     touched_objects,
@@ -332,7 +334,8 @@ cameras = [camera_framing] if camera_framing is not None else []
 # a second one.
 bpy.context.view_layer.update()
 owned_objects = owned_after(owned_objects, apply_objects, removed_objects)
-state_digest = compute_state_digest(after, owned_objects, touched_materials)
+owned_materials = owned_materials_after(owned_materials, touched_materials)
+state_digest = compute_state_digest(after, owned_objects, owned_materials)
 
 # The save happens HERE, after the framing and after the apply set is settled --
 # not inside the try above. Saving earlier wrote a branch file without the camera,
@@ -358,6 +361,7 @@ print(json.dumps({
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
     "ownedObjects": sorted(owned_objects),
+    "ownedMaterials": owned_materials,
     "stateDigest": state_digest,
     "cameras": cameras,
 }))
@@ -383,8 +387,10 @@ interface BranchRunPayload {
 	 * and the apply set alone cannot say what the module is responsible for.
 	 */
 	ownedObjects: string[];
+	/** Materials this module owns after this run; carried into the next one. */
+	ownedMaterials: string[];
 	/**
-	 * Content hash over those owned objects, or null when there is no subject.
+	 * Content hash over the owned objects and materials, or null when there is no subject.
 	 */
 	stateDigest: string | null;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
@@ -446,6 +452,9 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
+	// Ownership is read from the manifest before the run, so the digest subject
+	// survives a script that changes nothing this time.
+	const priorOwnership = collectModuleOwnership(manifest, moduleName);
 	let payload: BranchRunPayload;
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
@@ -469,7 +478,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				// its part byte-for-byte applies nothing and looks identical to a script
 				// that did nothing; without a prior record the digest would have an empty
 				// subject on exactly the rebuild iterations it exists to measure.
-				ownedObjects: collectModuleOwnership(manifest, moduleName),
+				ownedObjects: priorOwnership.objects,
+				ownedMaterials: priorOwnership.materials,
 			},
 			signal: options.signal,
 			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
@@ -550,6 +560,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
+		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 		renderOutputPath,
@@ -594,6 +605,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
+		ownedMaterials: payload.ownedMaterials,
 		renderOutputPath,
 		cameras: payload.cameras,
 		stateDigest: payload.stateDigest ?? undefined,
@@ -1072,7 +1084,8 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			// An apply is a module run as far as revert is concerned: it changed
 			// model.blend, so it needs a run record with a checkpoint the revert
 			// can restore. Recorded HERE rather than at run time, because the
-			// checkpoint is the state the apply replaced and is written by the run.
+			// checkpoint is the state the run replaced, taken when the branch was
+			// copied — an apply may land later, or a sibling may land first.
 			const moduleRuns = (current.moduleRuns ?? []) as BlenderModuleRunRecord[];
 			current.moduleRuns = [
 				...moduleRuns,

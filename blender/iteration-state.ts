@@ -24,6 +24,7 @@ import type {
 
 interface RunStamp {
   iteration: number;
+  sequence: number;
   stateDigest?: string;
   executionMode: "branch" | "live";
 }
@@ -37,10 +38,14 @@ function collectRuns(manifest: BlenderWorkspaceManifest, moduleName: string): Ru
 	return collectModuleGenerations(manifest, moduleName)
 		.map((generation) => ({
 			iteration: generation.iteration,
+			sequence: generation.sequence,
 			stateDigest: generation.stateDigest,
 			executionMode: generation.executionMode,
 		}))
-		.sort((a, b) => b.iteration - a.iteration);
+		// The generations are already in sequence order. Sorting by iteration
+		// here would be a second notion of "newest" and disagree for any record
+		// whose iteration and sequence were claimed separately.
+		.sort((a, b) => b.sequence - a.sequence);
 }
 
 function latestVerdict(entries: CritiqueVerdictRecord[], moduleName: string): CritiqueVerdictRecord | undefined {

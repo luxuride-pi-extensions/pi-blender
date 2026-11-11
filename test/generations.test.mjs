@@ -16,7 +16,7 @@ const {
 	previousModuleGeneration,
 } = generations;
 
-function branchRun(sequence, status, { digest, owned } = {}) {
+function branchRun(sequence, status, { digest, owned, materials } = {}) {
 	return {
 		module: "mug",
 		iteration: sequence,
@@ -24,10 +24,11 @@ function branchRun(sequence, status, { digest, owned } = {}) {
 		status,
 		stateDigest: digest,
 		ownedObjects: owned,
+		ownedMaterials: materials,
 	};
 }
 
-function liveRun(sequence, { digest, owned, viaBranchApply, status = "ok", name = "mug" } = {}) {
+function liveRun(sequence, { digest, owned, materials, viaBranchApply, status = "ok", name = "mug" } = {}) {
 	return {
 		name,
 		iteration: sequence,
@@ -35,6 +36,7 @@ function liveRun(sequence, { digest, owned, viaBranchApply, status = "ok", name 
 		status,
 		stateDigest: digest,
 		ownedObjects: owned,
+		ownedMaterials: materials,
 		viaBranchApply,
 	};
 }
@@ -91,7 +93,7 @@ test("a live run is a generation and its ownership is carried", () => {
 	const collected = collectModuleGenerations(manifest, "mug");
 	assert.equal(collected.length, 1);
 	assert.equal(collected[0].executionMode, "live");
-	assert.deepEqual(collectModuleOwnership(manifest, "mug"), ["Arm", "Mug"]);
+	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: ["Arm", "Mug"], materials: [] });
 });
 
 test("legacy records without ownership fall back to known ownership, not empty", () => {
@@ -103,7 +105,7 @@ test("legacy records without ownership fall back to known ownership, not empty",
 		moduleRuns: [],
 	};
 
-	assert.deepEqual(collectModuleOwnership(manifest, "mug"), ["Mug"]);
+	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: ["Mug"], materials: [] });
 });
 
 test("an explicit empty ownership is a real answer, not a fallback", () => {
@@ -115,7 +117,19 @@ test("an explicit empty ownership is a real answer, not a fallback", () => {
 		moduleRuns: [],
 	};
 
-	assert.deepEqual(collectModuleOwnership(manifest, "mug"), []);
+	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: [], materials: [] });
+});
+
+test("material ownership is carried, so a paint module keeps a digest subject", () => {
+	const manifest = {
+		branchRuns: [branchRun(1, "applied", { digest: "one", owned: ["Mug"], materials: ["Glaze"] })],
+		moduleRuns: [],
+	};
+
+	assert.deepEqual(collectModuleOwnership(manifest, "mug"), {
+		objects: ["Mug"],
+		materials: ["Glaze"],
+	});
 });
 
 test("only other modules' runs are ignored", () => {

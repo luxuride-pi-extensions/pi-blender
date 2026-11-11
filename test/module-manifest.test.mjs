@@ -130,9 +130,10 @@ describe("the iteration counter only ever goes up", () => {
 	it("records the digest and ownership so the next run has a subject", () => {
 		const m = manifest();
 
-		applySuccessfulRun(m, run({ ownedObjects: ["Mug"], stateDigest: "abc" }));
+		applySuccessfulRun(m, run({ ownedObjects: ["Mug"], ownedMaterials: ["Glaze"], stateDigest: "abc" }));
 
 		assert.deepEqual(m.moduleRuns[0].ownedObjects, ["Mug"]);
+		assert.deepEqual(m.moduleRuns[0].ownedMaterials, ["Glaze"]);
 		assert.equal(m.moduleRuns[0].stateDigest, "abc");
 	});
 
@@ -148,7 +149,7 @@ describe("the iteration counter only ever goes up", () => {
 describe("a revert retires the generations it removed from model.blend", () => {
 	const branchRun = (module, sequence, status) => ({ module, sequence, status });
 
-	it("drops applied branch records at or after the target, and the matching live runs", () => {
+	it("drops every applied branch record at or after the target, and the matching live runs", () => {
 		const current = {
 			moduleRuns: [
 				{ name: "mug", sequence: 1 },
@@ -171,8 +172,8 @@ describe("a revert retires the generations it removed from model.blend", () => {
 		);
 		assert.deepEqual(
 			current.branchRuns.map((run) => `${run.module}:${run.sequence}`),
-			["mug:1", "arm:4"],
-			"the reverted-away applied record must not remain a comparison baseline",
+			["mug:1"],
+			"a whole-file restore removes every module's later work, not just the reverted module's",
 		);
 	});
 

@@ -88,7 +88,21 @@ def owned_after(prior_owned, apply_objects, removed_objects):
     return sorted(owned)
 
 
-def state_digest(after, owned_objects, touched_materials):
+def owned_materials_after(prior_owned, touched_materials):
+    """Carry material ownership forward.
+
+    The digest subject needs the same treatment as objects. A paint run that
+    appends a material owns it, and an idempotent rebuild that touches no
+    material must still hash the material it owns; deriving the subject from
+    this run's delta alone makes every paint module's digest vanish on its next
+    run and reports the run after that as a change.
+    """
+    owned = set(prior_owned or [])
+    owned |= set(touched_materials or [])
+    return sorted(owned)
+
+
+def state_digest(after, owned_objects, owned_materials):
     """Content hash of what this module owns, or None when there is no subject.
 
     A pre-digest workspace and a run with no ownership both have nothing to
@@ -109,7 +123,7 @@ def state_digest(after, owned_objects, touched_materials):
         if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
     ]
     source = [name + "=" + after["objects"].get(name, "-") for name in digest_objects]
-    for material_name in sorted(touched_materials):
+    for material_name in sorted(owned_materials):
         source.append(material_name + "=" + after["materials"].get(material_name, "-"))
     if not source:
         return None

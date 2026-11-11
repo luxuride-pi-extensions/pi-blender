@@ -26,6 +26,7 @@ from fingerprint import content_changed, snapshot
 from module_state import (  # noqa: E402
     diff_snapshots,
     owned_after,
+    owned_materials_after,
     state_digest as compute_state_digest,
     widen_apply_objects,
 )
@@ -553,6 +554,10 @@ def handle_execute_python(request):
         apply_objects,
         removed_objects,
     )
+    owned_materials = owned_materials_after(
+        request.get("ownedMaterials") or [],
+        delta["touchedMaterials"],
+    )
 
     return {
         "stdout": stdout_buffer.getvalue(),
@@ -565,7 +570,8 @@ def handle_execute_python(request):
         "removedObjects": removed_objects,
         "applyObjects": apply_objects,
         "ownedObjects": owned_objects,
-        "stateDigest": compute_state_digest(after, owned_objects, delta["touchedMaterials"]),
+        "ownedMaterials": owned_materials,
+        "stateDigest": compute_state_digest(after, owned_objects, owned_materials),
     }
 
 
@@ -825,7 +831,6 @@ def handle_switch_workspace(request):
         if target_ws is None:
             raise RuntimeError(f'No workspace found containing space type "{space_type}".')
 
-    assert target_ws is not None
     window.workspace = target_ws
 
     active_spaces = []

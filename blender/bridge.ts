@@ -418,6 +418,7 @@ export interface LiveExecutePythonResult {
 	removedObjects: string[];
 	applyObjects: string[];
 	ownedObjects: string[];
+	ownedMaterials: string[];
 	/** Null when the module owns no datablocks yet: there is no subject to hash. */
 	stateDigest: string | null;
 }
@@ -431,6 +432,7 @@ export async function requestLiveBlenderExecutePython(options: {
 	saveAfter: boolean;
 	/** Ownership from this module's latest generation, so the digest keeps its subject. */
 	ownedObjects?: string[];
+	ownedMaterials?: string[];
 	label?: string;
 	signal?: AbortSignal;
 	timeoutMs?: number;
@@ -445,6 +447,7 @@ export async function requestLiveBlenderExecutePython(options: {
 			saveBeforePath: options.saveBeforePath,
 			saveAfter: options.saveAfter,
 			ownedObjects: options.ownedObjects,
+			ownedMaterials: options.ownedMaterials,
 			label: options.label,
 		},
 		signal: options.signal,
