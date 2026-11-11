@@ -14,7 +14,7 @@ core/exec.ts        execCommand stand-in (argv spawn, no shell)
 blender/            module from packages/coding-agent/src/blender/ (+ set-mode, paint scene-info categories, module run/revert)
   live-bridge.py      file-based bridge polled inside a running Blender UI
   blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch (per-instance path)
-  skills/             /skill:blender-create, blender-edit, blender-analyze, blender-with-reference, blender-paint, blender-modules, blender-live-state
+  skills/             /skill:blender-create, blender-edit, blender-analyze, blender-with-reference, blender-paint, blender-sculpt, blender-modules, blender-live-state
   agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
                       + blender-finalizer + blender-script-runner
@@ -189,9 +189,10 @@ Start pi in any project dir. The extension:
   told about it. The prompt also caps it at one mention per session and
   forbids offering it to unblock a Blender task, since delegation — not
   writing — is how a manager does Blender work
-- loads the 7 bundled `/skill:blender-*` skills (including `blender-paint`
-  for texture paint, UV, vertex/weight paint, and bone/rig work, and
-  `blender-modules` for Manager > worker/critic multi-module orchestration)
+- loads the 8 bundled `/skill:blender-*` skills (including `blender-paint`
+  for texture paint, UV, vertex/weight paint, and bone/rig work, `blender-sculpt`
+  for deterministic stroke data and sculpt metrics, and `blender-modules` for
+  Manager > worker/critic multi-module orchestration)
 - injects the manager prompt (read from `blender/agents/blender-manager.md`) +
   a live session-state block
   (selection, viewport, mode, 1.5 s timeout) in **manager mode only**, which
