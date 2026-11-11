@@ -707,7 +707,7 @@ test("a run that changed nothing reports changed:false, even after framing", { s
 			timeoutSeconds: 300,
 		});
 		assert.equal(first.changed, true, "the first build changes content");
-		assert.ok(first.applyObjects.includes("armCam"), "framing still contributes to the apply set");
+		assert.equal(first.cameras?.[0]?.cameraName, "armCam", "framing still happens and is reported");
 
 		const repeat = await module.blenderModuleRun({
 			cwd: ws.root,
@@ -729,7 +729,13 @@ test("a material-only edit reports changed:true", { skip }, async () => {
 	// fingerprint the live bridge reports; materials are in it.
 	const ws = await makeWorkspace();
 	try {
-		writeScript(ws.workspacePath, "base", ADD_CUBE);
+		writeScript(ws.workspacePath, "base", `
+import bpy
+bpy.ops.mesh.primitive_cube_add()
+bpy.context.object.name = "Mug"
+material = bpy.data.materials.new("Glaze")
+material.use_nodes = True
+`);
 		await module.blenderModuleRun({
 			cwd: ws.root,
 			workspace: ws.workspacePath,
@@ -740,12 +746,9 @@ test("a material-only edit reports changed:true", { skip }, async () => {
 
 		writeScript(ws.workspacePath, "glaze", `
 import bpy
-obj = bpy.data.objects.get("Mug")
-material = bpy.data.materials.new("Glaze")
-material.use_nodes = True
-bsdf = material.node_tree.nodes.get("Principled BSDF")
+material = bpy.data.materials["Glaze"]
+bsdf = material.node_tree.nodes["Principled BSDF"]
 bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
-obj.data.materials.append(material)
 `);
 		const painted = await module.blenderModuleRun({
 			cwd: ws.root,
@@ -754,8 +757,10 @@ obj.data.materials.append(material)
 			render: false,
 			timeoutSeconds: 300,
 		});
-		assert.deepEqual(painted.touchedObjects, [], "a paint module moves no object");
-		assert.ok(painted.touchedMaterials.includes("Glaze"));
+		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
+		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
+		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
+		assert.deepEqual(record?.touchedMaterials, ["Glaze"], "the only change is the material's content");
 		assert.equal(painted.changed, true, "a material-only edit is still a change");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });

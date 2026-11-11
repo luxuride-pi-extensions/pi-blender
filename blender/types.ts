@@ -1343,7 +1343,7 @@ export interface ModuleRunResult {
 	exitCode: number;
 	renderOutputPath: string | null;
 	/**
-	 * True when this run changed the blend's object or material content.
+	 * True when the script changed the blend's object or material content.
 	 *
 	 * From a before/after content fingerprint, not from Blender's `is_dirty`
 	 * flag: that flag is UI-facing and stays false in background mode, so a

@@ -262,7 +262,8 @@ jobs:
             $(ls test/*.test.mjs \
                 | grep -v -e launch-guard -e watch-window \
                           -e concurrency-budget -e module-paths \
-                          -e tool-params -e windowless-tools)
+                          -e tool-params -e windowless-tools \
+                          -e headless-changed)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
