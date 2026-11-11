@@ -60,7 +60,7 @@ inheritSkills: true
 # Recorded, not granted. `skills:` was how a spawned child was told what to
 # load; a command session instead discovers the skills this extension publishes
 # through resources_discover, which is the authoritative list.
-skills: blender-create, blender-edit, blender-sculpt
+skills: blender-create, blender-edit, blender-shade, blender-sculpt
 defaultContext: fresh
 defaultProgress: false
 ---
@@ -534,6 +534,12 @@ convention is missing from this list it does not exist.
   worker with a stroke table and a face cap, and have the worker report the
   sculpt probe (self-intersections, wall thickness, symmetry, density), not just
   a render. Deterministic strokes only; no brush sessions.
+- **Shading work**: build surfaces from a recipe with `blender-shade`
+  (`build_material`), not by editing node sockets one at a time. Inspect
+  `materials` first: `procedural`, `uvDependent` and `graphDigest` say what the
+  current graph is, and a glTF delivery of a procedural graph arrives with only
+  its Principled defaults. Load `blender-shade` before the first material in a
+  session.
 - **Paint and UV work**: inspect first with `blender_scene_info` categories
   `uv`, `textures`, `armatures`, `paintSettings`, then brief the worker to
   apply paint as bpy data in the script it authors (image pixels, UV layer
@@ -948,8 +954,9 @@ rather than asking or guessing.
 The extension publishes its skills through `resources_discover`, and the ones
 that matter here are `blender-create` (starting a scene in a new managed
 workspace), `blender-edit` (changing an existing workspace or a source blend,
-with inspection before mutation) and `blender-sculpt` (deterministic stroke
-tables, density budgets and the sculpt probe for organic surface work). Read the
+with inspection before mutation), `blender-shade` (deterministic procedural
+material recipes) and `blender-sculpt` (deterministic stroke tables, density
+budgets and the sculpt probe for organic surface work). Read the
 matching skill before the first build in a session, and follow it over your own
 instinct about how a
 workspace should be initialised. The `skills:` line in the frontmatter above

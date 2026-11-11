@@ -24,6 +24,7 @@ import re
 # Provided by Blender's own runtime, not by anything installed here.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
+from shading import material_summary
 
 # Blender's operator name for each supported format, and its extension.
 EXPORT_FORMATS = {
@@ -94,7 +95,12 @@ def handle_export(request, open_blend):
     output_dir = request.get("outputDir") or os.path.dirname(
         bpy.data.filepath or os.getcwd()
     )
-    os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as error:
+        raise RuntimeError(
+            f"Cannot create the export directory {output_dir}: {error}."
+        ) from error
 
     base = os.path.splitext(os.path.basename(bpy.data.filepath or "model.blend"))[0]
     if request.get("name"):
@@ -143,10 +149,25 @@ def handle_export(request, open_blend):
             "returned successfully and wrote nothing.".format(fmt, export_path)
         )
 
+    procedural_materials = sorted(
+        material.name for material in bpy.data.materials if material_summary(material)["procedural"]
+    )
+    warnings = []
+    if procedural_materials and fmt in {"glb", "gltf"}:
+        warnings.append(
+            "glTF exports image textures, not procedural nodes. These materials "
+            "will arrive with only their Principled defaults: {}. Bake them to "
+            "images before exporting (see the bake_textures helper).".format(
+                ", ".join(procedural_materials)
+            )
+        )
+
     return {
         "format": fmt,
         "exportPath": export_path,
         "bytes": os.path.getsize(export_path),
         "meshCount": sum(1 for obj in bpy.data.objects if obj.type == "MESH"),
         "blendPath": bpy.data.filepath if bpy.data.filepath else None,
+        "proceduralMaterials": procedural_materials,
+        "warnings": warnings,
     }

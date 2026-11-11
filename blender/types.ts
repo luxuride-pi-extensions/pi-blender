@@ -1184,6 +1184,8 @@ export interface AssetExportResult {
 	bytes: number;
 	meshCount: number;
 	objects?: string[];
+	proceduralMaterials?: string[];
+	warnings?: string[];
 }
 
 /**

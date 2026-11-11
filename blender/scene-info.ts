@@ -75,6 +75,7 @@ if _assets_dir and _assets_dir not in sys.path:
 # the single worst answer a health probe can give: it is indistinguishable from a
 # file with no missing references. Let the traceback reach the caller instead.
 from scene_info import extract_missing_files, extract_linked_libraries
+from shading import material_summary
 
 def maybe_vector(value):
     if value is None:
@@ -210,10 +211,7 @@ if payload.get("includeCollections", True):
 
 if payload.get("includeMaterials", True):
     for material in bpy.data.materials:
-        result["materials"].append({
-            "name": material.name,
-            "useNodes": bool(material.use_nodes),
-        })
+        result["materials"].append(material_summary(material))
 
 if payload.get("includeCameras", True):
     for obj in bpy.data.objects:
