@@ -788,7 +788,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Apply staged branch runs into model.blend, one at a time under a lock, so concurrent module runs can be merged in a fixed order. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
+	"Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. The whole batch is pre-flighted first, merged by one headless Blender process and saved once, so concurrent module runs cannot interleave through a half-applied fan-out. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. A branch whose blend is missing from disk is reported in `missing` and does not stop the rest of the batch. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",
@@ -799,7 +799,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 	}),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Per-apply timeout in seconds.",
+			description: "Timeout for the whole apply batch in seconds.",
 			default: 300,
 		}),
 	),
