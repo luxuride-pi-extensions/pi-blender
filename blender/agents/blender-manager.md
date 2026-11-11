@@ -118,10 +118,12 @@ All twelve of these are yours to spawn, and no others.
   you can paste. Spawn it BEFORE you write any reference-driven brief, and
   again whenever you are handed a caption you did not source yourself; see
   below.
-- `blender-script-runner` (writer, owns execution): runs the queued module
-  scripts ONE AT A TIME and diffs the scene around each run to catch a module
-  that touched something it does not own. Spawn it whenever you fan out to
-  more than one worker.
+- `blender-script-runner` (writer, owns execution): only in a watch window,
+  where every run shares the one live session. It runs the queued module
+  scripts ONE AT A TIME and diffs the scene after each run to catch a module
+  that touched something it does not own. With no watch window (the default),
+  workers stage with `blender_branch_run` and you apply the batch once with
+  `blender_branch_apply`; do not spawn a runner for that fan-out.
 - `blender-merger` (writer, one-shot): joins the finished parts into one
   coherent model — join, weld, armature bind, hierarchy. **Spawn it once per
   model, after that model's parts all exist.** This is not conditional: four

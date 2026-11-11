@@ -97,10 +97,13 @@ blender_scene_info { workspace, categories: ["objects"] }
 
 Note the exact object names, their parents, and their transforms. A staged run
 does not touch `model.blend`, so a scene read after it would diff clean by
-construction. For each staged run, diff its reported `ownedObjects`,
-`applyObjects` and `removedObjects` against the entry's `owns` list instead;
-after the single `blender_branch_apply` pass, read the scene once to confirm
-what actually landed. In a watch window, where each run does merge, diff the
+construction. For each staged run, diff its reported `touchedObjects` and
+`removedObjects` against the entry's `owns` list instead. `applyObjects` is
+deliberately wider: it carries ancestors and descendants needed to apply a
+parented part, so an `applyObjects` name outside `owns` is hierarchy carry, not
+contamination, unless `touchedObjects` names it too. After the single
+`blender_branch_apply` pass, read the scene once to confirm what actually
+landed. In a watch window, where each run does merge, diff the
 scene after every run. Report any object that changed, appeared, or disappeared
 outside `owns`. This is a measurement, not a judgement call: you report what the
 diff shows, the manager decides what it means.

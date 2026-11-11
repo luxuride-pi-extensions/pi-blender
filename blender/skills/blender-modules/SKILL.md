@@ -19,7 +19,7 @@ Spawn workers and critics as the **bundled agent types**, not generic ones: `ble
 
 - **Manager** = the main session (you). You hold the user's goal, the module breakdown, each module's **brief**, and each module's **report** and **critique**. You NEVER read module source code — that is the whole point: your context stays small. You MUST spawn subagents for all work; you plan, brief, and orchestrate only. The main session ALWAYS plays the manager role for multi-part Blender work — never do the work directly.
 - **Worker** = one `blender-worker` subagent per module. It receives the brief + workspace + module name, authors/edits `modules/<name>/script.py`, and returns a report. It owns its module's code.
-- **Script runner** = one `blender-script-runner` when more than one worker is authoring at once. It runs the queued module scripts one at a time and reports contamination. Workers do NOT execute their own scripts in that case.
+- **Script runner** = one `blender-script-runner` only when a watch window is open and more than one worker is authoring at once. It runs the queued module scripts one at a time against the live session and reports contamination. With no watch window, workers stage their own branches and the manager applies the batch once.
 - **Merger** = one `blender-merger`, once, after every part exists, and only when the parts actually need joining.
 - **Critic** = a `blender-critic` subagent (fresh context) per module per iteration. It judges how the result **looks** against the brief — vision on `modules/<name>/render.png` plus the report — and returns a critique. It does not edit anything.
 
@@ -42,7 +42,7 @@ Rules:
    1. (First run only) writes `modules/<name>/script.py` in the workspace — a self-contained bpy script that is **idempotent-safe**: it should create or modify its objects by name and skip/rebuild what it owns (guard with `bpy.data.objects.get(...)`), so re-runs don't duplicate. It touches only the object names its brief says it owns.
    2. Calls `blender_branch_run {workspace, moduleName, render: true}` to stage its branch — **unless a script-runner owns execution**. Every run writes its own checkpoint at `modules/<name>/runs/NN/pre-NN.blend` **before** executing, and the run is recorded in the workspace manifest (`moduleRuns`). A failed run records nothing and does not consume an iteration.
    3. On failure: read the error, fix `script.py`, re-run (max 3 self-fix attempts). If still failing, report the failure — do not revert by yourself unless the brief says so.
-2b. **Script runner** (`blender-script-runner`, when more than one worker authored): gets the ordered queue of `{module, owns}` entries, stages each with `blender_branch_run` in order, checks each run's reported owned/applied/removed objects against its `owns` list, then merges them once with `blender_branch_apply` and reads the scene once to confirm what landed. It reports contamination rather than repairing it (the repair is usually a revert, which discards work).
+2b. **Script runner** (`blender-script-runner`, only when a watch window is open and more than one worker authored): gets the ordered queue of `{module, owns}` entries, runs each with `blender_module_run` in order against the live session, diffs the scene after each run, and reports contamination rather than repairing it. With no watch window, workers stage with `blender_branch_run` and the manager merges the batch once with `blender_branch_apply`; do not spawn a runner.
 3. **Critic subagent** (`blender-critic`, fresh context, after the worker reports success):
    1. Gets the brief + the worker's report.
    2. Opens `modules/<name>/render.png` (read tool / image) and inspects the look against the acceptance criteria. May call `blender_scene_info {categories: ["objects","uv","textures","paintSettings","armatures"]}` for facts.
@@ -98,5 +98,5 @@ When done run blender_branch_run {workspace, moduleName: "body", render: true} a
 You are a Blender script runner. You own execution for this workspace; the workers only author scripts.
 Workspace: outputs/robot
 Queue, in order: [{module: "body", owns: ["robot_body"]}, {module: "head", owns: ["robot_head"]}, {module: "arm_l", owns: ["robot_arm_l"]}]
-Record the scene with blender_scene_info {categories: ["objects"]} first, stage each module with blender_branch_run in the order given, diff each run's reported owned/applied/removed objects against its owns list, then merge them in one blender_branch_apply pass and read the scene once to confirm what landed. Report contamination, do not repair it.
+Record the scene with blender_scene_info {categories: ["objects"]} first, run each module with blender_module_run in the order given, and diff the scene after each run. Report contamination, do not repair it.
 ```

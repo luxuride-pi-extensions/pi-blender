@@ -219,11 +219,10 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_add_reference",
 	"blender_module_revert",
 	// The manager is the serialization point: workers stage with
-	// blender_branch_run, and the manager applies each report as it arrives with
-	// blender_branch_apply. Without these two the conflict-checked apply is
-	// unreachable and the fan-out falls back to one module_run per worker, where
-	// a contested pair applies last-one-wins because no two branches are ever
-	// staged at once.
+	// blender_branch_run, and the manager applies the batch once with
+	// blender_branch_apply after every staged run for the batch is in. A
+	// contested pair can only be refused while both branches are still staged,
+	// so applying per report would turn the check into last-one-wins.
 	"blender_branch_run",
 	"blender_branch_apply",
 	"blender_session_context",
