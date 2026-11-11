@@ -154,9 +154,13 @@ export async function blenderIterationState(options: {
           viewUsable: verdict.viewUsable,
           rejectReason: verdict.rejectReason,
           axes: verdict.axes ?? {},
-          blockingAxes: Object.entries(verdict.axes ?? {})
-            .filter(([, score]) => score <= 1)
-            .map(([label]) => label),
+          // An absent axes map is "not logged", not "nothing is blocking":
+          // turning it into [] would claim all six axes scored at least 2.
+          blockingAxes: verdict.axes
+            ? Object.entries(verdict.axes)
+                .filter(([, score]) => score <= 1)
+                .map(([label]) => label)
+            : undefined,
           issues: verdict.issues ?? [],
           nextAction: verdict.nextAction,
         }

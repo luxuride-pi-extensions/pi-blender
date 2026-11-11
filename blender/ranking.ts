@@ -13,8 +13,9 @@
  * and the percentile cut disagree, the briefs are wrong rather than the assets.
  *
  * The log is parsed for STRUCTURE only — headers, the score line, the axis
- * lines, the decision line. Never the prose: an `issues:` bullet may say
- * anything at all, and a ranking that read it would rank on English.
+ * lines, the decision line. The prose is captured for the iteration state,
+ * which is where a manager recovers the follow-up brief, but it is never
+ * consulted by the ranking itself: ranking on English would rank on phrasing.
  */
 
 import { readFile } from "node:fs/promises";
@@ -135,8 +136,14 @@ export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 		}
 		if (inIssues) {
 			const issue = ISSUE_LINE.exec(line);
-			if (issue?.[1]) current.issues?.push(issue[1].trim());
-			continue;
+			if (issue?.[1]) {
+				const text = issue[1].trim();
+				// The writer emits a literal "- none" for a clean critique;
+				// handing that to a manager as a concrete issue would be a lie.
+				if (text && text.toLowerCase() !== "none") current.issues?.push(text);
+				continue;
+			}
+			inIssues = false;
 		}
 		const decision = DECISION_LINE.exec(line);
 		if (decision) {

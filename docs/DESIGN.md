@@ -460,8 +460,9 @@ Start pi in any project dir. The extension:
   a loop spends three renders re-learning that the handle is the wrong
   thickness: `blender_iteration_state` derives the state from the manifest and
   `critique.log` rather than from anyone's memory, reporting the per-module
-  budget, the last run and its content digest, the last verdict and score,
-  whether the last briefed fix actually changed anything, and a waste guard
+  budget, the last run and its content digest, the last verdict with its six
+  axis scores, blocking subset, issues and next action, whether the last
+  briefed fix actually changed anything, and a waste guard
   naming the condition under which another render would tell you nothing new.
   `blender_record_iteration_fact` persists ONE measured fact per call —
   what the probe returned and which tool returned it, so the next critic

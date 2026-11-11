@@ -1265,8 +1265,12 @@ export interface IterationState {
 		rejectReason?: string;
 		/** The six axis scores as logged, keyed by their printed label. */
 		axes: Record<string, number>;
-		/** Axis labels scored 0 or 1, the ones a follow-up brief must name. */
-		blockingAxes: string[];
+		/**
+		 * Axis labels scored 0 or 1, the ones a follow-up brief must name.
+		 * Absent when the critique predates axis logging; that is not the same
+		 * as an empty list.
+		 */
+		blockingAxes?: string[];
 		/** The critic's concrete issues, line by line. */
 		issues: string[];
 		/** The smallest fix the critic asked for, verbatim. */

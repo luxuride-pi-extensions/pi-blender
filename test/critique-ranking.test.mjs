@@ -46,6 +46,38 @@ test("parses structure and ignores prose", () => {
 	assert.equal(entries[0].viewUsable, true);
 });
 
+test("captures every axis, the issue list and the next action", () => {
+	const entries = parseCritiqueLog(block("chair", { score: 11, validity: 2, decision: "Decision: present to user" }));
+	assert.deepEqual(entries[0].axes, {
+		Accuracy: 2,
+		"Geometry & Proportions": 2,
+		"Materials & Appearance": 1,
+		Completeness: 2,
+		Quality: 2,
+		"Category validity": 2,
+	});
+	assert.deepEqual(entries[0].issues, [], "the writer's '- none' is not a concrete issue");
+	assert.equal(entries[0].nextAction, "present");
+});
+
+test("keeps several issue bullets without turning the sentinel into one", () => {
+	const log = [
+		"[2026-01-01T00:00:00.000Z] iteration_01 module=chair budget 1/5",
+		"Score: 8/12",
+		"Accuracy: 2/2",
+		"View adequacy: 2/2 — fine",
+		"Issues:",
+		"- the back is too straight",
+		"- [view] the seat is clipped",
+		"Next action: curve the back",
+		"Decision: continue iterating",
+		"",
+	].join("\n");
+	const entries = parseCritiqueLog(log);
+	assert.deepEqual(entries[0].issues, ["the back is too straight", "[view] the seat is clipped"]);
+	assert.equal(entries[0].nextAction, "curve the back");
+});
+
 test("an entry whose prose says something else is still ranked on its structure", () => {
 	// The reason the parser does not read English: a next action of "present"
 	// on a reject must not become a verdict of present.
