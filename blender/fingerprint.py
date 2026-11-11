@@ -83,6 +83,45 @@ def _mesh_digest(data):
     return mesh.hexdigest()
 
 
+def _rna_state(idblock):
+    """Scalar RNA settings, sorted by identifier.
+
+    A modifier's identity is its type, and its content is every setting that can
+    change geometry. Hashing only the type made a bevel-width edit invisible.
+    """
+    parts = []
+    # Runtime identity and UI state are not content: persistent_uid is assigned
+    # per datablock, execution_time is a measurement, and show_expanded is a
+    # panel toggle. Including them made a freshly created modifier fingerprint
+    # differently on every run.
+    ignored = {"rna_type", "persistent_uid", "execution_time", "show_expanded", "is_active", "is_override_data"}
+    for prop in sorted(idblock.bl_rna.properties, key=lambda item: item.identifier):
+        if prop.identifier in ignored or prop.type in {"POINTER", "COLLECTION"}:
+            continue
+        try:
+            value = getattr(idblock, prop.identifier)
+        except (AttributeError, TypeError, RuntimeError):
+            continue
+        if isinstance(value, (bool, int, float, str)):
+            parts.append(f"{prop.identifier}={value}")
+    pointer = getattr(idblock, "object", None)
+    if pointer is not None:
+        parts.append(f"object={pointer.name}")
+    return "|".join(parts)
+
+
+def _animation_state(idblock):
+    animation = getattr(idblock, "animation_data", None)
+    action = getattr(animation, "action", None) if animation is not None else None
+    if action is None:
+        return "action="
+    parts = [f"action={action.name}", f"slot={getattr(animation, 'action_slot', None)}"]
+    for curve in sorted(action.fcurves, key=lambda item: (item.data_path, item.array_index)):
+        points = ";".join(f"{point.co[0]:.3f}:{point.co[1]:.6f}" for point in curve.keyframe_points)
+        parts.append(f"{curve.data_path}[{curve.array_index}]={points}")
+    return "|".join(parts)
+
+
 def fingerprint_object(obj):
     """A content hash of one object.
 
@@ -93,8 +132,9 @@ def fingerprint_object(obj):
     parts = [obj.type]
     parts.append(obj.parent.name if obj.parent is not None else "")
     parts.append("|".join(f"{value:.6f}" for row in obj.matrix_world for value in row))
-    parts.append(",".join(mod.type for mod in obj.modifiers))
-    parts.append(str(len(obj.constraints)))
+    parts.append("|".join(f"{mod.type}:{_rna_state(mod)}" for mod in obj.modifiers))
+    parts.append("|".join(f"{cons.type}:{_rna_state(cons)}" for cons in obj.constraints))
+    parts.append("anim=" + _animation_state(obj))
     parts.append(";".join(f"{group.index:.6f}" for group in obj.vertex_groups))
     parts.append("weights=" + _vertex_groups(obj))
     parts.append("pose=" + _pose(obj))
@@ -105,6 +145,11 @@ def fingerprint_object(obj):
             parts.append(f"verts={len(data.vertices)}")
             parts.append(f"polys={len(data.polygons)}")
             parts.append("mesh=" + _mesh_digest(data))
+            shape_keys = getattr(data, "shape_keys", None)
+            if shape_keys is not None:
+                keys = getattr(shape_keys, "key_blocks", [])
+                parts.append("shape=" + "|".join(f"{key.name}:{key.value:.6f}" for key in keys))
+                parts.append("shapeAnim=" + _animation_state(shape_keys))
         except (AttributeError, TypeError, RuntimeError):
             pass
 

@@ -125,6 +125,10 @@ export interface BlenderRenderOutput {
 	createdAt: string;
 	/** Set when the render came from blender_module_run rather than blender_render. */
 	module?: string;
+	/** Iteration whose picture this entry reuses, when nothing was rendered. */
+	reusedFrom?: number;
+	/** Engine that produced the bytes, so a reused entry does not report none. */
+	resolvedEngine?: string;
 }
 
 /**
@@ -200,6 +204,8 @@ export interface BlenderBranchRunRecord {
 	 * touched nothing and drop its work at apply time.
 	 */
 	touchedMaterials: string[];
+	/** Images whose pixels changed, for materials this run touched. */
+	applyImages?: string[];
 	addedObjects: string[];
 	removedObjects: string[];
 	/** Everything the apply brings back: touched plus required relatives. */
@@ -230,6 +236,8 @@ export interface BlenderBranchRunRecord {
 	renderKey?: string;
 	/** True when this run reused a previous generation's render. */
 	reused?: boolean;
+	/** The engine the picture was rendered with, carried through a reuse. */
+	resolvedEngine?: string;
 	/** Framing this run solved for the module's camera. Empty when it produced no mesh. */
 	cameras?: BranchCameraFraming[];
 	/** The resolved plan this run's framing came from. */

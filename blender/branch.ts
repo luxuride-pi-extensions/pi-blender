@@ -186,6 +186,20 @@ changed = content_changed(before, after)
 
 touched_objects = delta["touchedObjects"]
 touched_materials = delta["touchedMaterials"]
+# Images are content too: a paint module can change only pixels. Only images a
+# touched material actually references are merged, so an unrelated scratch image
+# does not travel with the branch.
+apply_images = set()
+for material_name in touched_materials:
+    material = bpy.data.materials.get(material_name)
+    tree = getattr(material, "node_tree", None) if material is not None else None
+    if tree is None:
+        continue
+    for node in tree.nodes:
+        image = getattr(node, "image", None)
+        if image is not None and image.name in set(delta["touchedImages"]):
+            apply_images.add(image.name)
+apply_images = sorted(apply_images)
 
 # The APPLY set is wider than the touched set, because a datablock that travels
 # alone is invalid: a parented object without its parent is not a usable object,
@@ -641,6 +655,7 @@ print(json.dumps({
     "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
+    "applyImages": apply_images,
     "addedObjects": delta["addedObjects"],
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
@@ -665,6 +680,7 @@ interface BranchRunPayload {
 	changed: boolean;
 	touchedObjects: string[];
 	touchedMaterials: string[];
+	applyImages: string[];
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
@@ -964,6 +980,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		at: nowIso(),
 		touchedObjects: payload.touchedObjects,
 		touchedMaterials: payload.touchedMaterials,
+		applyImages: payload.applyImages,
 		addedObjects: payload.addedObjects,
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
@@ -975,6 +992,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		changed: payload.changed,
 		reused: renderSkipped,
 		renderKey,
+		resolvedEngine: payload.render?.resolvedEngine ?? (renderSkipped ? previousRenderRun?.resolvedEngine : undefined),
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
 		reviewSheet,
@@ -989,8 +1007,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 					path: renderOutputPath,
 					view: viewLabel,
 					iteration,
-					createdAt: nowIso(),
+					createdAt: renderSkipped && previousRenderRun?.appliedAt ? previousRenderRun.appliedAt : nowIso(),
 					module: moduleName,
+					reusedFrom: renderSkipped ? previousRenderRun?.iteration : undefined,
+					resolvedEngine: renderSkipped ? previousRenderRun?.resolvedEngine : payload.render?.resolvedEngine,
 				});
 			}
 		},
@@ -1159,8 +1179,10 @@ def probe(branch):
         with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
             object_index = {name: index for index, name in enumerate(data_from.objects)}
             material_index = {name: index for index, name in enumerate(data_from.materials)}
+            image_index = {name: index for index, name in enumerate(data_from.images)}
             missing.extend(name for name in branch["applyObjects"] if name not in object_index)
             missing.extend(name for name in branch["applyMaterials"] if name not in material_index)
+            missing.extend(name for name in branch.get("applyImages") or [] if name not in image_index)
     except Exception as exc:
         # The pre-flight check runs without the apply lock, so a branch can be
         # replaced or truncated between that check and this load. Report it as a
@@ -1172,6 +1194,7 @@ def probe(branch):
 def apply_branch(branch):
     apply_objects = branch["applyObjects"]
     apply_materials = branch["applyMaterials"]
+    apply_images = branch.get("applyImages") or []
     remove_objects = branch["removeObjects"]
 
     # Materials first: an object removed below may be the last user of a material
@@ -1180,6 +1203,10 @@ def apply_branch(branch):
         existing = bpy.data.materials.get(name)
         if existing is not None and existing.users == 0:
             bpy.data.materials.remove(existing)
+    for name in apply_images:
+        existing = bpy.data.images.get(name)
+        if existing is not None and existing.users == 0:
+            bpy.data.images.remove(existing)
 
     replaced = []
     removed_existing = []
@@ -1198,8 +1225,10 @@ def apply_branch(branch):
     with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
         object_index = {name: index for index, name in enumerate(data_from.objects)}
         material_index = {name: index for index, name in enumerate(data_from.materials)}
+        image_index = {name: index for index, name in enumerate(data_from.images)}
         data_to.objects = [data_from.objects[object_index[n]] for n in apply_objects]
         data_to.materials = [data_from.materials[material_index[m]] for m in apply_materials]
+        data_to.images = [data_from.images[image_index[n]] for n in apply_images]
 
     # Link every appended object into the scene. Without this the append is
     # undone by the save below, silently: Blender only writes datablocks that
@@ -1215,6 +1244,7 @@ def apply_branch(branch):
         "removedExisting": removed_existing,
         "appended": sorted(obj.name for obj in bpy.data.objects if obj.name in set(apply_objects)),
         "appendedMaterials": sorted(m.name for m in bpy.data.materials if m.name in set(apply_materials)),
+        "appendedImages": sorted(i.name for i in bpy.data.images if i.name in set(apply_images)),
     }
 
 
@@ -1276,6 +1306,7 @@ interface BranchApplyOutcome {
 	removedExisting: string[];
 	appended: string[];
 	appendedMaterials: string[];
+	appendedImages?: string[];
 	missing: string[];
 }
 
@@ -1461,6 +1492,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 						branchPath: record.branchPath,
 						applyObjects: record.applyObjects,
 						applyMaterials: record.touchedMaterials,
+						applyImages: record.applyImages ?? [],
 						removeObjects: record.removedObjects,
 					})),
 				},

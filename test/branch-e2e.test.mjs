@@ -1365,6 +1365,30 @@ test("an unchanged rebuild reuses the picture instead of rendering it", { skip }
 	assert.deepEqual(readFileSync(second.renderOutputPath), before);
 });
 
+test("a modifier setting is content, not a type name", { skip }, async () => {
+	const ws = await makeWorkspace();
+	const source = (width) => `
+import bpy
+obj = bpy.data.objects.get("BevelPart")
+if obj is None:
+    bpy.ops.mesh.primitive_cube_add(size=2.0)
+    obj = bpy.context.object
+    obj.name = "BevelPart"
+modifier = obj.modifiers.get("Bevel") or obj.modifiers.new("Bevel", "BEVEL")
+modifier.width = ${width}
+`;
+	writeScript(ws.workspacePath, "bevel", source("0.1"));
+	const first = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["bevel"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "bevel", source("0.1"));
+	const repeat = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(repeat.changed, false);
+	writeScript(ws.workspacePath, "bevel", source("0.3"));
+	const resized = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(resized.changed, true);
+});
+
 test("a changed picture option forces a render even when the content did not change", { skip }, async () => {
 	const ws = await makeWorkspace();
 	writeScript(ws.workspacePath, "static", replaceBox("StaticPart", 2, 2, 2));
