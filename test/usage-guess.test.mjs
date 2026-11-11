@@ -206,6 +206,7 @@ test("usage_guess returns category score, certainty, and named contributing sign
 		scriptSource: `
 import bpy, json
 mat = bpy.data.materials.new("CustomProceduralShader")
+mat.use_nodes = True
 mat.use_fake_user = True
 node_tree = getattr(mat, "node_tree", None)
 if node_tree:
