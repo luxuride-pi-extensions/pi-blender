@@ -458,7 +458,7 @@ interface BranchRenderPayload {
 	outputPath: string;
 	cameraName: string | null;
 	resolvedEngine: string;
-	requestedEngine: string | null;
+	requestedEngine: string | string[] | null;
 	resolution: { x: number; y: number; percentage: number };
 }
 
@@ -579,6 +579,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		// UNLESS the run script marked it saved before rendering. Then the build is
 		// real, and only the picture failed: keep it so the caller can apply it.
 		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
+		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
 		if (!branchSaved) {
 			await rm(branchPath, { force: true }).catch(() => undefined);
 		}

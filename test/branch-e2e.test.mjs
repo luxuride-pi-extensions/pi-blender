@@ -508,40 +508,36 @@ test("a branch render and a background render resolve the same engine", { skip }
 		assert.equal(
 			background.resolvedEngine,
 			staged.resolvedEngine,
-			"the branch render and blender_render must not pick different engines for the same scene",
+			"the branch render and blender_render must not pick different engines",
 		);
 
 		// A build without Cycles cannot satisfy the request and says so; the
 		// equality above still covers the shared code on that build.
-		let cycles;
 		try {
-			cycles = await render.blenderRender({
+			const cycles = await render.blenderRender({
 				cwd: ws.root,
 				workspace: ws.workspacePath,
 				renderMethod: "background",
 				renderEngine: "cycles",
 				outputName: "cycles.png",
 			});
+			const branchCycles = await branch.blenderBranchRun({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				moduleName: "engine",
+				render: true,
+				renderEngine: "cycles",
+				timeoutSeconds: 300,
+			});
+			assert.equal(cycles.resolvedEngine, "CYCLES", "a requested engine must be used, not dropped into the probe");
+			assert.equal(
+				branchCycles.resolvedEngine,
+				cycles.resolvedEngine,
+				"a module render must be able to request an engine too",
+			);
 		} catch (error) {
 			if (!/No usable render engine/.test(String(error))) throw error;
 		}
-		if (cycles) {
-			assert.equal(cycles.resolvedEngine, "CYCLES", "a requested engine must be used, not dropped into the probe");
-		}
-
-		const branchCycles = await branch.blenderBranchRun({
-			cwd: ws.root,
-			workspace: ws.workspacePath,
-			moduleName: "engine",
-			render: true,
-			renderEngine: "cycles",
-			timeoutSeconds: 300,
-		});
-		assert.equal(
-			branchCycles.resolvedEngine,
-			cycles?.resolvedEngine ?? "CYCLES",
-			"a module render must be able to request an engine too",
-		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
