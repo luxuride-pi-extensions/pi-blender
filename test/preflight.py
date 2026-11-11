@@ -73,6 +73,28 @@ def main():
     )
 
     reset()
+    first = cube("First")
+    second = cube("Second", location=(2.0, 0, 0))
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.context.view_layer.objects.active = first
+    bpy.ops.object.join()
+    verdict = validate(bpy, [first.name], profile="print")
+    checks["a joined pair of touching shells is not a fold"] = (
+        verdict["checks"]["selfIntersections"]["value"]["pairs"] == 0
+    )
+
+    reset()
+    first = cube("First")
+    second = cube("Second", location=(0.6, 0, 0))
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.context.view_layer.objects.active = first
+    bpy.ops.object.join()
+    verdict = validate(bpy, [first.name], profile="print")
+    checks["a joined interpenetration is a fold"] = (
+        verdict["checks"]["selfIntersections"]["value"]["pairs"] > 0
+    )
+
+    reset()
     obj = cube()
     obj.scale = (0.5, 0.5, 0.5)
     verdict = validate(bpy, [obj.name], profile="prop")

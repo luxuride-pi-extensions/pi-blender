@@ -145,15 +145,12 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
     triangles = []
     owners = []
     corners_world = []
-    trees = []
-    extents = []
     for ordinal, obj in enumerate(meshes):
         mesh = _evaluated(obj, depsgraph)
         try:
             offset = len(vertices)
             matrix = obj.matrix_world
             vertices.extend(matrix @ vertex.co for vertex in mesh.vertices)
-            local_triangles = []
             for polygon in mesh.polygons:
                 corners = [offset + index for index in polygon.vertices]
                 for index in range(1, len(corners) - 1):
@@ -161,14 +158,48 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
                     triangles.append(triangle)
                     owners.append((ordinal, polygon.index))
                     corners_world.append(tuple(vertices[corner].copy() for corner in triangle))
-                    local_triangles.append(triangle)
-            if local_triangles:
-                trees.append(BVHTree.FromPolygons(vertices, local_triangles, all_triangles=True, epsilon=1e-6))
-                extents.append(max((vertex.length for vertex in vertices[offset:]), default=1.0) or 1.0)
         finally:
             obj.evaluated_get(depsgraph).to_mesh_clear()
     if not triangles:
         return {"pairs": 0, "adjacentPairs": 0}, None
+
+    # Connectivity, not object identity, is what distinguishes a fold from two
+    # shells that merely touch. A joined model is one object with several shells;
+    # a blanket "same object" rule counted every abutting face pair as a fold.
+    parent = list(range(len(triangles)))
+
+    def root(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(first, second):
+        first_root, second_root = root(first), root(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    first_triangle_at_vertex = {}
+    for index, triangle in enumerate(triangles):
+        for vertex in triangle:
+            seen = first_triangle_at_vertex.get(vertex)
+            if seen is None:
+                first_triangle_at_vertex[vertex] = index
+            else:
+                union(seen, index)
+    components = {}
+    for index in range(len(triangles)):
+        components.setdefault(root(index), []).append(index)
+    component_tree = {}
+    component_extent = {}
+    for component, indices in components.items():
+        component_tree[component] = BVHTree.FromPolygons(
+            vertices, [triangles[index] for index in indices], all_triangles=True, epsilon=1e-6
+        )
+        component_extent[component] = max(
+            (vertex.length for index in indices for vertex in corners_world[index]), default=1.0
+        ) or 1.0
+
     tree = BVHTree.FromPolygons(vertices, triangles, all_triangles=True, epsilon=1e-6)
     pairs = 0
     adjacent_checked = 0
@@ -199,12 +230,10 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
             return False
         normal.normalize()
         centre = (first + second + third) / 3.0
-        # Offset to either side: a coincident duplicate's centroid lies exactly
-        # on the other surface, so testing the centre alone would report zero.
-        epsilon = max(other_extent * 1e-4, 1e-6)
         # Only the side the triangle's own solid occupies. Testing +normal as
         # well turns two solids that merely share a face into an interpenetration,
         # because one solid's outside is the other's inside.
+        epsilon = max(other_extent * 1e-4, 1e-6)
         if inside(other_tree, centre - normal * epsilon, other_extent):
             return True
         return any(inside(other_tree, point - normal * epsilon, other_extent) for point in triangle)
@@ -213,19 +242,18 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
         if first >= second:
             continue
         adjacent_checked += 1
-        owner_first = owners[first]
-        owner_second = owners[second]
         if set(triangles[first]) & set(triangles[second]):
             continue
-        if owner_first == owner_second:
-            # Different faces of one mesh: a non-adjacent pair is a fold.
+        first_component, second_component = root(first), root(second)
+        if first_component == second_component:
+            # A non-adjacent pair inside one shell is a fold.
             pairs += 1
             continue
         tested += 1
         if tested > 50000:
             break
-        if penetrates(corners_world[first], trees[owner_second[0]], extents[owner_second[0]]) or penetrates(
-            corners_world[second], trees[owner_first[0]], extents[owner_first[0]]
+        if penetrates(corners_world[first], component_tree[second_component], component_extent[second_component]) or penetrates(
+            corners_world[second], component_tree[first_component], component_extent[first_component]
         ):
             pairs += 1
     return {"pairs": pairs, "adjacentPairs": adjacent_checked, "testedPairs": tested}, None
