@@ -28,6 +28,7 @@ import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
+import { mergeCameraPlan } from "./camera-plan.js";
 import { collectModuleOwnership } from "./generations.js";
 import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
@@ -41,6 +42,7 @@ import type {
 	BranchApplyResult,
 	BranchCameraFraming,
 	BranchConflict,
+	ResolvedCameraPlan,
 	BranchRunOptions,
 	BranchRunResult,
 } from "./types.js";
@@ -247,59 +249,177 @@ def _mesh_world_bounds(names):
     )
 
 
-def frame_module_camera(module):
-    """Point <module>Cam at this module's own extent. Returns a report, or None."""
-    camera_name = module + CAMERA_SUFFIX
+def _frame_subjects(plan):
+    """The meshes this plan should frame.
+
+    "module" deliberately does NOT use the widened apply set: a detail parented
+    to a body would otherwise be photographed at whole-body scale, and a crop
+    that hides the detail is the reason the run existed. The touched set is the
+    module's own work for this iteration; an idempotent rebuild touches the
+    same names, and an empty touched set falls back to the apply set.
+    """
+    source = touched_objects if plan.get("frameSubject") == "module" else apply_objects
     subjects = sorted(
-        name for name in apply_objects
+        name for name in source
         if not name.endswith(CAMERA_SUFFIX)
+        and not name.endswith(CAMERA_SUFFIX + "Target")
         and bpy.data.objects.get(name) is not None
         and bpy.data.objects[name].type == "MESH"
     )
+    if not subjects and plan.get("frameSubject") == "module":
+        subjects = sorted(
+            name for name in apply_objects
+            if not name.endswith(CAMERA_SUFFIX)
+            and not name.endswith(CAMERA_SUFFIX + "Target")
+            and bpy.data.objects.get(name) is not None
+            and bpy.data.objects[name].type == "MESH"
+        )
+    return subjects
+
+
+def _subject_coverage(camera, subjects):
+    """NDC extents of every subject bbox corner, or None if any is behind."""
+    from bpy_extras.object_utils import world_to_camera_view  # pyright: ignore[reportMissingImports]
+
+    scene = bpy.context.scene
+    bpy.context.view_layer.update()
+    values = []
+    for name in subjects:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        for corner in obj.bound_box:
+            projected = world_to_camera_view(scene, camera, obj.matrix_world @ Vector(corner))
+            if projected.z <= 0:
+                return None
+            values.append((projected.x, projected.y))
+    if not values:
+        return None
+    return {
+        "minX": min(value[0] for value in values),
+        "maxX": max(value[0] for value in values),
+        "minY": min(value[1] for value in values),
+        "maxY": max(value[1] for value in values),
+    }
+
+
+def _frame_module_camera(module, plan):
+    """Place <module>Cam according to the resolved plan. Returns a report or None."""
+    subjects = _frame_subjects(plan)
     bounds = _mesh_world_bounds(subjects)
     if bounds is None:
         return None
+
+    shot = plan.get("primary") or {}
+    direction = Vector(shot.get("direction") or FRAME_DIRECTION).normalized()
+    lens = float(shot.get("lensMm") or FRAME_LENS_MM)
+    orthographic = bool(shot.get("orthographic"))
+    resolution = (payload.get("render") or {}).get("resolution") or {}
+    width = max(int(resolution.get("x") or 1200), 1)
+    height = max(int(resolution.get("y") or 900), 1)
+    aspect = width / height
+    # world_to_camera_view projects through camera.view_frame, which reads the
+    # SCENE resolution. Setting it here makes the fit and the coverage check use
+    # the same frame; render_scene writes the same values again later.
+    bpy.context.scene.render.resolution_x = width
+    bpy.context.scene.render.resolution_y = height
+    bpy.context.scene.render.resolution_percentage = 100
 
     bounds_min, bounds_max = bounds
     center = (bounds_min + bounds_max) * 0.5
     extent = bounds_max - bounds_min
     radius = max(extent.length * 0.5, 1e-4)
 
-    # E ~ 2*d*(s/2)/f inverted for distance, plus margin for headroom. The
-    # bounding SPHERE rather than the widest axis is what keeps a long thin part
-    # (a rotor arm) from being cropped by a camera sized to its length.
-    half_angle = math.atan((FRAME_SENSOR_MM * 0.5) / FRAME_LENS_MM)
-    distance = radius / math.sin(half_angle) * FRAME_MARGIN
-    location = center + Vector(FRAME_DIRECTION).normalized() * distance
+    # Fit the bounding SPHERE, using the NARROWER of the horizontal and vertical
+    # half-angles. Fitting only the sensor width crops a tall subject on a
+    # landscape frame, which is exactly the bug a fixed lens hid.
+    # sensor_fit AUTO fits the 36 mm sensor to the LONGER frame dimension, so a
+    # portrait frame has a narrower horizontal half-angle, not a narrower
+    # vertical one.
+    if aspect >= 1:
+        sensor_horizontal, sensor_vertical = FRAME_SENSOR_MM, FRAME_SENSOR_MM / aspect
+    else:
+        sensor_horizontal, sensor_vertical = FRAME_SENSOR_MM * aspect, FRAME_SENSOR_MM
+    half_horizontal = math.atan((sensor_horizontal * 0.5) / lens)
+    half_vertical = math.atan((sensor_vertical * 0.5) / lens)
+    half_angle = min(half_horizontal, half_vertical)
+    distance = radius / math.sin(half_angle) * FRAME_MARGIN if not orthographic else radius * 4.0
+    requested_distance = plan.get("distance")
+    if requested_distance:
+        distance = max(distance, float(requested_distance))
+    ortho_scale = radius * 2.0 * FRAME_MARGIN
 
+    camera_name = module + CAMERA_SUFFIX
     camera = bpy.data.objects.get(camera_name)
     created = camera is None
     if created:
         camera = bpy.data.objects.new(camera_name, bpy.data.cameras.new(camera_name))
         bpy.context.scene.collection.objects.link(camera)
-    camera.data.lens = FRAME_LENS_MM
-    camera.location = location
+    # Older harnesses aimed the camera with a Track To empty. The rotation is
+    # baked now, and leaving the empty would keep it in the module's ownership
+    # forever; only the exact legacy name is removed, never a user empty.
+    legacy_target = bpy.data.objects.get(camera_name + "Target")
+    removed_legacy = []
+    if legacy_target is not None and legacy_target.type == "EMPTY":
+        removed_legacy.append(legacy_target.name)
+        bpy.data.objects.remove(legacy_target, do_unlink=True)
+    camera.data.type = "ORTHO" if orthographic else "PERSP"
+    camera.data.lens = lens
+    camera.data.sensor_width = FRAME_SENSOR_MM
+    camera.data.sensor_fit = "AUTO"
 
-    # A Track To constraint on an empty rather than a baked rotation: re-framing
-    # is then a location change, and the aim cannot drift out of sync with it.
-    target_name = camera_name + "Target"
-    target = bpy.data.objects.get(target_name)
-    if target is None:
-        target = bpy.data.objects.new(target_name, None)
-        bpy.context.scene.collection.objects.link(target)
-    target.empty_display_size = max(radius * 0.15, 1e-3)
-    target.location = center
-    for constraint in list(camera.constraints):
-        camera.constraints.remove(constraint)
-    track = camera.constraints.new("TRACK_TO")
-    track.target = target
-    track.track_axis = "TRACK_NEGATIVE_Z"
-    track.up_axis = "UP_Y"
+    # Bake the rotation rather than constrain it to an empty: coverage is
+    # evaluated immediately, and a constraint is only resolved after a depsgraph
+    # update that would let a crop report a stale matrix. The camera looks down
+    # local -Z, so the look direction is -direction.
+    camera.rotation_mode = "XYZ"
+    camera.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
 
-    # Both datablocks must join the apply set, or they stay on this branch and
-    # model.blend keeps the previous framing for ever.
+    coverage = None
+    coverage_ok = False
+    for _ in range(10):
+        camera.location = center + direction * distance
+        camera.data.ortho_scale = ortho_scale
+        coverage = _subject_coverage(camera, subjects)
+        if coverage is None:
+            break
+        if coverage["minX"] >= 0.02 and coverage["maxX"] <= 0.98 and coverage["minY"] >= 0.02 and coverage["maxY"] <= 0.98:
+            coverage_ok = True
+            break
+        if orthographic:
+            ortho_scale *= 1.15
+        else:
+            distance *= 1.15
+
+    camera.data.clip_end = max(camera.data.clip_end, distance + radius * 2.0)
+
+    # camera_fit_coords is the independent check: if it asks for more distance
+    # than we chose for this direction, the arithmetic fit missed something.
+    # It fits along the camera's CURRENT rotation, which is why the rotation is
+    # set before this call.
+    fit_distance = None
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        coordinates = []
+        for name in subjects:
+            obj = bpy.data.objects.get(name)
+            if obj is not None:
+                coordinates.extend(obj.matrix_world @ Vector(corner) for corner in obj.bound_box)
+        if coordinates:
+            fit_location, fit_scale = camera.camera_fit_coords(depsgraph, coordinates)
+            fit_distance = (Vector(fit_location) - center).length
+            if orthographic:
+                ortho_scale = max(ortho_scale, fit_scale * FRAME_MARGIN)
+                camera.data.ortho_scale = ortho_scale
+    except Exception:
+        # Cross-check only: a Blender build without the helper must not fail the
+        # run, and the NDC coverage loop above is the authoritative check.
+        fit_distance = None
+
+    # Only the primary camera belongs to the module. Planned shots are metadata
+    # for the review sheet; creating five cameras per iteration would leave
+    # model.blend with a camera zoo and make the apply set contestable.
     apply_objects.add(camera_name)
-    apply_objects.add(target_name)
     removed_objects[:] = [n for n in removed_objects if n not in apply_objects]
 
     return {
@@ -308,14 +428,33 @@ def frame_module_camera(module):
         "created": created,
         "center": [center.x, center.y, center.z],
         "extent": [extent.x, extent.y, extent.z],
+        "direction": [direction.x, direction.y, direction.z],
         "distance": distance,
-        "lensMm": FRAME_LENS_MM,
+        "lensMm": lens,
+        "orthographic": orthographic,
+        "orthoScale": ortho_scale if orthographic else None,
+        "fitDistance": fit_distance,
+        "coverage": coverage,
+        "coverageOk": coverage_ok,
+        "removedLegacy": removed_legacy,
+        "shot": shot.get("name") or "hero",
         "subjects": subjects,
     }
 
 
-camera_framing = frame_module_camera(module_name)
+camera_plan = payload.get("cameraPlan") or {}
+camera_framing = _frame_module_camera(module_name, camera_plan)
 cameras = [camera_framing] if camera_framing is not None else []
+camera_plan_report = dict(camera_plan)
+camera_plan_report["resolved"] = camera_framing
+if camera_framing and camera_framing.get("removedLegacy"):
+    for legacy_name in camera_framing["removedLegacy"]:
+        if legacy_name not in removed_objects:
+            removed_objects.append(legacy_name)
+if camera_framing and not camera_framing.get("coverageOk") and payload.get("render"):
+    camera_plan_report["warnings"] = list(camera_plan_report.get("warnings") or []) + [
+        "The camera was not shown to fit the subject; coverage is reported on the framing."
+    ]
 
 # A digest of the geometry this run left behind, over the datablocks this
 # MODULE owns. It exists to make one question decidable without an image: did
@@ -399,6 +538,7 @@ print(json.dumps({
     "ownedMaterials": owned_materials,
     "stateDigest": state_digest,
     "cameras": cameras,
+    "cameraPlan": camera_plan_report,
     "render": render_result,
     "renderError": render_error,
 }))
@@ -432,6 +572,8 @@ interface BranchRunPayload {
 	stateDigest: string | null;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
 	cameras: BranchCameraFraming[];
+	/** The resolved camera plan and the framing it produced. */
+	cameraPlan: ResolvedCameraPlan;
 	/** The render this run took, or null when rendering was disabled. */
 	render: BranchRenderPayload | null;
 	/** Why the render failed, when the run itself succeeded. */
@@ -537,6 +679,23 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		requestedCameraName = options.view;
 	}
 
+	// The plan is sticky: a later run that omits the contract reuses the last
+	// resolved plan rather than silently snapping back to "prop from -Y". "Front"
+	// moving between iterations makes every comparison a comparison of cameras.
+	const previousPlan = [...(manifest.branchRuns ?? [])]
+		.filter((run) => run.module === moduleName && run.cameraPlan)
+		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0]?.cameraPlan;
+	const cameraPlan = mergeCameraPlan(
+		{
+			profile: options.cameraProfile,
+			frontAxis: options.frontAxis,
+			shots: options.cameraShots,
+			frameSubject: options.frameSubject,
+			distance: options.cameraDistance,
+		},
+		previousPlan,
+	);
+
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.
 	const priorOwnership = collectModuleOwnership(manifest, moduleName);
@@ -566,6 +725,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				// subject on exactly the rebuild iterations it exists to measure.
 				ownedObjects: priorOwnership.objects,
 				ownedMaterials: priorOwnership.materials,
+				cameraPlan,
 				render: renderRequested
 					? {
 							outputPath: join(moduleDir, RENDER_FILE),
@@ -649,6 +809,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
+		cameraPlan: payload.cameraPlan,
 	};
 
 	await updateManifest(
@@ -694,6 +855,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		renderError,
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
+		cameraPlan: payload.cameraPlan,
+		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 	};

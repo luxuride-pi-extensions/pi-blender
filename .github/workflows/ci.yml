@@ -144,16 +144,17 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly eight files
-      # and 46 tests survive:
+      # not exist -- which is the state this step creates. Exactly ten files
+      # and 62 tests survive:
       #
+      #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
-      #   generations.test.mjs           8
+      #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
       #   live-ownership.test.mjs        3
       #   module-paths.test.mjs          7
-      #   module-state.test.mjs          5
-      #   tool-params.test.mjs           3
+      #   module-state.test.mjs          6
+      #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
       #   windowless-tools.test.mjs      5
       #
@@ -166,7 +167,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the eight core-free suites
+      - name: typecheck and the ten core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -175,6 +176,7 @@ jobs:
           mkdir -p "$PI_AGENT_DIR"
           npm run typecheck
           node --test \
+            test/camera-plan.test.mjs \
             test/concurrency-budget.test.mjs \
             test/generations.test.mjs \
             test/headless-changed.test.mjs \
@@ -271,8 +273,8 @@ jobs:
                 | grep -v -e launch-guard -e watch-window \
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
-                          -e headless-changed -e generations \
-                          -e live-ownership -e module-state)
+                          -e headless-changed -e generations -e camera-plan \
+                          -e live-ownership -e module-state -e tool-surface)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
@@ -336,9 +338,9 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "46 tests ran, in 8 files: concurrency-budget,"
+            echo "62 tests ran, in 10 files: camera-plan, concurrency-budget,"
             echo "generations, headless-changed, live-ownership, module-paths,"
-            echo "module-state, tool-params and windowless-tools."
+            echo "module-state, tool-params, tool-surface and windowless-tools."
             echo "Those are the only files measured to pass without a"
             echo "pi-manager-core checkout."
             echo
@@ -348,11 +350,10 @@ jobs:
             echo 'nothing answered. The step above ran them anyway, so'
             echo 'that number is measured rather than assumed.'
             echo
-            echo 'The other 22 test files need the same checkout and were'
-            echo 'not run at all: 184 tests NOT VERIFIED. Running them'
-            echo 'without it would fail all 22 on one describeMissingCore()'
-            echo 'error, which measures the missing checkout rather than'
-            echo 'this commit.'
+            echo 'The remaining 44 test files need the same checkout and'
+            echo 'were not run at all. Running them without it would fail on'
+            echo 'one describeMissingCore() error, which measures the missing'
+            echo 'checkout rather than this commit.'
             echo
             echo '`coverage-audit` is failing this run for the same'
             echo 'reason: `secrets.CONSUMER_TOKEN` is not set.'

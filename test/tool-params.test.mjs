@@ -114,13 +114,18 @@ test("the schema parser is not vacuous", () => {
 	]);
 });
 
-test("module_run offers only options both paths can honour", () => {
+test("module_run names the camera options only the headless path honours", () => {
 	const moduleRun = toolBlocks().find((b) => b.name === "blender_module_run");
 	assert.deepEqual(schemaKeys(moduleRun), [
 		"workspace",
 		"moduleName",
 		"render",
 		"view",
+		"cameraProfile",
+		"frontAxis",
+		"cameraShots",
+		"frameSubject",
+		"cameraDistance",
 		"resolution",
 		"samples",
 		"timeoutSeconds",
@@ -138,4 +143,12 @@ test("module_run offers only options both paths can honour", () => {
 	const module = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
 	assert.match(module, /viewportShading: "material-preview"/, "the live module render states the one shading it uses");
 	assert.match(module, /options\.timeoutSeconds \?\? DEFAULT_MODULE_TIMEOUT_SECONDS/, "the live path shares the schema timeout default");
+});
+
+test("the live module path reports the camera options it ignored", async () => {
+	// A live run keeps the session camera. The warning is the only signal that a
+	// declaration did nothing, so the wiring is pinned rather than assumed.
+	const source = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
+	assert.match(source, /warnings:\s*liveCameraWarning\(options\)/);
+	assert.match(source, /headless path only; this live run used the session camera/);
 });

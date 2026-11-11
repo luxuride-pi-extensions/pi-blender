@@ -20,7 +20,7 @@ const moduleSource = readFileSync(fileURLToPath(new URL("../blender/module.ts", 
 test("the branch run takes its content diff before framing", () => {
 	const changedAt = branchSource.indexOf("changed = content_changed(before, after)");
 	assert.ok(changedAt >= 0, "the branch script must use the shared content fingerprint");
-	const framingAt = branchSource.indexOf("camera_framing = frame_module_camera(");
+	const framingAt = branchSource.indexOf("camera_framing = _frame_module_camera(");
 	assert.ok(framingAt >= 0, "the branch script should still frame the module camera");
 	assert.ok(
 		changedAt < framingAt,

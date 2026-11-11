@@ -7,7 +7,7 @@
 
 import { Type } from "typebox";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
-import type { AssetExportOptions, ImportFormat } from "../blender/types.js";
+import type { AssetExportOptions, CameraFrontAxis, CameraProfile, CameraShotKind, ImportFormat } from "../blender/types.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
 	blenderAddReference,
@@ -658,6 +658,54 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
+	cameraProfile: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.",
+			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
+		}),
+	),
+	frontAxis: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot. A live run reports that it ignored this.",
+			enum: ["-Y", "+Y", "-X", "+X"],
+		}),
+	),
+	cameraShots: Type.Optional(
+		Type.Array(
+			Type.String({
+				enum: [
+					"hero",
+					"front",
+					"back",
+					"left",
+					"right",
+					"top",
+					"ortho_front",
+					"ortho_side",
+					"ortho_top",
+					"interior_hero",
+					"interior_front",
+					"lineup_front",
+				],
+			}),
+			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered. A live run reports that it ignored this." },
+		),
+	),
+	frameSubject: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body. A live run reports that it ignored this.",
+			enum: ["module", "apply"],
+		}),
+	),
+	cameraDistance: Type.Optional(
+		Type.Number({
+			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject. A live run reports that it ignored this.",
+			minimum: 0,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -684,6 +732,11 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
+		cameraProfile: params.cameraProfile as CameraProfile | undefined,
+		frontAxis: params.frontAxis as CameraFrontAxis | undefined,
+		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
+		frameSubject: params.frameSubject as "module" | "apply" | undefined,
+		cameraDistance: params.cameraDistance,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -728,6 +781,54 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 				'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
+	cameraProfile: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
+		}),
+	),
+	frontAxis: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+			enum: ["-Y", "+Y", "-X", "+X"],
+		}),
+	),
+	cameraShots: Type.Optional(
+		Type.Array(
+			Type.String({
+				enum: [
+					"hero",
+					"front",
+					"back",
+					"left",
+					"right",
+					"top",
+					"ortho_front",
+					"ortho_side",
+					"ortho_top",
+					"interior_hero",
+					"interior_front",
+					"lineup_front",
+				],
+			}),
+			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered." },
+		),
+	),
+	frameSubject: Type.Optional(
+		Type.String({
+			description:
+				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+			enum: ["module", "apply"],
+		}),
+	),
+	cameraDistance: Type.Optional(
+		Type.Number({
+			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			minimum: 0,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -754,6 +855,11 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
+		cameraProfile: params.cameraProfile as CameraProfile | undefined,
+		frontAxis: params.frontAxis as CameraFrontAxis | undefined,
+		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
+		frameSubject: params.frameSubject as "module" | "apply" | undefined,
+		cameraDistance: params.cameraDistance,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,

@@ -286,6 +286,13 @@ The point of maximizing parallelism is not the width. It is that a slot left
 idle is wall-clock nobody gets back, and a critic run behind another critic is
 latency the user watches.
 
+Declare the camera contract in every brief: `cameraProfile` (`prop`, `character`,
+`hard_surface`, `interior`, `print`, `paint`, `asset_pack`) and `frontAxis`
+(`-Y`, `+Y`, `-X`, `+X`). The front is a declaration, not a guess; a wrong axis
+photographs a character from behind. The profile selects the shot list, and
+`frameSubject: "module"` frames a parented detail on itself instead of on the
+body the widened apply set carries.
+
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 framed automatically and rendered from its own camera, judged, re-briefed and run
 again — and each of
