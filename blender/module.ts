@@ -109,6 +109,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		cameraDistance: options.cameraDistance,
 		reviewSheet: options.reviewSheet,
 		forceRender: options.forceRender,
+		referenceId: options.referenceId,
 	});
 
 	// A single staged branch cannot contest itself, so a conflict here would mean
@@ -194,6 +195,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			branchResult.cameraPlan.warnings.length || branchResult.warnings?.length
 				? [...branchResult.cameraPlan.warnings, ...(branchResult.warnings ?? [])]
 				: undefined,
+		reviewPacket: branchResult.reviewPacket,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration: branchResult.iteration,
 			sequence: branchResult.sequence,

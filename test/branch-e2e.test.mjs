@@ -922,6 +922,55 @@ test("a portrait frame fits a tall subject instead of cropping it", { skip }, as
 	}
 });
 
+test("each generation keeps its evidence and compares against the previous one", { skip }, async () => {
+	// render.png is overwritten every run, so "it looks the same" has nothing
+	// to compare against. A packet is the stored picture plus the numbers that
+	// explain it; the comparison is composed from those files, not re-rendered.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "packet", replaceBox("PacketPart", 2, 2, 2));
+		const first = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "packet",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		assert.ok(first.reviewPacket?.renderPath, `first packet: ${JSON.stringify(first.reviewPacket)}`);
+		assert.ok(existsSync(first.reviewPacket.renderPath));
+		assert.equal(first.reviewPacket.comparePath ?? undefined, undefined, "one generation has nothing to compare against");
+
+		const second = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "packet",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		assert.ok(second.reviewPacket?.comparePath, `second packet: ${JSON.stringify(second.reviewPacket)}`);
+		assert.ok(existsSync(second.reviewPacket.comparePath));
+		assert.equal(second.reviewPacket.previousDir, first.reviewPacket.dir);
+		const comparisonImage = png.decodePng(readFileSync(second.reviewPacket.comparePath));
+		assert.equal(comparisonImage.width, 1304, "two panels and one gutter");
+		const packet = JSON.parse(readFileSync(join(second.reviewPacket.dir, "packet.json"), "utf-8"));
+		assert.equal(packet.iteration, second.iteration);
+		assert.equal(packet.changed, true);
+		assert.ok(packet.stateDigest);
+		assert.ok(packet.cameraPlan.shots.length > 0);
+		const sheet = await compare.blenderCompare({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "packet",
+		});
+		assert.match(sheet.note, /stored review packets/);
+		assert.equal(sheet.montagePath, second.reviewPacket.comparePath);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a review sheet renders the plan's other angles in the same run", { skip }, async () => {
 	// One 3/4 image cannot show a collapsed back or left/right asymmetry. The
 	// sheet is composed inside the run process from panels rendered there, so it

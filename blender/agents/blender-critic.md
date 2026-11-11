@@ -47,6 +47,14 @@ share one scale and lens, so a difference between two panels is geometry, not
 framing. Do not also read `render.png`: the hero panel is that picture, and a
 second look ends your budget.
 
+When the result reports a `reviewPacket.comparePath`, read that comparison sheet
+instead: current on the left, the previous generation in the middle, and the
+reference on the right when one was named. Its panels share one plan, so a
+difference is geometry. Report improvements and regressions per axis, and cite
+the panel when a defect is side-specific: a face fixed while the silhouette
+broke is a regression the current render alone cannot show. Do not also read
+`render.png` or the review sheet; the comparison contains them.
+
 You get one look at the subject per run: either `modules/<name>/render.png`, or a montage sheet you asked for yourself (below). If your brief names a reference image, that reference is your second and final image. Then you are done looking — no third look, and no other image of any kind.
 
 Base64 image payloads persist in the session transcript and are re-sent on every subsequent request; enough of them and the provider rejects the whole conversation, not just your turn. pi caps each individual image at 2000x2000 / 4.5 MB of base64, but it does not cap the *number*. Two images is the whole budget for one critic, and a fresh critic is how you get more. Who spawns that next critic depends on who owns the loop: for a module iteration it is the manager, and for a camera-alignment attempt it is `blender-camera-aligner`, which nests its own critics one per candidate view. Either way each of you sees only your own pair, and the difference matters to you only in one place — what you write in `nextAction` is read by that spawner, not by a fixed parent.

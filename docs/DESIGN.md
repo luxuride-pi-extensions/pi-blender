@@ -434,6 +434,13 @@ Start pi in any project dir. The extension:
   `reviewSheet: true` renders up to three more shots from the plan inside the
   same Blender process and composes `modules/<name>/review.png`, returning the
   panel map; the hero stays `render.png`, and the critic reads the sheet as its
+  one image. Each generation also stores its pictures and the numbers behind
+  them under `modules/<name>/iterations/NN/` (`render.png`, `review.png`,
+  `compare.png`, `packet.json`). The comparison is composed from the current
+  and previous packets, plus a named `referenceId` when given, so it costs no
+  Blender process, and `blender_compare` returns that stored sheet for the
+  default comparison instead of re-rendering both checkpoints. The packet lives
+  outside `runs/NN`, which is the directory checkpoint retention prunes.
   one image. That is how a back, profile or asymmetry finding becomes visible
   without a second process or a second image.
 - Every branch run also measures its geometry before the render: bounds and unit

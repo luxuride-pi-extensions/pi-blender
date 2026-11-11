@@ -165,6 +165,15 @@ export interface BlenderModuleRunRecord {
 
 /** Where a staged branch run is in its life. */
 export type BranchRunStatus = "staged" | "applied" | "unchanged" | "conflict" | "failed";
+/** One generation's stored visual evidence, under modules/<name>/iterations/NN. */
+export interface ReviewPacket {
+	dir: string;
+	renderPath?: string;
+	reviewPath?: string;
+	comparePath?: string;
+	previousDir?: string;
+	referencePath?: string;
+}
 
 /** One object's contested by two or more staged branches. */
 export interface BranchConflict {
@@ -244,6 +253,8 @@ export interface BlenderBranchRunRecord {
 	cameraPlan?: ResolvedCameraPlan;
 	/** The multi-panel review sheet this run wrote, if asked for one. */
 	reviewSheet?: ReviewSheetResult;
+	/** Where this generation's render, sheet, comparison and packet were stored. */
+	reviewPacket?: ReviewPacket;
 	/** Structural checks measured before this run's render. */
 	preflight?: PreflightResult;
 }
@@ -258,6 +269,8 @@ export interface BranchRunOptions {
 	reviewSheet?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
+	/** Reference id to include in the stored comparison sheet. */
+	referenceId?: string;
 	view?: string;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
@@ -371,6 +384,8 @@ export interface BranchRunResult {
 	resolvedCameraName?: string;
 	/** The multi-panel review sheet, when the run was asked for one. */
 	reviewSheet?: ReviewSheetResult;
+	/** Where this generation's render, sheet, comparison and packet were stored. */
+	reviewPacket?: ReviewPacket;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 	/** Content the headless apply does not carry, such as world or scene settings. */
@@ -1537,6 +1552,8 @@ export interface ModuleRunOptions {
 	reviewSheet?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
+	/** Reference id to include in the stored comparison sheet. */
+	referenceId?: string;
 	view?: string;
 	timeoutSeconds?: number;
 	resolution?: { x: number; y: number; percentage?: number };
@@ -1603,6 +1620,8 @@ export interface ModuleRunResult {
 	cameraPlan?: ResolvedCameraPlan;
 	/** The multi-panel review sheet this run wrote, when asked for one. */
 	reviewSheet?: ReviewSheetResult;
+	/** Where this generation's review evidence was stored, on the headless path. */
+	reviewPacket?: ReviewPacket;
 	/** Structural checks measured before the render, when the path can run them. */
 	preflight?: PreflightResult;
 	/** Behaviour the caller should know about, e.g. options this path ignored. */

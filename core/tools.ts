@@ -720,6 +720,12 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	referenceId: Type.Optional(
+		Type.String({
+			description:
+				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -753,6 +759,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
 		forceRender: params.forceRender,
+		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -859,6 +866,12 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	referenceId: Type.Optional(
+		Type.String({
+			description:
+				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -892,6 +905,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
 		forceRender: params.forceRender,
+		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,

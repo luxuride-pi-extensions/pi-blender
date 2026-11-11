@@ -295,7 +295,11 @@ body the widened apply set carries. Pass `reviewSheet: true` for geometry
 review: the run renders the plan's other angles and composes one sheet, so the
 critic sees the back and the profile without a second process or a second
 image. Read the panel map it returns and tell the critic which panel failed, if
-any.
+any. Every headless generation also stores its pictures under
+`modules/<name>/iterations/NN/`, and once a previous generation exists the run
+composes `compare.png` there. Tell the critic to read that comparison sheet when
+the result reports `reviewPacket.comparePath`; it is the current, previous and
+(if you pass `referenceId`) reference in one image, with no extra render.
 
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 framed automatically and rendered from its own camera, judged, re-briefed and run
