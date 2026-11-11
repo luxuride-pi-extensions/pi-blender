@@ -316,9 +316,16 @@ def reachable_nodes(material, allowed=None):
 
 def material_summary(material):
     """Describe what a material's graph is made of."""
+    tree_nodes = material.node_tree.nodes if material.use_nodes and material.node_tree else []
     nodes = reachable_nodes(material)
     types = [node.type for node in nodes]
-    procedural = any(node_type not in SAFE_GLTF_NODES for node_type in types)
+    outputs = [node for node in tree_nodes if node.type == "OUTPUT_MATERIAL"]
+    surface_linked = any(link for node in outputs for link in node.inputs["Surface"].links)
+    procedural = bool(tree_nodes) and (
+        not outputs
+        or not surface_linked
+        or any(node_type not in SAFE_GLTF_NODES for node_type in types)
+    )
     images = sorted(node.image.name for node in nodes if node.type == "TEX_IMAGE" and node.image is not None)
     uv_dependent = any(node.type in {"TEX_IMAGE", "UVMAP"} for node in nodes)
     summary = {
@@ -328,7 +335,14 @@ def material_summary(material):
         "nodeCount": len(nodes),
         "imageNodes": images,
         "uvDependent": uv_dependent,
-        "graphDigest": _digest(nodes, material.node_tree.links) if material.node_tree else None,
+        "graphDigest": _digest(
+            nodes,
+            [
+                link
+                for link in material.node_tree.links
+                if link.from_node in nodes and link.to_node in nodes
+            ],
+        ) if material.node_tree else None,
     }
     bsdf = next((node for node in nodes if node.type == "BSDF_PRINCIPLED"), None)
     if bsdf is not None:

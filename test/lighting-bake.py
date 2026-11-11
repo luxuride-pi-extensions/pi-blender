@@ -118,6 +118,7 @@ mean = sum(samples) / len(samples)
 stddev = math.sqrt(sum((value - mean) ** 2 for value in samples) / len(samples))
 checks["base colour bake is non-uniform"] = stddev > 0.02
 checks["baked material is no longer procedural"] = material_summary(material)["procedural"] is False
+checks["baked channels are linked"] = all(entry["linked"] for entry in baked["channels"])
 checks["ao ray distance follows the subject"] = (baked.get("aoDistance") or 0) > 0
 checks["material receives the baked image node"] = material.node_tree.nodes.get("Baked_base_color") is not None
 checks["bake switched to Cycles and restored the engine"] = baked["engineSwitched"] and baked["engineRestored"]
@@ -140,6 +141,15 @@ except ValueError as error:
 export_dir = tempfile.mkdtemp(prefix="export-review-")
 exported = handle_export({"format": "glb", "outputDir": export_dir, "name": "review"}, lambda request: None)
 checks["export verifies embedded images"] = exported["images"] > 0 and exported["textures"] > 0 and exported["texturesVerified"] is True
+
+subject.name = "Soup Bowl"
+separate = handle_export({"format": "gltf", "objects": [subject.name], "outputDir": tempfile.mkdtemp(prefix="gltf-review-")}, lambda request: None)
+checks["gltf percent-encoded image names resolve"] = separate.get("texturesVerified") is True
+
+broken = bpy.data.materials.new("BrokenSurface")
+broken.use_nodes = True
+broken.node_tree.links.remove(broken.node_tree.nodes["Principled BSDF"].outputs["BSDF"].links[0])
+checks["a disconnected surface is still procedural"] = material_summary(broken)["procedural"] is True
 
 ok = all(checks.values())
 print(json.dumps({"ok": ok, "checks": checks}))

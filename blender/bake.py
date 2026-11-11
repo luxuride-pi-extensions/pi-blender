@@ -290,6 +290,26 @@ def _attach_ao(tree, node):
     tree.links.new(node.outputs["Color"], holder.inputs["Occlusion"])
 
 
+def _channel_linked(material, channel):
+    tree = material.node_tree
+    if tree is None:
+        return False
+    if channel == "ao":
+        holder = tree.nodes.get("BakedAO")
+        return holder is not None and bool(holder.inputs["Occlusion"].links)
+    if channel == "normal":
+        normal_map = tree.nodes.get("BakedNormalMap")
+        if normal_map is None:
+            return False
+        bsdf = _principled(material)
+        return bsdf is not None and bool(bsdf.inputs["Normal"].links)
+    bsdf = _principled(material)
+    if bsdf is None:
+        return False
+    socket = bsdf.inputs.get("Emission Color" if channel == "emission" else CHANNEL_SOCKET[channel])
+    return socket is not None and bool(socket.links)
+
+
 def _attach_baked(material, nodes):
     tree = material.node_tree
     for channel, node in nodes.items():
@@ -381,7 +401,9 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
     active = bpy.context.view_layer.objects.active
     previous_ao_distance = None
     ao_distance = None
-    if scene.world is not None:
+    if "ao" in channels:
+        if scene.world is None:
+            raise RuntimeError("ao bake needs a world to measure occlusion against")
         previous_ao_distance = float(scene.world.light_settings.distance)
         ao_distance = 0.1 * max(target.dimensions)
     results = []
@@ -456,10 +478,12 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
                 "imageName": image.name,
                 "resolution": resolution,
                 "colorSpace": image.colorspace_settings.name,
-                "linked": image.users > 0,
+                "linked": False,
                 "elapsedSeconds": elapsed,
             })
         _attach_baked(material, nodes)
+        for entry in results:
+            entry["linked"] = _channel_linked(material, entry["channel"])
     finally:
         scene.render.engine = previous_engine
         scene.cycles.samples = previous_samples
@@ -487,6 +511,6 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         "engineSwitched": switched,
         "engineRestored": restored,
         "estimatedSeconds": round(estimate, 1),
-        "aoDistance": round(ao_distance, 6) if ao_distance else None,
+        "aoDistance": round(ao_distance, 6) if ao_distance is not None else None,
         "channels": results,
     }

@@ -9,8 +9,10 @@ Nothing here is saved into the user's scene unless they save it themselves; the
 caller decides whether the rig belongs in the deliverable.
 """
 
-# pi-lens-ignore: ast-grep:unresolved-import-python
-import bpy  # pyright: ignore[reportMissingImports]
+# pyright: reportMissingImports=false
+# pi-lens-ignore: ast-grep:unresolved-import-python (Blender's own modules)
+import bpy
+from mathutils import Vector
 
 STUDIO_COLLECTION = "Studio"
 LEGACY_RIG_NAMES = {"StudioKey", "StudioFill", "StudioRim"}
@@ -98,9 +100,16 @@ def _clear_rig(collection):
                 bpy.data.lights.remove(data)
 
 
-def _subject_scale(scene):
-    dimensions = [max(obj.dimensions) for obj in scene.objects if obj.type == "MESH"]
-    return max(1.0, max(dimensions) if dimensions else 1.0)
+def _subject_bounds(scene):
+    meshes = [obj for obj in scene.objects if obj.type == "MESH"]
+    dimensions = [max(obj.dimensions) for obj in meshes]
+    scale = max(1.0, max(dimensions) if dimensions else 1.0)
+    if not meshes:
+        return scale, (0.0, 0.0, 0.0)
+    corners = [obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box]
+    lo = [min(point[axis] for point in corners) for axis in range(3)]
+    hi = [max(point[axis] for point in corners) for axis in range(3)]
+    return scale, tuple((lo[axis] + hi[axis]) / 2.0 for axis in range(3))
 
 
 def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None):
@@ -122,7 +131,7 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
 
     strength = preset["world"] if world_strength is None else float(world_strength)
     _, worldChange = _neutral_world(scene, strength)
-    scale = _subject_scale(scene)
+    scale, center = _subject_bounds(scene)
     for spec in preset["lights"]:
         name = f"PI_{kind}_{spec['role']}"
         light_data = bpy.data.lights.new(name, type="SUN" if kind == "sun_dome" else "AREA")
@@ -132,11 +141,11 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
             light_data.size = spec["size"] * scale
         light_data.color = (1.0, 1.0, 1.0)
         obj = bpy.data.objects.new(name, light_data)
-        obj.location = tuple(component * scale for component in spec["location"])
+        obj.location = tuple(center[axis] + spec["location"][axis] * scale for axis in range(3))
         obj[RIG_PROPERTY] = kind
         obj["pi_studio_role"] = spec["role"]
         collection.objects.link(obj)
-        _aim(obj)
+        _aim(obj, target=center)
 
     scene.render.film_transparent = bool(film_transparent)
     scene.view_settings.view_transform = "Standard"
@@ -153,5 +162,6 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
         "viewTransform": scene.view_settings.view_transform,
         "exposure": float(scene.view_settings.exposure),
         "subjectScale": round(scale, 4),
+        "subjectCenter": [round(value, 4) for value in center],
         "world": worldChange,
     }

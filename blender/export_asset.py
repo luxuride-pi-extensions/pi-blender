@@ -20,6 +20,7 @@ behind an import that only works from inside live-bridge.py.
 
 import os
 import re
+from urllib.parse import unquote
 
 # Provided by Blender's own runtime, not by anything installed here.
 # pi-lens-ignore: ast-grep:unresolved-import-python
@@ -118,15 +119,34 @@ def _read_gltf_json(path):
 
 def _verify_textures(fmt, export_path, materials):
     """A GLB that silently drops its images must fail the tool, not the user."""
-    # Only textures the glTF exporter actually carries count here. A texture
-    # behind Bump or a colour ramp is reported as procedural instead of being
-    # demanded in the file, because the exporter cannot produce it.
-    image_nodes = [
-        node
-        for material in materials
-        for node in reachable_nodes(material, allowed=SAFE_GLTF_NODES)
-        if node.type == "TEX_IMAGE" and node.image is not None
-    ]
+    # Only textures the exporter carries to a real texture slot count. A
+    # texture behind Bump or a colour ramp, or driving Emission Strength,
+    # is reported as procedural instead of being demanded in the file.
+    texture_sockets = {
+        "Base Color", "Metallic", "Roughness", "Normal", "Emission Color", "Alpha",
+    }
+    image_nodes = []
+    for material in materials:
+        if not material.use_nodes or material.node_tree is None:
+            continue
+        seeds = [
+            socket
+            for node in material.node_tree.nodes
+            if node.type == "BSDF_PRINCIPLED"
+            for socket in node.inputs
+            if socket.name in texture_sockets
+        ]
+        seen = set()
+        queue = [link.from_node for socket in seeds for link in socket.links]
+        while queue:
+            node = queue.pop()
+            if node in seen or node.type not in SAFE_GLTF_NODES:
+                continue
+            seen.add(node)
+            if node.type == "TEX_IMAGE" and node.image is not None:
+                image_nodes.append(node)
+            for socket in node.inputs:
+                queue.extend(link.from_node for link in socket.links)
     uses_images = bool(image_nodes)
     if fmt not in {"glb", "gltf"}:
         return {"images": 0, "textures": 0, "verified": None}
@@ -171,8 +191,10 @@ def _verify_textures(fmt, export_path, materials):
         base = os.path.dirname(export_path)
         for image in images:
             uri = image.get("uri")
-            if uri and not os.path.exists(os.path.join(base, uri)):
-                raise RuntimeError(f"the exported glTF points at a missing image file: {uri}")
+            if uri and not uri.startswith("data:"):
+                path = os.path.join(base, unquote(uri))
+                if not os.path.exists(path):
+                    raise RuntimeError(f"the exported glTF points at a missing image file: {uri}")
     return {"images": len(images), "textures": len(textures), "verified": True if uses_images else None}
 
 
