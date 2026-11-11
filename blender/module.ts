@@ -445,7 +445,14 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 
 	// Guard against the destructive case: reverting module A after module B ran
 	// throws away B's work too, because they share one model.blend.
-	const laterRuns = moduleRuns.filter((run) => run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER));
+	const targetAt = target ? Date.parse(target.at) : Number.NEGATIVE_INFINITY;
+	const laterRuns = moduleRuns.filter(
+		(run) =>
+			run !== target &&
+			(run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER) ||
+				(run.name !== moduleName && run.checkpointPath === target?.checkpointPath) ||
+				(run.name !== moduleName && Date.parse(run.at) >= targetAt)),
+	);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");

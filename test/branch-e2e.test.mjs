@@ -480,6 +480,52 @@ test("an apply is recorded as a module run, so revert can restore what it replac
 	}
 });
 
+test("a revert refuses when another module in the same batch shares its checkpoint", { skip }, async () => {
+	// One apply pass writes one save, so every module in it names the same
+	// pre-batch checkpoint. Reverting one would restore the blend from before
+	// all of them and silently drop the others' applied work.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "one", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "One"\n`);
+		writeScript(ws.workspacePath, "two", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "Two"\n`);
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "one", render: false, timeoutSeconds: 300 });
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "two", render: false, timeoutSeconds: 300 });
+		await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["one", "two"], timeoutSeconds: 300 });
+		await assert.rejects(
+			() => module.blenderModuleRevert({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "two" }),
+			/Refusing to revert module "two"/,
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an in-process probe skip leaves the siblings applied and the branch untouched", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "one", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "One"\n`);
+		writeScript(ws.workspacePath, "ghost", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "GhostBox"\n`);
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "one", render: false, timeoutSeconds: 300 });
+		const staged = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "ghost", render: false, timeoutSeconds: 300 });
+
+		// Make the record claim a datablock its branch does not contain, which is
+		// what a branch that lost an object looks like to the apply.
+		const manifestPath = join(ws.workspacePath, "blender-workspace.json");
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		const record = manifest.branchRuns.find((run) => run.module === "ghost");
+		record.applyObjects = [...record.applyObjects, "Ghost"];
+		writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+		const result = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["one", "ghost"], timeoutSeconds: 300 });
+		assert.deepEqual(result.applied.map((run) => run.module), ["one"]);
+		assert.deepEqual(result.skipped.map((run) => run.module), ["ghost"]);
+		assert.deepEqual(result.skipped[0].conflicts.map((conflict) => conflict.objectName), ["Ghost"]);
+		assert.ok(existsSync(staged.branchPath), "a skipped branch is left for the author to fix");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("blender_module_run works with NO window, by branching and applying", { skip }, async () => {
 	// The default state of a session: /blender no longer opens a window, so this
 	// is the path a manager takes unless the user ran /blender-watch. Asserted

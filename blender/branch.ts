@@ -833,11 +833,17 @@ def probe(branch):
     library with an empty data_to, which loads nothing.
     """
     missing = []
-    with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
-        object_index = {name: index for index, name in enumerate(data_from.objects)}
-        material_index = {name: index for index, name in enumerate(data_from.materials)}
-        missing.extend(name for name in branch["applyObjects"] if name not in object_index)
-        missing.extend(name for name in branch["applyMaterials"] if name not in material_index)
+    try:
+        with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
+            object_index = {name: index for index, name in enumerate(data_from.objects)}
+            material_index = {name: index for index, name in enumerate(data_from.materials)}
+            missing.extend(name for name in branch["applyObjects"] if name not in object_index)
+            missing.extend(name for name in branch["applyMaterials"] if name not in material_index)
+    except Exception as exc:
+        # The pre-flight check runs without the apply lock, so a branch can be
+        # replaced or truncated between that check and this load. Report it as a
+        # skipped branch instead of aborting every other branch in the batch.
+        return [f"<unreadable branch blend: {exc}>"]
     return missing
 
 
@@ -894,6 +900,20 @@ outcomes = []
 saved = False
 for branch in branches:
     missing = probe(branch)
+    if not missing:
+        try:
+            result = apply_branch(branch)
+        except Exception as exc:
+            missing = [f"<branch could not be read: {exc}>"]
+        else:
+            outcomes.append({
+                "module": branch["module"],
+                "applied": True,
+                "missing": [],
+                **result,
+            })
+            saved = True
+            continue
     if missing:
         outcomes.append({
             "module": branch["module"],
@@ -905,17 +925,6 @@ for branch in branches:
             "missing": missing,
         })
         continue
-    result = apply_branch(branch)
-    saved = True
-    outcomes.append({
-        "module": branch["module"],
-        "applied": True,
-        "replaced": result["replaced"],
-        "removedExisting": result["removedExisting"],
-        "appended": result["appended"],
-        "appendedMaterials": result["appendedMaterials"],
-        "missing": [],
-    })
 
 # ONE save for the whole apply. A failure before this point leaves model.blend
 # exactly as it was, so a hard failure cannot remove one module's objects and
