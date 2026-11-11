@@ -172,7 +172,11 @@ def handle_export(request, open_blend):
         "format": fmt,
         "exportPath": export_path,
         "bytes": os.path.getsize(export_path),
-        "meshCount": sum(1 for obj in bpy.data.objects if obj.type == "MESH"),
+        "meshCount": sum(
+            1
+            for obj in bpy.data.objects
+            if obj.type == "MESH" and (exported_names is None or obj.name in exported_names)
+        ),
         "blendPath": bpy.data.filepath if bpy.data.filepath else None,
         "proceduralMaterials": procedural_materials,
         "warnings": warnings,

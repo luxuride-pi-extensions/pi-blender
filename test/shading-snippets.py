@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender)
 import bpy  # pyright: ignore[reportMissingImports]
-from shading import build_material  # pyright: ignore[reportMissingImports]
+from shading import build_material, material_summary  # pyright: ignore[reportMissingImports]
 
 checks = {}
 
@@ -83,7 +83,10 @@ voronoi_bump = dict(metal)
 voronoi_bump["bump"] = {"kind": "voronoi", "scale": 30.0, "strength": 0.1}
 try:
     voronoi = build_material("ReviewVoronoiBump", voronoi_bump)
-    checks["voronoi bump uses its distance output"] = voronoi["nodeCount"] == first["nodeCount"]
+    bump_link = bpy.data.materials["ReviewVoronoiBump"].node_tree.nodes["Bump"].inputs["Height"].links[0]
+    checks["voronoi bump uses its distance output"] = (
+        bump_link.from_socket.name == "Distance" and voronoi["nodeCount"] == first["nodeCount"]
+    )
 except KeyError:
     checks["voronoi bump uses its distance output"] = False
 
@@ -92,7 +95,9 @@ try:
     build_material("ReviewMetal", {"preset": "nope"})
     checks["unknown preset is rejected"] = False
 except ValueError:
-    checks["unknown preset is rejected"] = build_material("ReviewMetal", metal)["graphDigest"] == before_invalid
+    checks["unknown preset is rejected"] = (
+        material_summary(bpy.data.materials["ReviewMetal"])["graphDigest"] == before_invalid
+    )
 
 import tempfile  # noqa: E402
 
@@ -102,15 +107,24 @@ bpy.ops.mesh.primitive_cube_add()
 review_object = bpy.context.object
 review_object.name = "ReviewCube"
 review_object.data.materials.append(material)
+build_material("UnselectedMetal", metal)
+bpy.ops.mesh.primitive_cube_add(location=(4.0, 0.0, 0.0))
+unselected = bpy.context.object
+unselected.name = "UnselectedCube"
+unselected.data.materials.append(bpy.data.materials["UnselectedMetal"])
 export_dir = tempfile.mkdtemp(prefix="shading-review-")
 export_result = export_asset.handle_export(
     {"format": "glb", "objects": ["ReviewCube"], "name": "review", "outputDir": export_dir},
     lambda _request: None,
 )
 checks["export names the lost procedural material"] = "ReviewMetal" in export_result["proceduralMaterials"]
+checks["export ignores materials outside the selection"] = "UnselectedMetal" not in export_result["proceduralMaterials"]
 checks["export warns instead of claiming the graph survived"] = any(
     "procedural" in warning and "ReviewMetal" in warning for warning in export_result["warnings"]
 )
 
-print(json.dumps({"ok": all(checks.values()), "checks": checks}))
+all_ok = all(checks.values())
+print(json.dumps({"ok": all_ok, "checks": checks}))
+if not all_ok:
+    raise SystemExit(1)
 print("PASS: shading snippets")

@@ -109,6 +109,20 @@ def _configure_texture(node, texture):
     return node
 
 
+def _validate_number(value, label):
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number, got {value!r}") from None
+
+
+def _validate_color(value, label):
+    if not isinstance(value, (list, tuple)) or len(value) not in {3, 4}:
+        raise ValueError(f"{label} must be a list of 3 or 4 numbers, got {value!r}")
+    for component in value:
+        _validate_number(component, label)
+
+
 def _validate_recipe(recipe):
     preset = str(recipe.get("preset", "dielectric"))
     if preset not in PRESETS:
@@ -116,6 +130,19 @@ def _validate_recipe(recipe):
     space = str(recipe.get("coordinates", "Generated"))
     if space not in {"Object", "Generated", "UV"}:
         raise ValueError(f"coordinates must be Object, Generated or UV, got {space!r}")
+    for key in ("baseColor", "emissionColor"):
+        if key in recipe:
+            _validate_color(recipe[key], key)
+    for key in ("textureScale", "textureLocation", "textureRotation"):
+        if key in recipe:
+            value = recipe[key]
+            if not isinstance(value, (list, tuple)) or len(value) != 3:
+                raise ValueError(f"{key} must be a list of 3 numbers, got {value!r}")
+            for component in value:
+                _validate_number(component, key)
+    for key in ("roughness", "metallic", "emissionStrength"):
+        if key in recipe:
+            _validate_number(recipe[key], key)
     for texture in recipe.get("textures") or []:
         kind = str(texture.get("kind", "noise"))
         if kind not in TEXTURE_TYPES:
@@ -130,6 +157,11 @@ def _validate_recipe(recipe):
         stops = ramp.get("stops", []) if isinstance(ramp, dict) else (ramp or [])
         if len(stops) > 32:
             raise ValueError("a colour ramp supports at most 32 stops")
+        for stop in stops:
+            if not isinstance(stop, dict) or "position" not in stop:
+                raise ValueError("every ramp stop needs a position and a colour")
+            _validate_number(stop["position"], "ramp position")
+            _validate_color(stop.get("color"), "ramp colour")
     bump = recipe.get("bump") or {}
     kind = str(bump.get("kind", "noise"))
     if bump and kind not in {"noise", "voronoi"}:
@@ -195,8 +227,8 @@ def _digest(nodes, links):
                 continue
             try:
                 inputs[socket.name] = _round(list(value))
-            except TypeError:
-                inputs[socket.name] = _round(value)
+            except (TypeError, ValueError):
+                inputs[socket.name] = str(value)
         record = {"name": node.name, "type": node.type, "inputs": inputs}
         if node.type == "VALTORGB":
             record["ramp"] = [
@@ -205,6 +237,11 @@ def _digest(nodes, links):
             ]
             record["interpolation"] = node.color_ramp.interpolation
         record["mute"] = bool(node.mute)
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            record["image"] = node.image.name
+            record["imagePath"] = node.image.filepath
+        if node.type == "GROUP" and node.node_tree is not None:
+            record["group"] = node.node_tree.name
         for attribute in (
             "gradient_type",
             "feature",
@@ -366,8 +403,8 @@ def build_material(name, recipe):
     if hasattr(material, "roughness"):
         material.roughness = float(settings.get("roughness", 0.5))
 
-    for node in nodes:
-        node.location = (0.0, 0.0)
+    for index, node in enumerate(nodes):
+        node.location = ((index % 4) * 240.0, -(index // 4) * 180.0)
     summary = material_summary(material)
     summary["built"] = True
     return summary

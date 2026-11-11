@@ -1315,7 +1315,10 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		content: [
 			{
 				type: "text",
-				text: `Exported ${result.format} to ${result.exportPath} (${result.bytes} bytes, ${result.meshCount} mesh(es)).`,
+				text: [
+					`Exported ${result.format} to ${result.exportPath} (${result.bytes} bytes, ${result.meshCount} mesh(es)).`,
+					...(result.warnings ?? []).map((warning) => `Warning: ${warning}`),
+				].join("\n"),
 			},
 		],
 		details: result,

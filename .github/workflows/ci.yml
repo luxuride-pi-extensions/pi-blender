@@ -471,14 +471,15 @@ jobs:
             test/import-asset.test.mjs \
             test/scene-health.test.mjs \
             test/scene-stats.test.mjs \
-            test/usage-guess.test.mjs 2>&1)"; then
+            test/usage-guess.test.mjs \
+            test/shading-snippets.test.mjs 2>&1)"; then
             printf '%s\n' "$out"
             exit 1
           fi
           printf '%s\n' "$out"
           if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
             echo "::error title=Blender tests skipped despite a real Blender::At" \
-              "least one of the seven suites skipped. detectBlender() did not" \
+              "least one of the eight suites skipped. detectBlender() did not" \
               "find the unpacked build, or one suite looked on the wrong" \
               "channel, and this job verified less than it claims."
             exit 1
