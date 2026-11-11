@@ -117,7 +117,7 @@ def compute_principal_axes(obj):
     count = len(vertices)
     limit = 2000
     stride = max(1, count // limit)
-    points = [obj.matrix_world @ v.co for v in vertices[::stride]]
+    points = [obj.matrix_world @ vertices[index].co for index in range(0, count, stride)]
     if len(points) < 3:
         return {"available": False, "reason": "Fewer than 3 sampled vertices"}
 
