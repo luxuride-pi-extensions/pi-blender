@@ -28,7 +28,7 @@ import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
-import { resolveCameraPlan } from "./camera-plan.js";
+import { mergeCameraPlan } from "./camera-plan.js";
 import { collectModuleOwnership } from "./generations.js";
 import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
@@ -270,6 +270,7 @@ def _frame_subjects(plan):
         subjects = sorted(
             name for name in apply_objects
             if not name.endswith(CAMERA_SUFFIX)
+            and not name.endswith(CAMERA_SUFFIX + "Target")
             and bpy.data.objects.get(name) is not None
             and bpy.data.objects[name].type == "MESH"
         )
@@ -317,6 +318,12 @@ def _frame_module_camera(module, plan):
     width = max(int(resolution.get("x") or 1200), 1)
     height = max(int(resolution.get("y") or 900), 1)
     aspect = width / height
+    # world_to_camera_view projects through camera.view_frame, which reads the
+    # SCENE resolution. Setting it here makes the fit and the coverage check use
+    # the same frame; render_scene writes the same values again later.
+    bpy.context.scene.render.resolution_x = width
+    bpy.context.scene.render.resolution_y = height
+    bpy.context.scene.render.resolution_percentage = 100
 
     bounds_min, bounds_max = bounds
     center = (bounds_min + bounds_max) * 0.5
@@ -326,8 +333,15 @@ def _frame_module_camera(module, plan):
     # Fit the bounding SPHERE, using the NARROWER of the horizontal and vertical
     # half-angles. Fitting only the sensor width crops a tall subject on a
     # landscape frame, which is exactly the bug a fixed lens hid.
-    half_horizontal = math.atan((FRAME_SENSOR_MM * 0.5) / lens)
-    half_vertical = math.atan((FRAME_SENSOR_MM / aspect) * 0.5 / lens)
+    # sensor_fit AUTO fits the 36 mm sensor to the LONGER frame dimension, so a
+    # portrait frame has a narrower horizontal half-angle, not a narrower
+    # vertical one.
+    if aspect >= 1:
+        sensor_horizontal, sensor_vertical = FRAME_SENSOR_MM, FRAME_SENSOR_MM / aspect
+    else:
+        sensor_horizontal, sensor_vertical = FRAME_SENSOR_MM * aspect, FRAME_SENSOR_MM
+    half_horizontal = math.atan((sensor_horizontal * 0.5) / lens)
+    half_vertical = math.atan((sensor_vertical * 0.5) / lens)
     half_angle = min(half_horizontal, half_vertical)
     distance = radius / math.sin(half_angle) * FRAME_MARGIN if not orthographic else radius * 4.0
     requested_distance = plan.get("distance")
@@ -341,10 +355,17 @@ def _frame_module_camera(module, plan):
     if created:
         camera = bpy.data.objects.new(camera_name, bpy.data.cameras.new(camera_name))
         bpy.context.scene.collection.objects.link(camera)
+    # Older harnesses aimed the camera with a Track To empty. The rotation is
+    # baked now, and leaving the empty would keep it in the module's ownership
+    # forever; only the exact legacy name is removed, never a user empty.
+    legacy_target = bpy.data.objects.get(camera_name + "Target")
+    if legacy_target is not None and legacy_target.type == "EMPTY":
+        bpy.data.objects.remove(legacy_target, do_unlink=True)
     camera.data.type = "ORTHO" if orthographic else "PERSP"
     camera.data.lens = lens
     camera.data.sensor_width = FRAME_SENSOR_MM
     camera.data.sensor_fit = "AUTO"
+    camera.data.clip_end = max(camera.data.clip_end, distance + radius * 2.0)
 
     # Bake the rotation rather than constrain it to an empty: coverage is
     # evaluated immediately, and a constraint is only resolved after a depsgraph
@@ -354,18 +375,15 @@ def _frame_module_camera(module, plan):
     camera.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
 
     coverage = None
+    coverage_ok = False
     for _ in range(10):
         camera.location = center + direction * distance
         camera.data.ortho_scale = ortho_scale
         coverage = _subject_coverage(camera, subjects)
         if coverage is None:
-            # Behind the camera cannot be fixed by moving further out along the
-            # same direction; move to the opposite side instead of reporting a
-            # camera that never saw the subject.
-            direction = -direction
-            camera.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
-            continue
+            break
         if coverage["minX"] >= 0.02 and coverage["maxX"] <= 0.98 and coverage["minY"] >= 0.02 and coverage["maxY"] <= 0.98:
+            coverage_ok = True
             break
         if orthographic:
             ortho_scale *= 1.15
@@ -414,6 +432,7 @@ def _frame_module_camera(module, plan):
         "orthoScale": ortho_scale if orthographic else None,
         "fitDistance": fit_distance,
         "coverage": coverage,
+        "coverageOk": coverage_ok,
         "shot": shot.get("name") or "hero",
         "subjects": subjects,
     }
@@ -654,13 +673,16 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const previousPlan = [...(manifest.branchRuns ?? [])]
 		.filter((run) => run.module === moduleName && run.cameraPlan)
 		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0]?.cameraPlan;
-	const cameraPlan = resolveCameraPlan({
-		profile: options.cameraProfile ?? previousPlan?.profile,
-		frontAxis: options.frontAxis ?? previousPlan?.frontAxis,
-		shots: options.cameraShots ?? previousPlan?.shots.map((shot) => shot.kind),
-		frameSubject: options.frameSubject ?? previousPlan?.frameSubject,
-		distance: options.cameraDistance ?? previousPlan?.distance,
-	});
+	const cameraPlan = mergeCameraPlan(
+		{
+			profile: options.cameraProfile,
+			frontAxis: options.frontAxis,
+			shots: options.cameraShots,
+			frameSubject: options.frameSubject,
+			distance: options.cameraDistance,
+		},
+		previousPlan,
+	);
 
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.

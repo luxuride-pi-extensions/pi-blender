@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveCameraPlan } from "../blender/camera-plan.ts";
+import { loadTs } from "./paths.mjs";
+
+const { mergeCameraPlan, resolveCameraPlan } = await loadTs("../blender/camera-plan.ts");
 
 const profiles = ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"]
 
@@ -71,4 +73,35 @@ test("the frame subject and a lineup distance are carried into the plan", () => 
 	assert.equal(plan.distance, 12.5);
 	assert.equal(plan.primary.name, "lineup_front");
 	assert.equal(plan.primary.orthographic, true);
+});
+
+test("a new profile re-expands its own shots instead of reusing the old list", () => {
+	const previous = resolveCameraPlan({ profile: "prop", frontAxis: "-Y" });
+	const interior = mergeCameraPlan({ profile: "interior" }, previous);
+	assert.equal(interior.profile, "interior");
+	assert.deepEqual(interior.shots.map((shot) => shot.kind), ["interior_hero", "interior_front"]);
+	assert.equal(interior.shots[0].lensMm, 20, "the interior profile brings its 20 mm lens");
+});
+
+test("omitting the contract reuses the previous plan", () => {
+	const previous = resolveCameraPlan({ profile: "character", frontAxis: "+X", frameSubject: "module" });
+	const same = mergeCameraPlan({}, previous);
+	assert.equal(same.profile, "character");
+	assert.equal(same.frontAxis, "+X");
+	assert.equal(same.frameSubject, "module");
+	assert.deepEqual(same.shots.map((shot) => shot.kind), previous.shots.map((shot) => shot.kind));
+});
+
+test("an explicit shot list wins over both the profile and the previous plan", () => {
+	const previous = resolveCameraPlan({ profile: "prop", frontAxis: "-Y" });
+	const plan = mergeCameraPlan({ shots: ["top", "hero"] }, previous);
+	assert.deepEqual(plan.shots.map((shot) => shot.kind), ["top", "hero"]);
+	assert.equal(plan.profile, "prop", "the profile still labels the plan it came from");
+});
+
+test("an unreadable previous plan warns and falls back instead of throwing", () => {
+	const previous = { ...resolveCameraPlan({ profile: "prop" }), shots: [{ kind: "closeup" }] };
+	const plan = mergeCameraPlan({}, previous);
+	assert.deepEqual(plan.shots.map((shot) => shot.kind), ["hero", "front"]);
+	assert.match(plan.warnings.join(" "), /Ignored an unreadable previous camera plan/);
 });

@@ -147,6 +147,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
 		cameraPlan: branchResult.cameraPlan,
+		warnings: branchResult.cameraPlan.warnings.length ? branchResult.cameraPlan.warnings : undefined,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration: branchResult.iteration,
 			sequence: branchResult.sequence,
@@ -193,6 +194,23 @@ async function compareWithPreviousDigest(
 		comparedWithIteration: previous.iteration,
 		unchangedSinceLastRun: previous.stateDigest === result.stateDigest,
 	};
+}
+
+function liveCameraWarning(options: ModuleRunOptions): string[] | undefined {
+	const declared = [
+		options.cameraProfile ? "cameraProfile" : null,
+		options.frontAxis ? "frontAxis" : null,
+		options.cameraShots ? "cameraShots" : null,
+		options.frameSubject ? "frameSubject" : null,
+		options.cameraDistance !== undefined ? "cameraDistance" : null,
+	].filter((name): name is string => name !== null);
+	if (declared.length === 0) return undefined;
+	// A live run keeps the session's camera: replacing it would silently move the
+	// user's view and the branch harness is the only path that owns a framing
+	// step. Saying so is better than returning a result with no cameraPlan.
+	return [
+		`${declared.join(", ")} ${declared.length === 1 ? "applies" : "apply"} to the headless path only; this live run used the session camera.`,
+	];
 }
 
 async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<ModuleRunResult> {
@@ -364,6 +382,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		renderOutputPath,
 		changed: result.changed,
 		executionMode: "live-session",
+		warnings: liveCameraWarning(options),
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration,
 			sequence,

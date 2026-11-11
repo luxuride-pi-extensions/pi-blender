@@ -250,7 +250,7 @@ export interface BranchRunOptions {
 	cameraShots?: CameraShotKind[];
 	/** Frame this run's own touched geometry, or the widened apply set. */
 	frameSubject?: "module" | "apply";
-	/** Fixed distance for lineup shots; omitted to fit the subject. */
+	/** Minimum camera distance; a larger subject still fits. Omitted to fit. */
 	cameraDistance?: number;
 }
 
@@ -383,6 +383,8 @@ export interface BranchCameraFraming {
 	orthoScale?: number | null;
 	fitDistance?: number | null;
 	coverage?: { minX: number; maxX: number; minY: number; maxY: number } | null;
+	/** False when ten refits still left a corner outside the safe frame. */
+	coverageOk?: boolean;
 	shot?: string;
 }
 
@@ -1511,6 +1513,8 @@ export interface ModuleRunResult {
 	cameras?: BranchCameraFraming[];
 	/** The camera plan this run resolved, when it ran headless. */
 	cameraPlan?: ResolvedCameraPlan;
+	/** Behaviour the caller should know about, e.g. options this path ignored. */
+	warnings?: string[];
 	/**
 	 * Content hash of the datablocks this run applied. Comparing it with the
 	 * previous run's is how a caller learns that an iteration changed nothing,

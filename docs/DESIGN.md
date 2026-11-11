@@ -408,14 +408,19 @@ Start pi in any project dir. The extension:
   `frontAxis`; the plan expands to an inspectable shot list (hero, orthographic
   front/side/top, character front/left/back, interior 20 mm presets, asset-pack
   lineup) and the first shot is rendered. Coverage is checked with
-  `world_to_camera_view` over the subject's bounds and the camera is moved out
-  until every corner is inside a safe frame, so a radius fit cannot silently
-  crop a tall or thin part. `frameSubject: "module"` frames the geometry this
+  `world_to_camera_view` over the subject's bounds and the camera is refit out
+  (up to ten times, with the resulting coverage reported) so a radius fit
+  cannot silently crop a tall or thin part. A `cameraDistance` is a floor, not
+  a fixed framing: a larger subject still fits. `left`/`right` name Blender's
+  view directions, not the subject's anatomy — the "left" shot sees the side a
+  viewer on the subject's left sees. `frameSubject: "module"` frames the geometry this
   run touched, which is how a detail parented to a body is photographed at
   detail scale instead of body scale. The resolved plan is recorded and reused
   by later iterations unless the brief changes it, because a front that moves
-  between iterations turns every comparison into a camera comparison. An
-  explicit `view` still wins for the picture
+  between iterations turns every comparison into a camera comparison, while a
+  NEW profile or shot list re-expands instead of reusing the old list. The
+  camera options are the headless path's: a live run uses the session camera
+  and says so in its warnings. An explicit `view` still wins for the picture
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

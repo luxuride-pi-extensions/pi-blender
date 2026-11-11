@@ -866,6 +866,16 @@ detail.matrix_world.translation = (8.0, 0.0, 0.0)
 		assert.ok(framing.coverage, "coverage is reported");
 		assert.ok(framing.coverage.minX >= 0.02 && framing.coverage.maxX <= 0.98, "the detail is inside the safe frame");
 		assert.ok(framing.coverage.minY >= 0.02 && framing.coverage.maxY <= 0.98, "the detail is inside the safe frame vertically");
+		const placed = await cameraReport(ws.root, ws.blendPath, framing.cameraName);
+		assert.ok(placed, "the framed camera reached model.blend");
+		assert.ok(
+			placed.location[1] - framing.center[1] > 0,
+			`a +Y front puts the camera at +Y in the file, not only in the report (${JSON.stringify(placed.location)} vs ${JSON.stringify(framing.center)})`,
+		);
+		assert.ok(
+			Math.abs(placed.location[0] - framing.center[0]) < placed.location[1] - framing.center[1],
+			"the front shot is not the old fixed three-quarter direction",
+		);
 
 		const widened = await module.blenderModuleRun({
 			cwd: ws.root,

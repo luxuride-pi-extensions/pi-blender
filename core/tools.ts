@@ -661,7 +661,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				"Use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.",
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
@@ -702,7 +702,8 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Fixed camera distance for asset-pack lineup shots. Omit to fit the subject.",
+			description: "Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			minimum: 0,
 		}),
 	),
 	resolution: Type.Optional(
@@ -783,7 +784,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				"Use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.",
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
@@ -824,7 +825,8 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Fixed camera distance for asset-pack lineup shots. Omit to fit the subject.",
+			description: "Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			minimum: 0,
 		}),
 	),
 	resolution: Type.Optional(

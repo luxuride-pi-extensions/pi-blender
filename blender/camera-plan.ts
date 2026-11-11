@@ -96,13 +96,54 @@ function shotDirection(kind: CameraShotKind, frontAxis: CameraFrontAxis): [numbe
  * contract a review sheet consumes. Generating them anyway makes the plan
  * reviewable and keeps the profile decision out of the renderer.
  */
-export function resolveCameraPlan(options: {
+type CameraPlanOptions = {
 	profile?: CameraProfile;
 	frontAxis?: CameraFrontAxis;
 	shots?: CameraShotKind[];
 	frameSubject?: "module" | "apply";
 	distance?: number;
-}): ResolvedCameraPlan {
+};
+
+/**
+ * Merge this run's declaration over the plan the module used last time.
+ *
+ * A profile or an explicit shot list is a NEW declaration and must re-expand
+ * the defaults; only an omitted contract is the "same camera" case. A previous
+ * plan read from a manifest is untrusted input: one hand edit or a newer writer
+ * must not make every later run of that module throw, so an unreadable plan is
+ * ignored with a warning rather than partially applied.
+ */
+export function mergeCameraPlan(
+	options: CameraPlanOptions,
+	previous: ResolvedCameraPlan | undefined,
+): ResolvedCameraPlan {
+	const usable = sanitizePrevious(previous);
+	const plan = resolveCameraPlan({
+		profile: options.profile ?? usable?.profile,
+		frontAxis: options.frontAxis ?? usable?.frontAxis,
+		shots:
+			options.shots ??
+			(options.profile ? undefined : usable?.shots.map((shot) => shot.kind)),
+		frameSubject: options.frameSubject ?? usable?.frameSubject,
+		distance: options.distance ?? usable?.distance,
+	});
+	if (previous && !usable) {
+		return { ...plan, warnings: [...plan.warnings, "Ignored an unreadable previous camera plan."] };
+	}
+	return plan;
+}
+
+function sanitizePrevious(previous: ResolvedCameraPlan | undefined): ResolvedCameraPlan | undefined {
+	if (!previous || typeof previous !== "object") return undefined;
+	if (!(previous.profile in PROFILE_SHOTS)) return undefined;
+	if (!(previous.frontAxis in FRONT_VECTORS)) return undefined;
+	if (previous.frameSubject !== "module" && previous.frameSubject !== "apply") return undefined;
+	if (!Array.isArray(previous.shots) || previous.shots.length === 0) return undefined;
+	if (!previous.shots.every((shot) => shot.kind in SHOT_LENS)) return undefined;
+	return previous;
+}
+
+export function resolveCameraPlan(options: CameraPlanOptions): ResolvedCameraPlan {
 	const profile = options.profile ?? "prop";
 	const frontAxis = options.frontAxis ?? "-Y";
 	const warnings: string[] = [];
