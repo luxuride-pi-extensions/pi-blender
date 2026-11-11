@@ -35,20 +35,30 @@ bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, segments=16, ring_count=8)
 high = bpy.context.object
 high.name = "HighSculpt"
 
+scene = bpy.context.scene
+engine_before = scene.render.engine
+selected_before = list(bpy.context.selected_objects)
 output = os.path.join(tempfile.mkdtemp(prefix="pi-bake-"), "low_normal.png")
-report = bake_module.bake_normal(low, high, output, resolution=64, samples=1)
+report = bake_module.bake_normal(low, high, output, resolution=64, samples=1, cage_extrusion=0.25)
 
 check(os.path.exists(output) and os.path.getsize(output) > 0, "the normal map is written")
 check(report["resolution"] == 64 and report["samples"] == 1, "the report names the resolution and samples used")
 check(report["lowTriangles"] < report["highTriangles"], "the cage has fewer triangles than the sculpt")
 check(0.0 <= report["triangleReduction"] <= 1.0, "the triangle reduction is a fraction")
 check(report["elapsedSeconds"] >= 0, "elapsed time is reported")
+check(len(low.data.uv_layers) > 0 and report["uvCreated"] in (True, False), "the low-poly cage has UVs for the bake")
+check(scene.render.engine == engine_before, "the previous engine is restored after the bake")
+check(list(bpy.context.selected_objects) == selected_before, "the previous selection is restored after the bake")
 material = bpy.data.materials.get(report["materialName"])
 assert material is not None and material.node_tree is not None
 check(material.use_nodes, "the low-poly material was created")
 image_node = material.node_tree.nodes.get("BakeTarget")
 assert image_node is not None and image_node.image is not None
-check(True, "the material references the baked image")
+pixels = image_node.image.pixels[:]
+check(
+    max(pixels[0::4]) - min(pixels[0::4]) > 0.02 and max(pixels[1::4]) - min(pixels[1::4]) > 0.02,
+    "the baked image is not a flat colour",
+)
 check(image_node.image.packed_file is not None, "the image is packed so a glTF export embeds it")
 normal_map = material.node_tree.nodes.get("BakedNormalMap")
 assert normal_map is not None
@@ -66,7 +76,14 @@ bpy.ops.object.select_all(action="DESELECT")
 low.select_set(True)
 bpy.context.view_layer.objects.active = low
 bpy.ops.export_scene.gltf(filepath=export_path, export_format="GLB", use_selection=True)
-check(os.path.exists(export_path) and os.path.getsize(export_path) > 1000, "the cage exports with the baked material")
+with open(export_path, "rb") as handle:
+    raw = handle.read()
+length = int.from_bytes(raw[12:16], "little")
+document = raw[20 : 20 + length].decode("utf-8")
+check(
+    os.path.getsize(export_path) > 1000 and "normalTexture" in document and '"images"' in document,
+    "the cage exports with the baked normal texture",
+)
 
 try:
     bake_module.bake_normal(low, high, output, resolution=8, samples=1)

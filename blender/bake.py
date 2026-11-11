@@ -49,9 +49,10 @@ def _bake_target(low, image_name, resolution):
         target.name = "BakeTarget"
         target.location = (-420, 320)
     image = bpy.data.images.get(image_name)
-    if image is not None:
-        bpy.data.images.remove(image)
-    image = bpy.data.images.new(image_name, width=resolution, height=resolution, alpha=False)
+    if image is None:
+        image = bpy.data.images.new(image_name, width=resolution, height=resolution, alpha=False)
+    elif image.size[0] != resolution or image.size[1] != resolution:
+        image.scale(resolution, resolution)
     image.colorspace_settings.name = "Non-Color"
     target.image = image
     nodes.active = target
@@ -94,6 +95,8 @@ def bake_normal(
     if samples < 1 or samples > 4096:
         raise ValueError(f"samples {samples} is outside 1..4096")
 
+    previously_selected = [obj for obj in bpy.context.selected_objects]
+    previous_active = bpy.context.view_layer.objects.active
     output_path = os.path.abspath(output_path)
     try:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -115,36 +118,41 @@ def bake_normal(
         "margin": bake.margin,
     }
 
-    for other in bpy.context.selected_objects:
-        other.select_set(False)
-    low.select_set(True)
-    high.select_set(True)
-    bpy.context.view_layer.objects.active = low
-    scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
-    scene.cycles.samples = samples
-    bake.use_selected_to_active = True
     used_cage = cage_extrusion if cage_extrusion is not None else max(0.001, low.dimensions.length * 0.02)
-    bake.cage_extrusion = used_cage
-    bake.margin = margin
-
     started = time.monotonic()
     try:
-        bpy.ops.object.bake(type="NORMAL")
-    except RuntimeError as error:
-        raise RuntimeError(
-            f"Normal bake failed at {resolution}x{resolution} with {samples} samples "
-            f"({low_triangles} -> {high_triangles} triangles): {error}. "
-            "Lower resolution or samples, or widen cage_extrusion."
-        ) from error
-    elapsed = time.monotonic() - started
-
-    image.filepath_raw = output_path
-    image.file_format = "PNG"
-    image.save()
-    image.pack()
-
-    try:
+        for other in bpy.context.selected_objects:
+            other.select_set(False)
+        low.select_set(True)
+        high.select_set(True)
+        bpy.context.view_layer.objects.active = low
+        scene.render.engine = "CYCLES"
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = samples
+        bake.use_selected_to_active = True
+        bake.cage_extrusion = used_cage
+        bake.margin = margin
+        try:
+            bpy.ops.object.bake(type="NORMAL")
+        except RuntimeError as error:
+            raise RuntimeError(
+                f"Normal bake failed at {resolution}x{resolution} with {samples} samples "
+                f"({low_triangles} -> {high_triangles} triangles): {error}. "
+                "Lower resolution or samples, or widen cage_extrusion."
+            ) from error
+        elapsed = time.monotonic() - started
+        try:
+            image.filepath_raw = output_path
+            image.file_format = "PNG"
+            image.save()
+            image.pack()
+        except (OSError, RuntimeError) as error:
+            raise RuntimeError(f"Normal bake could not write {output_path}: {error}") from error
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError(f"Normal bake wrote no PNG at {output_path}")
+    finally:
+        # Engine, bake settings and selection are all process-wide state: a
+        # failure halfway through must not change the next render's cost or look.
         scene.render.engine = previous_engine
         if previous_samples is not None:
             scene.cycles.samples = previous_samples
@@ -153,10 +161,11 @@ def bake_normal(
         bake.use_selected_to_active = previous_bake["use_selected_to_active"]
         bake.cage_extrusion = previous_bake["cage_extrusion"]
         bake.margin = previous_bake["margin"]
-    except (AttributeError, TypeError):
-        # A build without Cycles leaves nothing to restore; the bake itself
-        # already failed above if that mattered.
-        pass
+        for other in bpy.context.selected_objects:
+            other.select_set(False)
+        for obj in previously_selected:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = previous_active
 
     return {
         "imagePath": output_path,
