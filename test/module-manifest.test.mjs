@@ -15,7 +15,7 @@ import { loadTs } from "./paths.mjs";
 // The manifest publish runs inside BlenderModuleRevert's neighbours, so it is
 // exported purely to be assertable here; loading the module still needs jiti,
 // because pi-blender is TypeScript with NodeNext ".js" specifiers.
-const { applySuccessfulRun } = await loadTs("../blender/module.ts");
+const { applySuccessfulRun, pruneRevertedGenerations } = await loadTs("../blender/module.ts");
 
 function manifest(overrides = {}) {
 	return {
@@ -127,11 +127,79 @@ describe("the iteration counter only ever goes up", () => {
 		assert.equal(m.renderOutputs[0].module, "table-top");
 	});
 
+	it("records the digest and ownership so the next run has a subject", () => {
+		const m = manifest();
+
+		applySuccessfulRun(m, run({ ownedObjects: ["Mug"], ownedMaterials: ["Glaze"], stateDigest: "abc" }));
+
+		assert.deepEqual(m.moduleRuns[0].ownedObjects, ["Mug"]);
+		assert.deepEqual(m.moduleRuns[0].ownedMaterials, ["Glaze"]);
+		assert.equal(m.moduleRuns[0].stateDigest, "abc");
+	});
+
 	it("records no render when there was none", () => {
 		const m = manifest();
 
 		applySuccessfulRun(m, run(), null);
 
 		assert.deepEqual(m.renderOutputs, []);
+	});
+});
+
+describe("a revert retires the generations it removed from model.blend", () => {
+	const branchRun = (module, sequence, status) => ({ module, sequence, status });
+
+	it("drops every applied branch record at or after the target, and the matching live runs", () => {
+		const current = {
+			moduleRuns: [
+				{ name: "mug", sequence: 1 },
+				{ name: "mug", sequence: 3 },
+				{ name: "arm", sequence: 4 },
+			],
+			branchRuns: [
+				branchRun("mug", 1, "applied"),
+				branchRun("mug", 3, "applied"),
+				branchRun("arm", 4, "applied"),
+			],
+		};
+
+		pruneRevertedGenerations(current, { name: "mug", sequence: 2 });
+
+		assert.deepEqual(
+			current.moduleRuns.map((run) => run.sequence),
+			[1],
+			"a later module run no longer describes model.blend",
+		);
+		assert.deepEqual(
+			current.branchRuns.map((run) => `${run.module}:${run.sequence}`),
+			["mug:1"],
+			"a whole-file restore removes every module's later work, not just the reverted module's",
+		);
+	});
+
+	it("keeps a staged branch record, whose work is still in its branch blend", () => {
+		const current = {
+			moduleRuns: [],
+			branchRuns: [branchRun("mug", 2, "staged"), branchRun("mug", 3, "applied")],
+		};
+
+		pruneRevertedGenerations(current, { name: "mug", sequence: 2 });
+
+		assert.deepEqual(
+			current.branchRuns.map((run) => `${run.sequence}:${run.status}`),
+			["2:staged"],
+		);
+	});
+
+	it("changes nothing when there is no target record", () => {
+		const current = {
+			moduleRuns: [{ name: "mug", sequence: 3 }],
+			branchRuns: [branchRun("mug", 3, "applied")],
+		};
+
+		pruneRevertedGenerations(current, undefined);
+
+		assert.equal(current.moduleRuns.length, 1);
+		assert.equal(current.branchRuns.length, 1);
 	});
 });

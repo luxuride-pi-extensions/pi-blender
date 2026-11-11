@@ -26,6 +26,7 @@ import { loadTs } from "./paths.mjs";
 const branch = await loadTs(`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`);
 const workspace = await loadTs(`${fileURLToPath(new URL("../blender/workspace.ts", import.meta.url))}`);
 const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", import.meta.url))}`);
+const render = await loadTs(`${fileURLToPath(new URL("../blender/render.ts", import.meta.url))}`);
 const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
@@ -549,6 +550,93 @@ test("blender_module_run works with NO window, by branching and applying", { ski
 	}
 });
 
+test("a branch render and a background render resolve the same engine", { skip }, async () => {
+	// Both paths used to carry their own copy of the render script. The branch
+	// renderer never chose an engine, so a branch image came from an unrecorded
+	// one, and blender_render's preference list was silently dropped when the
+	// assignment raised. They now share render_scene, so the resolved engine must
+	// be identical for the same scene -- that equality is what says the copies
+	// are gone. The explicit Cycles request pins the list-walking half.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "engine", ADD_CUBE);
+		const staged = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "engine",
+			render: true,
+			timeoutSeconds: 300,
+		});
+		assert.ok(staged.resolvedEngine, "a branch render must report the engine it used");
+
+		const background = await render.blenderRender({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			renderMethod: "background",
+			outputName: "engine.png",
+		});
+		assert.equal(
+			background.resolvedEngine,
+			staged.resolvedEngine,
+			"the branch render and blender_render must not pick different engines",
+		);
+
+		// A build without Cycles cannot satisfy the request and says so; the
+		// equality above still covers the shared code on that build.
+		try {
+			const cycles = await render.blenderRender({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				renderMethod: "background",
+				renderEngine: "cycles",
+				outputName: "cycles.png",
+			});
+			const branchCycles = await branch.blenderBranchRun({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				moduleName: "engine",
+				render: true,
+				renderEngine: "cycles",
+				timeoutSeconds: 300,
+			});
+			assert.equal(cycles.resolvedEngine, "CYCLES", "a requested engine must be used, not dropped into the probe");
+			assert.equal(
+				branchCycles.resolvedEngine,
+				cycles.resolvedEngine,
+				"a module render must be able to request an engine too",
+			);
+		} catch (error) {
+			if (!/No usable render engine/.test(String(error))) throw error;
+		}
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a failed render keeps the saved branch and names the stage that failed", { skip }, async () => {
+	// A render failure used to be indistinguishable from a failed run: the
+	// caller saw renderOutputPath null. The branch is saved before the render, so
+	// the build must survive and the reason must travel with it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "broken-render", ADD_CUBE);
+		const staged = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "broken-render",
+			render: true,
+			view: "NoSuchCamera",
+			timeoutSeconds: 300,
+		});
+		assert.equal(staged.exitCode, 0);
+		assert.equal(staged.renderOutputPath, null);
+		assert.match(String(staged.renderError), /Camera not found: NoSuchCamera/);
+		assert.ok(existsSync(staged.branchPath), "the geometry was saved before the render failed");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a module's own camera survives the apply, and renders from it", { skip }, async () => {
 	// The per-module review loop depends on two things holding at once: the
 	// camera the worker authored travels into model.blend with its geometry, so
@@ -720,6 +808,10 @@ test("an unchanged iteration is reported as unchanged, without a render", { skip
 		});
 		assert.equal(repeat.unchangedSinceLastRun, true, "re-running the same script must be reported as no change");
 		assert.equal(repeat.comparedWithIteration, first.iteration);
+		assert.ok(
+			repeat.stateDigest && first.stateDigest && repeat.stateDigest === first.stateDigest,
+			"unchanged must come from two real, equal digests — not from both sides being empty",
+		);
 
 		// Now change the geometry, which must move the digest.
 		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));
@@ -805,6 +897,8 @@ bpy.ops.mesh.primitive_cube_add()
 bpy.context.object.name = "Mug"
 material = bpy.data.materials.new("Glaze")
 material.use_nodes = True
+# A zero-user material is dropped by the save, so the branch would not contain it.
+bpy.context.object.data.materials.append(material)
 `);
 		await module.blenderModuleRun({
 			cwd: ws.root,
@@ -827,6 +921,18 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
 			render: false,
 			timeoutSeconds: 300,
 		});
+		// Re-run the paint module untouched: its geometry set is empty, so the
+		// digest can only survive if material ownership was carried forward.
+		const repainted = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "glaze",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.ok(painted.stateDigest, "a material-only edit still has a subject");
+		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
+		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
 		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
