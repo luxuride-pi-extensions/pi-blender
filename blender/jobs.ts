@@ -131,10 +131,9 @@ const inFlight = new Map<string, AbortController>();
 /**
  * Mark a running job cancelled and abort its worker.
  *
- * The process may have written more of the job since the read, so the state is
- * written after the abort. A worker that had already finished cannot overwrite
- * this: its completion goes through `finishJob`, which leaves a cancelled
- * record alone.
+ * The state is written before the abort so the worker's rejection cannot land
+ * as "failed" on a job the user just cancelled. A worker that had already
+ * finished goes through `finishJob`, which leaves a cancelled record alone.
  */
 export async function cancelJob(
 	id: string,

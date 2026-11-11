@@ -45,6 +45,7 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_search_manual_docs` | search the bundled Blender manual |
 | `blender_usage_guess` | guess what a saved blend is for (animation/rendering/shading/procedural/modelling scores) |
 | `blender_job_status` | poll a deferred render/montage/compare job |
+| `blender_job_cancel` | cancel a running deferred render/montage/compare job (idempotent) |
 
 The `/blender` command engages manager mode over these tools; child agents
 (`blender-worker`, `blender-critic`, `blender-reference-describer`,
