@@ -1,0 +1,1566 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 8c62aa2..c4d0148 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -144,12 +144,15 @@ jobs:
+       # So this list is now MEASURED, not reasoned: each file was run on its
+       # own from a `git archive` export -- no sibling checkout, no installed
+       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
+-      # not exist -- which is the state this step creates. Exactly five files
+-      # and 28 tests survive:
++      # not exist -- which is the state this step creates. Exactly eight files
++      # and 44 tests survive:
+       #
+       #   concurrency-budget.test.mjs   11
++      #   generations.test.mjs           8
+       #   headless-changed.test.mjs      2
++      #   live-ownership.test.mjs        3
+       #   module-paths.test.mjs          7
++      #   module-state.test.mjs          5
+       #   tool-params.test.mjs           3
+       #   windowless-tools.test.mjs      5
+       #
+@@ -162,7 +165,7 @@ jobs:
+       # derived from `ls test/*.test.mjs`: a new test file is unverified by
+       # default and has to be added here, which is the safe direction for a
+       # mistake in the other one.
+-      - name: typecheck and the five core-free suites
++      - name: typecheck and the eight core-free suites
+         env:
+           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
+           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+@@ -172,8 +175,11 @@ jobs:
+           npm run typecheck
+           node --test \
+             test/concurrency-budget.test.mjs \
++            test/generations.test.mjs \
+             test/headless-changed.test.mjs \
++            test/live-ownership.test.mjs \
+             test/module-paths.test.mjs \
++            test/module-state.test.mjs \
+             test/tool-params.test.mjs \
+             test/windowless-tools.test.mjs
+ 
+@@ -263,7 +269,8 @@ jobs:
+                 | grep -v -e launch-guard -e watch-window \
+                           -e concurrency-budget -e module-paths \
+                           -e tool-params -e windowless-tools \
+-                          -e headless-changed)
++                          -e headless-changed -e generations \
++                          -e live-ownership -e module-state)
+ 
+       # The same two suites step 2 exists for, now with
+       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
+diff --git a/blender/branch.ts b/blender/branch.ts
+index 6948b18..47ca67f 100644
+--- a/blender/branch.ts
++++ b/blender/branch.ts
+@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
+ import { getBlenderAssetsDir } from "../config.js";
+ import { isLiveBridgeAlive } from "../launch.js";
+ import { requestLiveBlenderReloadBlend } from "./bridge.js";
++import { collectModuleOwnership } from "./generations.js";
+ import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
+ import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
+ import type {
+@@ -95,7 +96,6 @@ export function getBranchBlendPath(workspacePath: string, moduleName: string): s
+ function buildBranchRunScript(): string {
+ 	return `
+ import contextlib
+-import hashlib
+ import io
+ import json
+ import math
+@@ -120,18 +120,24 @@ from mathutils import Vector  # pyright: ignore[reportMissingImports]
+ # of this algorithm are two answers to "did anything change", and the apply side
+ # only trusts a run if both paths agree.
+ from fingerprint import content_changed, snapshot
++from module_state import (
++    diff_snapshots,
++    owned_after,
++    owned_materials_after,
++    state_digest as compute_state_digest,
++    widen_apply_objects,
++)
+ 
+ branch_path = payload["branchPath"]
+ workspace_path = payload["workspacePath"]
+ iteration_path = payload["iterationPath"]
+ script_path = payload["scriptPath"]
+ module_name = payload["moduleName"]
+-owned_objects = set(payload.get("ownedObjects") or [])
++owned_objects = list(payload.get("ownedObjects") or [])
++owned_materials = list(payload.get("ownedMaterials") or [])
+ 
+ 
+ before = snapshot(bpy)
+-before_objects = set(before["objects"])
+-before_materials = set(before["materials"])
+ 
+ globals_dict = {
+     "__name__": "__main__",
+@@ -159,8 +165,7 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
+         os.chdir(previous_cwd)
+ 
+ after = snapshot(bpy)
+-after_objects = set(after["objects"])
+-after_materials = set(after["materials"])
++delta = diff_snapshots(before, after)
+ 
+ # The same content fingerprint the live bridge reports, from the same snapshot
+ # pair. Computed BEFORE framing: the auto-framed camera and its target are
+@@ -168,43 +173,27 @@ after_materials = set(after["materials"])
+ # every successful framing run as a change and make the flag useless.
+ changed = content_changed(before, after)
+ 
+-touched_objects = sorted(
+-    name for name in (before_objects | after_objects) if before["objects"].get(name) != after["objects"].get(name)
+-)
+-touched_materials = sorted(
+-    name for name in (before_materials | after_materials) if before["materials"].get(name) != after["materials"].get(name)
+-)
++touched_objects = delta["touchedObjects"]
++touched_materials = delta["touchedMaterials"]
+ 
+ # The APPLY set is wider than the touched set, because a datablock that travels
+ # alone is invalid: a parented object without its parent is not a usable object,
+ # and a parent without its children strands them. The widening happens HERE and
+ # is reported in the record, rather than being discovered at apply time — a
+ # widened apply set is exactly what turns into a conflict against a sibling.
+-
+-# Objects the module DELETED. These are removals on apply, never appends, and
+-# the distinction matters: a deleted object is also "touched" in the sense that
+-# its fingerprint disappeared, so classifying it by touch alone would put it in
+-# the apply set and the apply would then fail looking for it in a branch that
+-# correctly no longer contains it.
+-deleted = before_objects - after_objects
+-
+-apply_objects = (set(touched_objects) - deleted)
+-for name in list(apply_objects):
+-    obj = bpy.data.objects.get(name)
+-    if obj is None:
+-        continue
+-    ancestor = obj.parent
+-    while ancestor is not None:
+-        apply_objects.add(ancestor.name)
+-        ancestor = ancestor.parent
+-    for descendant in obj.children_recursive:
+-        apply_objects.add(descendant.name)
+-
+-# A deleted object that was only a relative of something touched is NOT counted
+-# as deleted by this module: it never asked for its removal, and dropping a
+-# sibling because a parent moved would be the module's apply destroying another
+-# module's work. Only objects the module itself removed are applied as removals.
+-removed_objects = sorted(deleted - (apply_objects & set(after_objects)))
++#
++# A removal is exactly a name that disappeared between the two snapshots. A
++# cascade deletion reports every object it took with it, so the apply removes
++# them together; a relative that merely MOVED is not a removal, and the apply
++# never takes one out because a parent changed.
++apply_objects, removed_objects = widen_apply_objects(
++    bpy,
++    touched_objects,
++    delta["removedObjects"],
++)
++# widen_apply_objects answers with a list (it is shared with the live bridge,
++# which reports JSON). Framing below adds to this set, so take a set here.
++apply_objects = set(apply_objects)
+ 
+ # ---- auto-framing -----------------------------------------------------------
+ # The module's camera is framed HERE, from the bounds of the objects this run
+@@ -346,20 +335,10 @@ cameras = [camera_framing] if camera_framing is not None else []
+ # not exist yet as a dash while every later run hashes its real content -- so
+ # the very first run would always read as a change and every rebuild after it as
+ # a second one.
+-FRAMING_DATABLOCK_SUFFIXES = (CAMERA_SUFFIX, CAMERA_SUFFIX + "Target")
+ bpy.context.view_layer.update()
+-owned_objects |= apply_objects
+-owned_objects -= set(removed_objects)
+-digest_objects = [
+-    name for name in sorted(owned_objects)
+-    if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
+-]
+-state_digest_source = [
+-    name + "=" + after["objects"].get(name, "-") for name in digest_objects
+-]
+-for material_name in sorted(touched_materials):
+-    state_digest_source.append(material_name + "=" + after["materials"].get(material_name, "-"))
+-state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest()
++owned_objects = owned_after(owned_objects, apply_objects, removed_objects)
++owned_materials = owned_materials_after(owned_materials, touched_materials)
++state_digest = compute_state_digest(after, owned_objects, owned_materials)
+ 
+ # The save happens HERE, after the framing and after the apply set is settled --
+ # not inside the try above. Saving earlier wrote a branch file without the camera,
+@@ -381,10 +360,11 @@ print(json.dumps({
+     "changed": changed,
+     "touchedObjects": touched_objects,
+     "touchedMaterials": touched_materials,
+-    "addedObjects": sorted(after_objects - before_objects),
++    "addedObjects": delta["addedObjects"],
+     "removedObjects": removed_objects,
+     "applyObjects": sorted(apply_objects),
+     "ownedObjects": sorted(owned_objects),
++    "ownedMaterials": owned_materials,
+     "stateDigest": state_digest,
+     "cameras": cameras,
+ }))
+@@ -410,10 +390,12 @@ interface BranchRunPayload {
+ 	 * and the apply set alone cannot say what the module is responsible for.
+ 	 */
+ 	ownedObjects: string[];
++	/** Materials this module owns after this run; carried into the next one. */
++	ownedMaterials: string[];
+ 	/**
+-	 * Content hash over those owned objects. Absent only from a pre-digest run.
++	 * Content hash over the owned objects and materials, or null when there is no subject.
+ 	 */
+-	stateDigest: string;
++	stateDigest: string | null;
+ 	/** Framing solved for this module's camera; empty when it produced no mesh. */
+ 	cameras: BranchCameraFraming[];
+ }
+@@ -473,6 +455,9 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
+ 		);
+ 	}
+ 
++	// Ownership is read from the manifest before the run, so the digest subject
++	// survives a script that changes nothing this time.
++	const priorOwnership = collectModuleOwnership(manifest, moduleName);
+ 	let payload: BranchRunPayload;
+ 	try {
+ 		payload = await runBlenderJson<BranchRunPayload>({
+@@ -490,17 +475,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
+ 				// in the assets dir, so nothing about sys.path comes for free and
+ 				// the shared fingerprint module has to be pointed at explicitly.
+ 				assetsDir: getBlenderAssetsDir(),
+-				// Ownership is CARRIED FORWARD from the module's earlier runs, not
+-				// re-derived from the script or from the diff. The fingerprints are
+-				// content-based, so a script that removes and rebuilds its part
+-				// byte-for-byte applies nothing and looks identical to a script that
+-				// did nothing; without a prior record the digest would have an empty
++				// Ownership is CARRIED FORWARD from the module's earlier APPLIED
++				// generations, not re-derived from the script or from the diff. The
++				// fingerprints are content-based, so a script that removes and rebuilds
++				// its part byte-for-byte applies nothing and looks identical to a script
++				// that did nothing; without a prior record the digest would have an empty
+ 				// subject on exactly the rebuild iterations it exists to measure.
+-				ownedObjects: [
+-					...((manifest.branchRuns ?? [])
+-						.filter((run) => run.module === moduleName)
+-						.flatMap((run) => run.ownedObjects ?? [])),
+-				],
++				ownedObjects: priorOwnership.objects,
++				ownedMaterials: priorOwnership.materials,
+ 			},
+ 			signal: options.signal,
+ 			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+@@ -581,7 +563,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
+ 		removedObjects: payload.removedObjects,
+ 		applyObjects: payload.applyObjects,
+ 		ownedObjects: payload.ownedObjects,
+-		stateDigest: payload.stateDigest,
++		ownedMaterials: payload.ownedMaterials,
++		stateDigest: payload.stateDigest ?? undefined,
+ 		status: "staged",
+ 		renderOutputPath,
+ 		cameras: payload.cameras,
+@@ -612,6 +595,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
+ 		scriptPath,
+ 		branchPath,
+ 		iteration,
++		sequence,
+ 		runDir,
+ 		checkpointPath,
+ 		exitCode: payload.exitCode,
+@@ -624,9 +608,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
+ 		removedObjects: payload.removedObjects,
+ 		applyObjects: payload.applyObjects,
+ 		ownedObjects: payload.ownedObjects,
++		ownedMaterials: payload.ownedMaterials,
+ 		renderOutputPath,
+ 		cameras: payload.cameras,
+-		stateDigest: payload.stateDigest,
++		stateDigest: payload.stateDigest ?? undefined,
+ 		status: "staged",
+ 	};
+ }
+@@ -1102,7 +1087,8 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
+ 			// An apply is a module run as far as revert is concerned: it changed
+ 			// model.blend, so it needs a run record with a checkpoint the revert
+ 			// can restore. Recorded HERE rather than at run time, because the
+-			// checkpoint is the state the apply replaced and is written by the run.
++			// checkpoint is the state the run replaced, taken when the branch was
++			// copied — an apply may land later, or a sibling may land first.
+ 			const moduleRuns = (current.moduleRuns ?? []) as BlenderModuleRunRecord[];
+ 			current.moduleRuns = [
+ 				...moduleRuns,
+diff --git a/blender/bridge.ts b/blender/bridge.ts
+index 2d9ecf8..40fcea0 100644
+--- a/blender/bridge.ts
++++ b/blender/bridge.ts
+@@ -407,6 +407,22 @@ export async function requestLiveBlenderCapture(options: {
+ 	});
+ }
+ 
++export interface LiveExecutePythonResult {
++	stdout: string;
++	stderr: string;
++	exitCode: number;
++	changed: boolean;
++	touchedObjects: string[];
++	touchedMaterials: string[];
++	addedObjects: string[];
++	removedObjects: string[];
++	applyObjects: string[];
++	ownedObjects: string[];
++	ownedMaterials: string[];
++	/** Null when the module owns no datablocks yet: there is no subject to hash. */
++	stateDigest: string | null;
++}
++
+ export async function requestLiveBlenderExecutePython(options: {
+ 	blendPath: string;
+ 	workspacePath: string;
+@@ -414,10 +430,13 @@ export async function requestLiveBlenderExecutePython(options: {
+ 	userScriptPath: string;
+ 	saveBeforePath?: string;
+ 	saveAfter: boolean;
++	/** Ownership from this module's latest generation, so the digest keeps its subject. */
++	ownedObjects?: string[];
++	ownedMaterials?: string[];
+ 	label?: string;
+ 	signal?: AbortSignal;
+ 	timeoutMs?: number;
+-}): Promise<{ stdout: string; stderr: string; exitCode: number; changed: boolean }> {
++}): Promise<LiveExecutePythonResult> {
+ 	return await requestLiveBlenderBridge({
+ 		payload: {
+ 			type: "execute-python",
+@@ -427,6 +446,8 @@ export async function requestLiveBlenderExecutePython(options: {
+ 			userScriptPath: options.userScriptPath,
+ 			saveBeforePath: options.saveBeforePath,
+ 			saveAfter: options.saveAfter,
++			ownedObjects: options.ownedObjects,
++			ownedMaterials: options.ownedMaterials,
+ 			label: options.label,
+ 		},
+ 		signal: options.signal,
+diff --git a/blender/generations.ts b/blender/generations.ts
+new file mode 100644
+index 0000000..7bb1994
+--- /dev/null
++++ b/blender/generations.ts
+@@ -0,0 +1,127 @@
++import type { BlenderWorkspaceManifest } from "./types.js";
++
++/**
++ * One module generation whose content is in model.blend.
++ *
++ * This is the single answer to "what counts as a generation", shared by the
++ * digest comparison and the iteration state. They used to disagree: the digest
++ * compared against any branch run with a digest, including one that was staged
++ * and never applied, failed, or was skipped on a conflict, while the iteration
++ * state counted staged-but-unapplied runs as history. A rejected merge is not a
++ * generation the next run can be compared with, and counting it as one made an
++ * unchanged iteration look changed.
++ *
++ * A branch apply writes BOTH a branch record with status "applied" and a
++ * companion moduleRuns record carrying `viaBranchApply`. Only the branch record
++ * is a generation; the companion is the revert hook for the same work.
++ */
++export interface ModuleGeneration {
++	module: string;
++	iteration: number;
++	sequence: number;
++	stateDigest?: string;
++	ownedObjects?: string[];
++	ownedMaterials?: string[];
++	/** Where the generation ran, for the iteration report. */
++	executionMode: "branch" | "live";
++}
++
++type RunManifest = Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">;
++
++/** Newest first would be cheaper, but callers need a stable order to compare. */
++export function collectModuleGenerations(manifest: RunManifest, moduleName: string): ModuleGeneration[] {
++	const generations: ModuleGeneration[] = [];
++	for (const run of manifest.branchRuns ?? []) {
++		if (run.module !== moduleName || run.status !== "applied") continue;
++		generations.push({
++			module: run.module,
++			iteration: run.iteration,
++			sequence: run.sequence,
++			stateDigest: run.stateDigest,
++			ownedObjects: run.ownedObjects,
++			ownedMaterials: run.ownedMaterials,
++			executionMode: "branch",
++		});
++	}
++	for (const run of manifest.moduleRuns ?? []) {
++		if (run.name !== moduleName || run.status !== "ok" || run.viaBranchApply) continue;
++		generations.push({
++			module: run.name,
++			iteration: run.iteration,
++			sequence: run.sequence,
++			stateDigest: run.stateDigest,
++			ownedObjects: run.ownedObjects,
++			ownedMaterials: run.ownedMaterials,
++			executionMode: "live",
++		});
++	}
++	return generations.sort((a, b) => a.sequence - b.sequence);
++}
++
++/** The most recent generation strictly before `sequence`, if any. */
++export function previousModuleGeneration(
++	manifest: RunManifest,
++	moduleName: string,
++	sequence: number,
++): ModuleGeneration | undefined {
++	return collectModuleGenerations(manifest, moduleName)
++		.filter((generation) => generation.sequence < sequence)
++		.at(-1);
++}
++
++/**
++ * What this module owns as of its latest generation.
++ *
++ * Ownership is carried forward by the runner, so the latest generation is the
++ * answer. Records written before ownership was recorded have no field at all,
++ * which is different from owning nothing: the fallback unions the known
++ * ownership of earlier generations rather than restarting the digest subject at
++ * empty and reporting the next unchanged run as a change.
++ */
++export function collectModuleOwnership(
++	manifest: RunManifest,
++	moduleName: string,
++): { objects: string[]; materials: string[] } {
++	const generations = collectModuleGenerations(manifest, moduleName);
++	const latest = (pick: (generation: ModuleGeneration) => string[] | undefined): string[] | undefined => {
++		for (let index = generations.length - 1; index >= 0; index -= 1) {
++			const owned = pick(generations[index]!);
++			if (owned !== undefined) return [...owned].sort();
++		}
++		return undefined;
++	};
++	const objects = latest((generation) => generation.ownedObjects);
++	const materials = latest((generation) => generation.ownedMaterials);
++	return {
++		objects: objects ?? union(generations, (generation) => generation.ownedObjects),
++		materials: materials ?? union(generations, (generation) => generation.ownedMaterials),
++	};
++}
++
++function union(
++	generations: ModuleGeneration[],
++	pick: (generation: ModuleGeneration) => string[] | undefined,
++): string[] {
++	const known = new Set<string>();
++	for (const generation of generations) {
++		for (const name of pick(generation) ?? []) known.add(name);
++	}
++	return [...known].sort();
++}
++
++/**
++ * A digest is comparable when there is one.
++ *
++ * An empty subject produces no digest, and an empty string must never be
++ * compared: every empty run would match it and read as "unchanged" for a module
++ * whose subject was never recorded. Digests recorded before the shared
++ * accounting used MD5 while current ones use SHA-256; those two values can never
++ * be equal, so an upgrade reports one changed run rather than a false all-clear,
++ * which is the safe direction for the one number the loop trusts.
++ */
++export function isComparableStateDigest(digest: string | undefined | null): digest is string {
++	// SHA-256 output only. An MD5 digest from a pre-#57 workspace and an empty
++	// subject both mean "no comparable state": comparing either would report a
++	// change that did not happen, or an unchanged build that did.
++	return typeof digest === "string" && /^[0-9a-f]{64}$/i.test(digest);
++}
+diff --git a/blender/iteration-state.ts b/blender/iteration-state.ts
+index 068825f..bb8846b 100644
+--- a/blender/iteration-state.ts
++++ b/blender/iteration-state.ts
+@@ -2,6 +2,7 @@ import { MAX_ITERATIONS_PER_MODULE, PRESENT_SCORE_THRESHOLD } from "./critique.j
+ import { parseCritiqueLog } from "./ranking.js";
+ import { readFile } from "node:fs/promises";
+ import { getWorkspaceCritiqueLogPath, loadWorkspaceManifest } from "./workspace.js";
++import { collectModuleGenerations, isComparableStateDigest } from "./generations.js";
+ import type {
+   BlenderWorkspaceManifest,
+   CritiqueVerdictRecord,
+@@ -23,22 +24,28 @@ import type {
+ 
+ interface RunStamp {
+   iteration: number;
++  sequence: number;
+   stateDigest?: string;
+   executionMode: "branch" | "live";
+ }
+ 
+-/** Newest first, and only successful runs: a failed script is not a generation. */
++/**
++ * Newest first, and only APPLIED generations: a failed script, a conflicted
++ * merge and a branch that is still waiting for its apply are not states the next
++ * run can be compared against, because none of them is in model.blend.
++ */
+ function collectRuns(manifest: BlenderWorkspaceManifest, moduleName: string): RunStamp[] {
+-  const stamps: RunStamp[] = [];
+-  for (const run of manifest.branchRuns ?? []) {
+-    if (run.module !== moduleName || run.status !== "staged") continue;
+-    stamps.push({ iteration: run.iteration, stateDigest: run.stateDigest, executionMode: "branch" });
+-  }
+-  for (const run of manifest.moduleRuns ?? []) {
+-    if (run.name !== moduleName) continue;
+-    stamps.push({ iteration: run.iteration, executionMode: "live" });
+-  }
+-  return stamps.sort((a, b) => b.iteration - a.iteration);
++	return collectModuleGenerations(manifest, moduleName)
++		.map((generation) => ({
++			iteration: generation.iteration,
++			sequence: generation.sequence,
++			stateDigest: generation.stateDigest,
++			executionMode: generation.executionMode,
++		}))
++		// The generations are already in sequence order. Sorting by iteration
++		// here would be a second notion of "newest" and disagree for any record
++		// whose iteration and sequence were claimed separately.
++		.sort((a, b) => b.sequence - a.sequence);
+ }
+ 
+ function latestVerdict(entries: CritiqueVerdictRecord[], moduleName: string): CritiqueVerdictRecord | undefined {
+@@ -69,7 +76,7 @@ function resolveWasteGuard(args: {
+     };
+   }
+   const [newest, previous] = runs;
+-  if (newest?.stateDigest && newest.stateDigest === previous?.stateDigest) {
++  if (isComparableStateDigest(newest?.stateDigest) && newest.stateDigest === previous?.stateDigest) {
+     return {
+       kind: "unchanged-digest",
+       detail: `Iteration ${newest.iteration} produced the same content as iteration ${previous.iteration}. A render of it would repeat the last verdict; find why the script did not change the build before running or critiquing again.`,
+@@ -121,7 +128,7 @@ export async function blenderIterationState(options: {
+   const judgedRun = verdict?.iteration === undefined ? undefined : runs.find((run) => run.iteration === verdict.iteration);
+   const laterRun = judgedRun ? runs.find((run) => run.iteration > judgedRun.iteration) : undefined;
+   const fixLanded =
+-    judgedRun?.stateDigest && laterRun?.stateDigest
++    isComparableStateDigest(judgedRun?.stateDigest) && isComparableStateDigest(laterRun?.stateDigest)
+       ? judgedRun.stateDigest !== laterRun.stateDigest
+       : undefined;
+ 
+diff --git a/blender/live-bridge.py b/blender/live-bridge.py
+index 83f8f68..9d3f42b 100644
+--- a/blender/live-bridge.py
++++ b/blender/live-bridge.py
+@@ -23,6 +23,13 @@ from mathutils import Matrix, Vector  # pyright: ignore[reportMissingImports]
+ from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
+ 
+ from fingerprint import content_changed, snapshot
++from module_state import (  # noqa: E402
++    diff_snapshots,
++    owned_after,
++    owned_materials_after,
++    state_digest as compute_state_digest,
++    widen_apply_objects,
++)
+ 
+ # Sits beside this file so a read-only run is refused in the bridge rather than
+ # in the prompt that asked for it.
+@@ -510,22 +517,8 @@ def handle_execute_python(request):
+     stdout_buffer = io.StringIO()
+     stderr_buffer = io.StringIO()
+     exit_code = 0
+-    changed = False
+     before = snapshot(bpy)
+ 
+-    def sample_change():
+-        """Record whether this execution changed the scene's content.
+-
+-        Sampled immediately after exec returns, and again when it raises, so a
+-        mutation made before the exception still counts. Content hashes rather
+-        than `bpy.data.is_dirty`: that flag is a UI-facing notion of unsaved
+-        work, it reads False in background mode, and reading it after the save
+-        would report the file clean precisely when the run did the most work.
+-        """
+-        nonlocal changed
+-        if not changed and content_changed(before, snapshot(bpy)):
+-            changed = True
+-
+     previous_cwd = os.getcwd()
+     workspace_path = request.get("workspacePath")
+     if workspace_path:
+@@ -537,21 +530,48 @@ def handle_execute_python(request):
+                 code = handle.read()
+             # pi-lens-ignore: ast-grep:no-compile-call, S102, eval-exec
+             exec(compile(code, request["userScriptPath"], "exec"), globals_dict)
+-            sample_change()
+             if request.get("saveAfter", True):
+                 bpy.ops.wm.save_mainfile()
+         except Exception:
+-            sample_change()
+             exit_code = 1
+             traceback.print_exc()
+         finally:
+             os.chdir(previous_cwd)
+ 
++    # The same accounting the headless branch runner reports, from the same
++    # shared module: what changed (content fingerprint, not is_dirty), what an
++    # apply would move, and what this module owns so the next run has a digest
++    # subject even after a live-built module switches to the headless path.
++    after = snapshot(bpy)
++    delta = diff_snapshots(before, after)
++    apply_objects, removed_objects = widen_apply_objects(
++        bpy,
++        delta["touchedObjects"],
++        delta["removedObjects"],
++    )
++    owned_objects = owned_after(
++        request.get("ownedObjects") or [],
++        apply_objects,
++        removed_objects,
++    )
++    owned_materials = owned_materials_after(
++        request.get("ownedMaterials") or [],
++        delta["touchedMaterials"],
++    )
++
+     return {
+         "stdout": stdout_buffer.getvalue(),
+         "stderr": stderr_buffer.getvalue(),
+         "exitCode": exit_code,
+-        "changed": changed,
++        "changed": content_changed(before, after),
++        "touchedObjects": delta["touchedObjects"],
++        "touchedMaterials": delta["touchedMaterials"],
++        "addedObjects": delta["addedObjects"],
++        "removedObjects": removed_objects,
++        "applyObjects": apply_objects,
++        "ownedObjects": owned_objects,
++        "ownedMaterials": owned_materials,
++        "stateDigest": compute_state_digest(after, owned_objects, owned_materials),
+     }
+ 
+ 
+diff --git a/blender/module.ts b/blender/module.ts
+index 8798b39..8e5c549 100644
+--- a/blender/module.ts
++++ b/blender/module.ts
+@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+ import { join } from "node:path";
+ import { isLiveBridgeAlive } from "../launch.js";
+ import { blenderBranchApply, blenderBranchRun } from "./branch.js";
++import { collectModuleOwnership, isComparableStateDigest, previousModuleGeneration } from "./generations.js";
+ import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
+ import type {
+ 	BlenderModuleRunRecord,
+@@ -137,7 +138,11 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
+ 		executionMode: "headless-apply",
+ 		liveBlenderMessage: applyResult.liveBlenderMessage,
+ 		cameras: branchResult.cameras,
+-		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, branchResult)),
++		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
++			iteration: branchResult.iteration,
++			sequence: branchResult.sequence,
++			stateDigest: branchResult.stateDigest,
++		})),
+ 	};
+ }
+ 
+@@ -154,26 +159,26 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
+  *
+  * Only a digest is compared, never a run count: two runs of an unchanged script
+  * are expected to match, while two runs of a script being edited under a failing
+- * iteration are not. Comparison is against the most recent PRIOR run only, and
+- * it is skipped when either side lacks a digest (a pre-digest workspace) rather
+- * than guessed.
++ * iteration are not. Comparison is against the most recent PRIOR APPLIED
++ * generation only, and it is skipped when either side lacks a comparable digest
++ * (a pre-digest workspace, an empty subject, or a 32-hex MD5 legacy value)
++ * rather than guessed.
+  */
+ async function compareWithPreviousDigest(
+ 	cwd: string,
+ 	workspace: string,
+ 	moduleName: string,
+-	result: { iteration: number; stateDigest?: string },
++	result: { iteration: number; sequence: number; stateDigest?: string },
+ ): Promise<{ stateDigest?: string; unchangedSinceLastRun?: boolean; comparedWithIteration?: number }> {
+ 	if (!result.stateDigest) return {};
+ 	const manifest = await loadWorkspaceManifest(cwd, workspace);
+-	const previous = (manifest.branchRuns ?? [])
+-		.filter((run) => run.module === moduleName && run.iteration < result.iteration && run.stateDigest)
+-		.sort((a, b) => a.iteration - b.iteration)
+-		.at(-1);
++	const previous = previousModuleGeneration(manifest, moduleName, result.sequence);
+ 	// No earlier digest means the comparison is simply unavailable, and saying
+ 	// "unchanged" about a run nothing was compared against would be a false
+ 	// all-clear on the one number the loop is about to trust.
+-	if (!previous) return { stateDigest: result.stateDigest };
++	if (!previous || !isComparableStateDigest(previous.stateDigest)) {
++		return { stateDigest: result.stateDigest };
++	}
+ 	return {
+ 		stateDigest: result.stateDigest,
+ 		comparedWithIteration: previous.iteration,
+@@ -185,6 +190,10 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
+ 	const moduleName = normalizeModuleName(options.moduleName);
+ 
+ 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
++	// A live-built module must keep its digest subject when it later switches to
++	// the headless path, so ownership is read from the manifest and written back
++	// with the run, exactly as the branch runner does.
++	const ownership = collectModuleOwnership(manifest, moduleName);
+ 	const moduleDir = getModuleDir(manifest.workspacePath, moduleName);
+ 	const scriptPath = getModuleScriptPath(manifest.workspacePath, moduleName);
+ 	if (!(await fileExists(scriptPath))) {
+@@ -268,6 +277,8 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
+ 		userScriptPath: effectiveScriptPath,
+ 		saveBeforePath: undefined,
+ 		saveAfter: true,
++		ownedObjects: ownership.objects,
++		ownedMaterials: ownership.materials,
+ 		label: `module:${moduleName}`,
+ 		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
+ 		signal: options.signal,
+@@ -317,13 +328,14 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
+ 		renderOutputPath = renderPayload.outputPath;
+ 	}
+ 
++	const stateDigest = result.stateDigest ?? undefined;
+ 	// Publish success: iteration counter, run history, and render output all
+ 	// land in one manifest write, applied to the state on disk (not this
+ 	// snapshot) so a concurrent render or save-view is merged, not lost.
+ 	await updateManifest(manifest.manifestPath, (current) => {
+ 		applySuccessfulRun(
+ 			current,
+-			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode },
++			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode, ownedObjects: result.ownedObjects, ownedMaterials: result.ownedMaterials, stateDigest },
+ 			renderOutputPath ? { path: renderOutputPath, view: viewLabel } : null,
+ 		);
+ 	});
+@@ -342,9 +354,42 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
+ 		renderOutputPath,
+ 		changed: result.changed,
+ 		executionMode: "live-session",
++		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
++			iteration,
++			sequence,
++			stateDigest,
++		})),
+ 	};
+ }
+ 
++/**
++ * Retire the history a revert made false.
++ *
++ * Both record kinds are generations: a live run and an applied branch run. A
++ * revert removes their content from model.blend, so leaving them behind would
++ * let the next digest comparison pick a state that is gone — and report the
++ * reverted-away content as the current baseline. Staged branch records survive:
++ * their work is still in a branch blend and can be applied after the revert.
++ */
++export function pruneRevertedGenerations(
++	current: Pick<BlenderWorkspaceManifest, "moduleRuns" | "branchRuns">,
++	target: { name: string; sequence: number } | undefined,
++): void {
++	if (!target) return;
++	// Records written before `sequence` existed use the iteration they claimed;
++	// both counters only ever go up, so treating the missing field as its
++	// iteration keeps the comparison the same instead of silently pruning or
++	// silently ignoring the record.
++	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
++	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => sequence(run) < target.sequence);
++	// Not scoped to the target module: the checkpoint is a whole-file restore,
++	// so every module's applied generation at or after this point is gone, not
++	// just the one being reverted.
++	current.branchRuns = (current.branchRuns ?? []).filter(
++		(run) => sequence(run) < target.sequence || run.status !== "applied",
++	);
++}
++
+ /**
+  * Fold a successful module run into the manifest state on disk.
+  *
+@@ -379,6 +424,9 @@ export function applySuccessfulRun(
+ 		sequence: number;
+ 		checkpointPath: string;
+ 		exitCode: number;
++		ownedObjects?: string[];
++		ownedMaterials?: string[];
++		stateDigest?: string;
+ 	},
+ 	renderOutput?: { path: string; view: string } | null,
+ ): void {
+@@ -393,6 +441,9 @@ export function applySuccessfulRun(
+ 			sequence: record.sequence,
+ 			exitCode: record.exitCode,
+ 			status: "ok",
++			ownedObjects: record.ownedObjects,
++			ownedMaterials: record.ownedMaterials,
++			stateDigest: record.stateDigest,
+ 		},
+ 	];
+ 	if (renderOutput) {
+@@ -445,7 +496,12 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
+ 
+ 	// Guard against the destructive case: reverting module A after module B ran
+ 	// throws away B's work too, because they share one model.blend.
+-	const laterRuns = moduleRuns.filter((run) => run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER));
++	// A pre-`sequence` record still blocks a revert: `undefined > n` is false,
++	// which would let the revert discard its work without a guard.
++	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
++	const laterRuns = moduleRuns.filter(
++		(run) => sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER),
++	);
+ 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
+ 	if (laterRuns.length > 0 && !options.force) {
+ 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");
+@@ -473,9 +529,7 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
+ 	await updateManifest(
+ 		manifest.manifestPath,
+ 		(current) => {
+-			current.moduleRuns = target
+-				? (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence)
+-				: (current.moduleRuns ?? []);
++			pruneRevertedGenerations(current, target);
+ 		},
+ 		{ signal: options.signal },
+ 	);
+diff --git a/blender/module_state.py b/blender/module_state.py
+new file mode 100644
+index 0000000..aa6968d
+--- /dev/null
++++ b/blender/module_state.py
+@@ -0,0 +1,134 @@
++"""Post-run scene accounting shared by the branch runner and the live bridge.
++
++Both execution paths answer the same three questions after a module script: what
++did it touch, what must the apply move, and what does the module own so a later
++run can be compared against it. The answers were written twice and drifted —
++the live path could not report ownership at all, so a module built in a live
++session restarted its digest from an empty subject on the next headless run.
++Keeping them here also keeps the digest's empty-subject rule in one place.
++
++`bpy` is never imported at module scope: the helpers that need it take it as an
++argument, so this file can be imported and unit-tested outside Blender.
++"""
++
++import hashlib
++
++CAMERA_SUFFIX = "Cam"
++FRAMING_DATABLOCK_SUFFIXES = (CAMERA_SUFFIX, CAMERA_SUFFIX + "Target")
++
++
++def diff_snapshots(before, after):
++    """What changed between two `fingerprint.snapshot` maps.
++
++    Additions, removals and edits all count as touched: a script that only
++    deletes an object changed the file as much as one that builds a new one.
++    """
++    before_objects = before.get("objects", {})
++    after_objects = after.get("objects", {})
++    before_materials = before.get("materials", {})
++    after_materials = after.get("materials", {})
++
++    return {
++        "touchedObjects": sorted(
++            name
++            for name in (set(before_objects) | set(after_objects))
++            if before_objects.get(name) != after_objects.get(name)
++        ),
++        "touchedMaterials": sorted(
++            name
++            for name in (set(before_materials) | set(after_materials))
++            if before_materials.get(name) != after_materials.get(name)
++        ),
++        "addedObjects": sorted(set(after_objects) - set(before_objects)),
++        "removedObjects": sorted(set(before_objects) - set(after_objects)),
++    }
++
++
++def widen_apply_objects(bpy, touched_objects, deleted_objects):
++    """Widen the apply set to the datablocks that cannot travel alone.
++
++    A parented object without its parent is not a usable object, and a parent
++    without its children strands them. Widening happens here rather than at
++    apply time, and is reported, because a widened apply set is exactly what
++    turns into a conflict against a sibling.
++
++    A removed object is exactly a name that disappeared between the two
++    snapshots. A cascade deletion reports every object it took with it, because
++    the module did delete them; the apply tolerates removals that are already
++    absent from model.blend.
++    """
++    deleted = set(deleted_objects)
++    apply_objects = set(touched_objects) - deleted
++    for name in list(apply_objects):
++        obj = bpy.data.objects.get(name)
++        if obj is None:
++            continue
++        ancestor = obj.parent
++        while ancestor is not None:
++            apply_objects.add(ancestor.name)
++            ancestor = ancestor.parent
++        for descendant in obj.children_recursive:
++            apply_objects.add(descendant.name)
++    removed_objects = sorted(deleted)
++    return sorted(apply_objects), removed_objects
++
++
++def owned_after(prior_owned, apply_objects, removed_objects):
++    """Carry ownership forward across the run.
++
++    Ownership is the DIGEST SUBJECT, not the apply set. An idempotent rebuild
++    that removes and recreates a part byte-for-byte is indistinguishable from a
++    run that did nothing: touched is empty and apply_objects is empty. A digest
++    over the apply set would then hash the empty string and report every rebuild
++    as a change, which is the one false negative the loop must not have.
++    """
++    owned = set(prior_owned or [])
++    owned |= set(apply_objects)
++    owned -= set(removed_objects)
++    return sorted(owned)
++
++
++def owned_materials_after(prior_owned, touched_materials):
++    """Carry material ownership forward.
++
++    The digest subject needs the same treatment as objects. A paint run that
++    appends a material owns it, and an idempotent rebuild that touches no
++    material must still hash the material it owns; deriving the subject from
++    this run's delta alone makes every paint module's digest vanish on its next
++    run and reports the run after that as a change.
++    """
++    owned = set(prior_owned or [])
++    owned |= set(touched_materials or [])
++    return sorted(owned)
++
++
++def state_digest(after, owned_objects, owned_materials):
++    """Content hash of what this module owns, or None when there is no subject.
++
++    A pre-digest workspace and a run with no ownership both have nothing to
++    compare. Returning None is that fact; returning `md5("")` would be a digest
++    that every empty run matches, which reads as "unchanged" for a module whose
++    subject was never recorded.
++
++    Two exclusions keep the number about geometry a critic would notice. The
++    camera AND its target are rewritten by framing on every run, so both
++    suffixes are filtered: filtering on CAMERA_SUFFIX alone leaves the target in
++    the digest, and because the after-snapshot predates framing, the first run
++    hashes a datablock that does not exist yet as a dash while later runs hash
++    its real content.
++    """
++    digest_objects = [
++        name
++        for name in sorted(owned_objects)
++        if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
++    ]
++    source = [name + "=" + after["objects"].get(name, "-") for name in digest_objects]
++    for material_name in sorted(owned_materials):
++        source.append(material_name + "=" + after["materials"].get(material_name, "-"))
++    if not source:
++        return None
++    # SHA-256, not MD5: these digests are change detectors rather than a
++    # security boundary, but the rule against MD5 is cheap to satisfy and a
++    # 64-hex digest is distinguishable from the 32-hex values earlier releases
++    # recorded, which callers use to skip an incomparable comparison.
++    return hashlib.sha256("\x01".join(source).encode()).hexdigest()
+diff --git a/blender/types.ts b/blender/types.ts
+index 32e7c6d..d354bb8 100644
+--- a/blender/types.ts
++++ b/blender/types.ts
+@@ -126,6 +126,15 @@ export interface BlenderModuleRunRecord {
+ 	 * reader can tell which of the two paths changed model.blend.
+ 	 */
+ 	viaBranchApply?: string;
++	/**
++	 * Everything this module owns after the run, recorded so a later headless run
++	 * keeps a digest subject instead of restarting from empty.
++	 */
++	ownedObjects?: string[];
++	/** Materials this module owns, for the same reason. */
++	ownedMaterials?: string[];
++	/** Content hash of the state this run left in model.blend, when it produced one. */
++	stateDigest?: string;
+ }
+ 
+ /** Where a staged branch run is in its life. */
+@@ -181,6 +190,8 @@ export interface BlenderBranchRunRecord {
+ 	 * say what a module is responsible for.
+ 	 */
+ 	ownedObjects?: string[];
++	/** Materials this module owns after this run; carried into the next run. */
++	ownedMaterials?: string[];
+ 	/**
+ 	 * Content hash of the applied datablocks, so the next iteration can be
+ 	 * compared against this one without spending a render or a critic on the
+@@ -216,6 +227,8 @@ export interface BranchRunResult {
+ 	scriptPath: string;
+ 	branchPath: string;
+ 	iteration: number;
++	/** Claimed iteration, shared by every module run; it is also the record's order. */
++	sequence: number;
+ 	runDir: string;
+ 	checkpointPath: string;
+ 	exitCode: number;
+@@ -235,11 +248,13 @@ export interface BranchRunResult {
+ 	applyObjects: string[];
+ 	/** Everything this module owns after this run; carried into the next run. */
+ 	ownedObjects: string[];
++	/** Materials this module owns after this run; carried into the next run. */
++	ownedMaterials: string[];
+ 	renderOutputPath: string | null;
+ 	status: BranchRunStatus;
+ 	/** Framing solved for the module's camera, and the numbers it was solved from. */
+ 	cameras: BranchCameraFraming[];
+-	/** Content hash of the applied datablocks; empty only from a pre-digest Blender. */
++	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
+ 	stateDigest?: string;
+ }
+ 
+@@ -1377,8 +1392,8 @@ export interface ModuleRunResult {
+ 	 * previous run's is how a caller learns that an iteration changed nothing,
+ 	 * without rendering the same bytes and paying a critic to look at them.
+ 	 *
+-	 * Absent on a live-session run: `changed` there is a yes/no content
+-	 * comparison rather than a comparable hash.
++	 * Absent when the module owns no datablocks yet, and on runs recorded before
++	 * the live path reported ownership.
+ 	 */
+ 	stateDigest?: string;
+ 	/** True when the previous run of this module produced this same digest. */
+diff --git a/test/branch-e2e.test.mjs b/test/branch-e2e.test.mjs
+index d48434e..2a316a7 100644
+--- a/test/branch-e2e.test.mjs
++++ b/test/branch-e2e.test.mjs
+@@ -650,6 +650,10 @@ test("an unchanged iteration is reported as unchanged, without a render", { skip
+ 		});
+ 		assert.equal(repeat.unchangedSinceLastRun, true, "re-running the same script must be reported as no change");
+ 		assert.equal(repeat.comparedWithIteration, first.iteration);
++		assert.ok(
++			repeat.stateDigest && first.stateDigest && repeat.stateDigest === first.stateDigest,
++			"unchanged must come from two real, equal digests — not from both sides being empty",
++		);
+ 
+ 		// Now change the geometry, which must move the digest.
+ 		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));
+@@ -757,6 +761,18 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
+ 			render: false,
+ 			timeoutSeconds: 300,
+ 		});
++		// Re-run the paint module untouched: its geometry set is empty, so the
++		// digest can only survive if material ownership was carried forward.
++		const repainted = await module.blenderModuleRun({
++			cwd: ws.root,
++			workspace: ws.workspacePath,
++			moduleName: "glaze",
++			render: false,
++			timeoutSeconds: 300,
++		});
++		assert.ok(painted.stateDigest, "a material-only edit still has a subject");
++		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
++		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
+ 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
+ 		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
+ 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
+diff --git a/test/generations.test.mjs b/test/generations.test.mjs
+new file mode 100644
+index 0000000..cdf5cf5
+--- /dev/null
++++ b/test/generations.test.mjs
+@@ -0,0 +1,159 @@
++// One definition of "a generation", shared by the digest comparison and the
++// iteration state. The bug these pin down is a rejected merge counting as
++// history: a staged branch that was never applied, or a run that failed, is not
++// a state the next run can be compared against.
++
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import { loadTs } from "./paths.mjs";
++
++const generations = await loadTs("../blender/generations.ts");
++const {
++	collectModuleGenerations,
++	collectModuleOwnership,
++	isComparableStateDigest,
++	previousModuleGeneration,
++} = generations;
++
++function branchRun(sequence, status, { digest, owned, materials } = {}) {
++	return {
++		module: "mug",
++		iteration: sequence,
++		sequence,
++		status,
++		stateDigest: digest,
++		ownedObjects: owned,
++		ownedMaterials: materials,
++	};
++}
++
++function liveRun(sequence, { digest, owned, materials, viaBranchApply, status = "ok", name = "mug" } = {}) {
++	return {
++		name,
++		iteration: sequence,
++		sequence,
++		status,
++		stateDigest: digest,
++		ownedObjects: owned,
++		ownedMaterials: materials,
++		viaBranchApply,
++	};
++}
++
++test("only applied branch runs are generations", () => {
++	const manifest = {
++		branchRuns: [
++			branchRun(1, "applied", { digest: "one" }),
++			branchRun(2, "staged", { digest: "two" }),
++			branchRun(3, "failed", { digest: "three" }),
++			branchRun(4, "conflict", { digest: "four" }),
++			branchRun(5, "applied", { digest: "five" }),
++		],
++		moduleRuns: [],
++	};
++
++	const collected = collectModuleGenerations(manifest, "mug");
++	assert.deepEqual(
++		collected.map((generation) => generation.iteration),
++		[1, 5],
++	);
++});
++
++test("a failed or conflicted run between two applied ones is skipped, not the newest applied", () => {
++	const manifest = {
++		branchRuns: [
++			branchRun(1, "applied", { digest: "good-one" }),
++			branchRun(2, "failed", { digest: "bad" }),
++			branchRun(3, "conflict", { digest: "also-bad" }),
++			branchRun(4, "applied", { digest: "good-four" }),
++		],
++		moduleRuns: [],
++	};
++
++	assert.equal(previousModuleGeneration(manifest, "mug", 5)?.iteration, 4);
++	assert.equal(collectModuleGenerations(manifest, "mug")[1].stateDigest, "good-four");
++	// The old predicate took the newest run below the target regardless of
++	// status, which would answer 3 here. Only the applied one may be a baseline.
++	assert.equal(previousModuleGeneration(manifest, "mug", 3)?.stateDigest, "good-one");
++});
++
++test("the moduleRun a branch apply writes is not a second generation", () => {
++	const manifest = {
++		branchRuns: [branchRun(1, "applied", { digest: "branch", owned: ["Mug"] })],
++		moduleRuns: [liveRun(1, { digest: "branch", owned: ["Mug"], viaBranchApply: "/ws/branch.blend" })],
++	};
++
++	assert.equal(collectModuleGenerations(manifest, "mug").length, 1);
++});
++
++test("a live run is a generation and its ownership is carried", () => {
++	const manifest = {
++		branchRuns: [],
++		moduleRuns: [liveRun(1, { digest: "live", owned: ["Mug", "Arm"] })],
++	};
++
++	const collected = collectModuleGenerations(manifest, "mug");
++	assert.equal(collected.length, 1);
++	assert.equal(collected[0].executionMode, "live");
++	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: ["Arm", "Mug"], materials: [] });
++});
++
++test("legacy records without ownership fall back to known ownership, not empty", () => {
++	const manifest = {
++		branchRuns: [
++			branchRun(1, "applied", { digest: "one", owned: ["Mug"] }),
++			branchRun(2, "applied", { digest: "two" }),
++		],
++		moduleRuns: [],
++	};
++
++	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: ["Mug"], materials: [] });
++});
++
++test("an explicit empty ownership is a real answer, not a fallback", () => {
++	const manifest = {
++		branchRuns: [
++			branchRun(1, "applied", { digest: "one", owned: ["Mug"] }),
++			branchRun(2, "applied", { digest: "two", owned: [] }),
++		],
++		moduleRuns: [],
++	};
++
++	assert.deepEqual(collectModuleOwnership(manifest, "mug"), { objects: [], materials: [] });
++});
++
++test("material ownership is carried, so a paint module keeps a digest subject", () => {
++	const manifest = {
++		branchRuns: [branchRun(1, "applied", { digest: "one", owned: ["Mug"], materials: ["Glaze"] })],
++		moduleRuns: [],
++	};
++
++	assert.deepEqual(collectModuleOwnership(manifest, "mug"), {
++		objects: ["Mug"],
++		materials: ["Glaze"],
++	});
++});
++
++test("only other modules' runs are ignored", () => {
++	const manifest = {
++		branchRuns: [branchRun(1, "applied", { digest: "mug" }), { ...branchRun(2, "applied", { digest: "arm" }), module: "arm" }],
++		moduleRuns: [liveRun(3, { digest: "mug-live" })],
++	};
++
++	assert.deepEqual(
++		collectModuleGenerations(manifest, "mug").map((generation) => generation.sequence),
++		[1, 3],
++	);
++});
++
++test("an empty digest is not comparable, so it can never read as unchanged", () => {
++	assert.equal(isComparableStateDigest(""), false);
++	assert.equal(isComparableStateDigest(undefined), false);
++	assert.equal(isComparableStateDigest(null), false);
++	// A 32-hex legacy MD5 value is not a SHA-256 digest; comparing it with a new
++	// run would report a change that did not happen.
++	assert.equal(isComparableStateDigest("abc"), false);
++	assert.equal(isComparableStateDigest("0".repeat(32)), false);
++	assert.equal(isComparableStateDigest("0".repeat(64)), true);
++});
+diff --git a/test/iteration-state.test.mjs b/test/iteration-state.test.mjs
+index 6b05105..46ba91c 100644
+--- a/test/iteration-state.test.mjs
++++ b/test/iteration-state.test.mjs
+@@ -55,13 +55,13 @@ function branchRun(iteration, stateDigest, module = "mug") {
+     scriptPath: `/ws/modules/${module}/script.py`,
+     checkpointPath: `/ws/modules/${module}/runs/${String(iteration).padStart(2, "0")}/pre-${String(iteration).padStart(2, "0")}.blend`,
+     at: "2026-01-01T00:00:00.000Z",
+-    status: "staged",
++    status: "applied",
+     touchedObjects: [],
+     touchedMaterials: [],
+     addedObjects: [],
+     removedObjects: [],
+     applyObjects: [],
+-    stateDigest,
++    stateDigest: stateDigest.padEnd(64, "0"),
+   };
+ }
+ 
+@@ -191,3 +191,13 @@ test("a missing moduleName is refused rather than summarised for every module at
+     /requires the moduleName/,
+   );
+ });
++
++test("a staged branch is not the last run, because it applied nothing", async () => {
++  const applied = branchRun(1, "aaa");
++  const staged = { ...branchRun(2, "bbb"), status: "staged" };
++  const workspacePath = makeWorkspace("staged-only", {
++    manifest: manifestFor({ branchRuns: [applied, staged] }),
++  });
++  const state = await blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "mug" });
++  assert.equal(state.lastRun.iteration, 1, "the staged branch never reached model.blend");
++});
+diff --git a/test/live-ownership.test.mjs b/test/live-ownership.test.mjs
+new file mode 100644
+index 0000000..7ea20f4
+--- /dev/null
++++ b/test/live-ownership.test.mjs
+@@ -0,0 +1,37 @@
++// The wiring that gives a live run an ownership subject, and writes it back.
++//
++// A real live session needs Blender with the pi-blender add-on connected, so
++// the accounting itself is tested in module-state.test.mjs and the persistence
++// in module-manifest.test.mjs. What cannot be exercised here is the join
++// between them: a live run that reads ownership from the manifest, sends it to
++// the bridge, and stores what the bridge says it owns. Deleting any of those
++// three steps would leave every other test green, so it is pinned directly.
++
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++
++const moduleSource = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
++const bridgeSource = readFileSync(new URL("../blender/live-bridge.py", import.meta.url), "utf8");
++
++test("a live run reads ownership from the manifest and sends both halves", () => {
++	assert.match(moduleSource, /const ownership = collectModuleOwnership\(manifest, moduleName\)/);
++	assert.match(moduleSource, /ownedObjects: ownership\.objects/);
++	assert.match(moduleSource, /ownedMaterials: ownership\.materials/);
++});
++
++test("a live run persists the ownership and digest the bridge reported", () => {
++	assert.match(
++		moduleSource,
++		/ownedObjects: result\.ownedObjects, ownedMaterials: result\.ownedMaterials, stateDigest/,
++	);
++	assert.match(bridgeSource, /owned_materials = owned_materials_after\(/);
++	assert.match(bridgeSource, /"ownedMaterials": owned_materials/);
++	assert.match(bridgeSource, /"stateDigest": compute_state_digest\(after, owned_objects, owned_materials\)/);
++});
++
++test("the bridge reports prior ownership alongside the changes it observed", () => {
++	assert.match(bridgeSource, /request\.get\("ownedMaterials"\)/);
++	assert.match(bridgeSource, /"ownedObjects": owned_objects/);
++	assert.match(bridgeSource, /"touchedMaterials": delta\["touchedMaterials"\]/);
++});
+diff --git a/test/module-manifest.test.mjs b/test/module-manifest.test.mjs
+index 32d0407..2bfa2b5 100644
+--- a/test/module-manifest.test.mjs
++++ b/test/module-manifest.test.mjs
+@@ -15,7 +15,7 @@ import { loadTs } from "./paths.mjs";
+ // The manifest publish runs inside BlenderModuleRevert's neighbours, so it is
+ // exported purely to be assertable here; loading the module still needs jiti,
+ // because pi-blender is TypeScript with NodeNext ".js" specifiers.
+-const { applySuccessfulRun } = await loadTs("../blender/module.ts");
++const { applySuccessfulRun, pruneRevertedGenerations } = await loadTs("../blender/module.ts");
+ 
+ function manifest(overrides = {}) {
+ 	return {
+@@ -127,6 +127,16 @@ describe("the iteration counter only ever goes up", () => {
+ 		assert.equal(m.renderOutputs[0].module, "table-top");
+ 	});
+ 
++	it("records the digest and ownership so the next run has a subject", () => {
++		const m = manifest();
++
++		applySuccessfulRun(m, run({ ownedObjects: ["Mug"], ownedMaterials: ["Glaze"], stateDigest: "abc" }));
++
++		assert.deepEqual(m.moduleRuns[0].ownedObjects, ["Mug"]);
++		assert.deepEqual(m.moduleRuns[0].ownedMaterials, ["Glaze"]);
++		assert.equal(m.moduleRuns[0].stateDigest, "abc");
++	});
++
+ 	it("records no render when there was none", () => {
+ 		const m = manifest();
+ 
+@@ -135,3 +145,61 @@ describe("the iteration counter only ever goes up", () => {
+ 		assert.deepEqual(m.renderOutputs, []);
+ 	});
+ });
++
++describe("a revert retires the generations it removed from model.blend", () => {
++	const branchRun = (module, sequence, status) => ({ module, sequence, status });
++
++	it("drops every applied branch record at or after the target, and the matching live runs", () => {
++		const current = {
++			moduleRuns: [
++				{ name: "mug", sequence: 1 },
++				{ name: "mug", sequence: 3 },
++				{ name: "arm", sequence: 4 },
++			],
++			branchRuns: [
++				branchRun("mug", 1, "applied"),
++				branchRun("mug", 3, "applied"),
++				branchRun("arm", 4, "applied"),
++			],
++		};
++
++		pruneRevertedGenerations(current, { name: "mug", sequence: 2 });
++
++		assert.deepEqual(
++			current.moduleRuns.map((run) => run.sequence),
++			[1],
++			"a later module run no longer describes model.blend",
++		);
++		assert.deepEqual(
++			current.branchRuns.map((run) => `${run.module}:${run.sequence}`),
++			["mug:1"],
++			"a whole-file restore removes every module's later work, not just the reverted module's",
++		);
++	});
++
++	it("keeps a staged branch record, whose work is still in its branch blend", () => {
++		const current = {
++			moduleRuns: [],
++			branchRuns: [branchRun("mug", 2, "staged"), branchRun("mug", 3, "applied")],
++		};
++
++		pruneRevertedGenerations(current, { name: "mug", sequence: 2 });
++
++		assert.deepEqual(
++			current.branchRuns.map((run) => `${run.sequence}:${run.status}`),
++			["2:staged"],
++		);
++	});
++
++	it("changes nothing when there is no target record", () => {
++		const current = {
++			moduleRuns: [{ name: "mug", sequence: 3 }],
++			branchRuns: [branchRun("mug", 3, "applied")],
++		};
++
++		pruneRevertedGenerations(current, undefined);
++
++		assert.equal(current.moduleRuns.length, 1);
++		assert.equal(current.branchRuns.length, 1);
++	});
++});
+diff --git a/test/module-state.test.mjs b/test/module-state.test.mjs
+new file mode 100644
+index 0000000..2fe48a4
+--- /dev/null
++++ b/test/module-state.test.mjs
+@@ -0,0 +1,159 @@
++// The post-run accounting both execution paths share. These run the real Python
++// module with fake snapshots and a fake bpy, so a divergence between what the
++// branch runner and the live bridge report fails here without Blender.
++
++import assert from "node:assert/strict";
++import { spawnSync } from "node:child_process";
++import { fileURLToPath } from "node:url";
++import test from "node:test";
++
++const moduleDir = fileURLToPath(new URL("../blender", import.meta.url));
++const python = spawnSync("python3", ["--version"], { encoding: "utf-8" });
++const skip = python.error ? "python3 is required to exercise blender/module_state.py" : false;
++
++function runPython(source) {
++	const result = spawnSync("python3", ["-c", source], {
++		cwd: moduleDir,
++		encoding: "utf-8",
++	});
++	assert.equal(result.status, 0, `python exited ${result.status}: ${result.stderr}`);
++	return JSON.parse(result.stdout);
++}
++
++test("a material-only edit is a touch of that material and no object", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++from fingerprint import content_changed
++
++before = {"objects": {"Mug": "a"}, "materials": {"Glaze": "x"}}
++after = {"objects": {"Mug": "a"}, "materials": {"Glaze": "y"}}
++print(json.dumps({
++    "delta": module_state.diff_snapshots(before, after),
++    "changed": content_changed(before, after),
++}))
++`);
++
++	assert.deepEqual(outcome.delta, {
++		touchedObjects: [],
++		touchedMaterials: ["Glaze"],
++		addedObjects: [],
++		removedObjects: [],
++	});
++	assert.equal(outcome.changed, true, "a paint module changed the file even though no object moved");
++});
++
++test("the apply set is widened to ancestors and children, and removals keep their meaning", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++
++class Obj:
++    def __init__(self, name, parent=None, children=()):
++        self.name = name
++        self.parent = parent
++        self.children_recursive = list(children)
++
++parent = Obj("Handle")
++child = Obj("Grip", parent=parent, children=())
++parent.children_recursive = [child]
++other = Obj("Other")
++
++class Objects:
++    values = {"Grip": child, "Handle": parent, "Other": other}
++
++    def get(self, name):
++        return self.values.get(name)
++
++class Data:
++    objects = Objects()
++
++class Bpy:
++    data = Data()
++
++apply_objects, removed = module_state.widen_apply_objects(
++    Bpy(), ["Grip"], ["Gone"],
++)
++print(json.dumps({"apply": apply_objects, "removed": removed}))
++`);
++
++	assert.deepEqual(outcome.apply, ["Grip", "Handle"], "a parent travels with the part it holds");
++	assert.deepEqual(outcome.removed, ["Gone"], "an unrelated deletion is still reported as a removal");
++});
++
++test("ownership carries forward so an idempotent rebuild keeps a digest subject", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++
++print(json.dumps({
++    "rebuilt": module_state.owned_after(["Mug"], [], []),
++    "grown": module_state.owned_after(["Mug"], ["Arm"], []),
++    "shrunk": module_state.owned_after(["Mug", "Arm"], [], ["Arm"]),
++}))
++`);
++
++	assert.deepEqual(outcome.rebuilt, ["Mug"]);
++	assert.deepEqual(outcome.grown, ["Arm", "Mug"]);
++	assert.deepEqual(outcome.shrunk, ["Mug"]);
++});
++
++test("material ownership carries, so a paint module's next run still has a subject", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++
++after = {"objects": {"Mug": "hash"}, "materials": {"Glaze": "gloss"}}
++owned_materials = module_state.owned_materials_after(["Glaze"], [])
++print(json.dumps({
++    "carried": owned_materials,
++    "grown": module_state.owned_materials_after(["Glaze"], ["Rim"]),
++    "untouched_run": module_state.state_digest(after, ["Mug"], owned_materials),
++    "paint_run": module_state.state_digest(after, ["Mug"], ["Glaze"]),
++}))
++`);
++
++	assert.deepEqual(outcome.carried, ["Glaze"]);
++	assert.deepEqual(outcome.grown, ["Glaze", "Rim"]);
++	assert.equal(
++		outcome.untouched_run,
++		outcome.paint_run,
++		"a run that touched no material must still hash the one the module owns",
++	);
++});
++
++test("an empty subject has no digest instead of the digest of an empty string", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++
++after = {"objects": {"Mug": "hash", "MugCam": "camera", "MugCamTarget": "target"}, "materials": {}}
++print(json.dumps({
++    "empty": module_state.state_digest(after, [], []),
++    "framing_only": module_state.state_digest(after, ["MugCam", "MugCamTarget"], []),
++    "with_subject": module_state.state_digest(after, ["Mug", "MugCam", "MugCamTarget"], []),
++}))
++`);
++
++	assert.equal(outcome.empty, null);
++	assert.equal(outcome.framing_only, null, "the framing pair is harness bookkeeping, not a digest subject");
++	assert.match(outcome.with_subject, /^[0-9a-f]{64}$/);
++});
++
++test("the digest moves with content and stays put for the same content", { skip }, () => {
++	const outcome = runPython(`
++import json
++import module_state
++
++same = {"objects": {"Mug": "hash"}, "materials": {"Glaze": "gloss"}}
++moved = {"objects": {"Mug": "other"}, "materials": {"Glaze": "gloss"}}
++print(json.dumps({
++    "first": module_state.state_digest(same, ["Mug"], ["Glaze"]),
++    "same": module_state.state_digest(same, ["Mug"], ["Glaze"]),
++    "moved": module_state.state_digest(moved, ["Mug"], ["Glaze"]),
++}))
++`);
++
++	assert.equal(outcome.first, outcome.same);
++	assert.notEqual(outcome.first, outcome.moved);
++});

@@ -36,7 +36,7 @@ export function collectModuleGenerations(manifest: RunManifest, moduleName: stri
 		generations.push({
 			module: run.module,
 			iteration: run.iteration,
-			sequence: run.sequence,
+			sequence: run.sequence ?? run.iteration,
 			stateDigest: run.stateDigest,
 			ownedObjects: run.ownedObjects,
 			ownedMaterials: run.ownedMaterials,
@@ -48,7 +48,7 @@ export function collectModuleGenerations(manifest: RunManifest, moduleName: stri
 		generations.push({
 			module: run.name,
 			iteration: run.iteration,
-			sequence: run.sequence,
+			sequence: run.sequence ?? run.iteration,
 			stateDigest: run.stateDigest,
 			ownedObjects: run.ownedObjects,
 			ownedMaterials: run.ownedMaterials,
