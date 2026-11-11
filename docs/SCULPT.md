@@ -63,7 +63,7 @@ Do not build these on `bpy.ops.sculpt.brush_stroke`, and do not apply the
 subdivision as a live modifier: the exported mesh would differ from the one that
 was rendered.
 
-## # Sculpt detail: normal-map bake
+## Normal-map bake
 
 A sculpt exported as-is is a high-poly mesh; glTF has no multires level. Bake
 the surface into a normal map on a low-poly cage before export:
