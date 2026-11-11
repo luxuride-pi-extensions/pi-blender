@@ -750,6 +750,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: string;
+	symmetryAxis?: "x" | "y" | "z";
 	/** Metres; `clearance` and `path` sampling granularity. */
 	cell?: number;
 	/** Metres; `clearance` and `path` person reach. */
@@ -778,6 +779,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			specifications: options.specifications,
 			tolerance: options.tolerance,
 			expectedAxis: options.expectedAxis,
+			symmetryAxis: options.symmetryAxis,
 			cell: options.cell,
 			body: options.body,
 			points: options.points,

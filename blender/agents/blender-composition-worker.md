@@ -154,7 +154,7 @@ most of it, and all are cheaper than being re-briefed:
   door to floor. `separated` is wrong, and `interpenetrating` is wrong beyond a
   sliver: a join you meant is a few millimetres of overlap, not half the part.
 
-Self-intersections inside one object need `checks: ["topology"]`, which is the
+Self-intersections inside one object need `checks: ["sculpt"]`, which is the
 expensive one. Use it on the shell, where a bad wall costs everything. Its
 `connectedComponents` is the other number a render cannot show: a mesh that has
 drifted into two or more pieces reads as `nonManifoldEdges: 0` and

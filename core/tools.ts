@@ -1534,6 +1534,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 				Type.Literal("shape"),
 				Type.Literal("topology"),
 				Type.Literal("scale"),
+				Type.Literal("sculpt"),
 			]),
 			{
 				description:
@@ -1541,10 +1542,16 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			},
 		),
 	),
+	symmetryAxis: Type.Optional(
+		Type.Union([Type.Literal("x"), Type.Literal("y"), Type.Literal("z")], {
+			description:
+				"Axis the `sculpt` symmetry metric mirrors across, default `x` for bilateral symmetry. Independent of `expectedAxis`, which is the axis check's thin-direction alignment.",
+		}),
+	),
 	densityCap: Type.Optional(
 		Type.Number({
 			description:
-				"Face ceiling for the `sculpt` check's density budget, e.g. 50000. Omit to report vertex/face counts without judging them.",
+				"Face ceiling for the `sculpt` check's density budget, e.g. 50000. Naming a cap runs `sculpt` even when `checks` omits it. Omit to report vertex/face counts without judging them.",
 		}),
 	),
 	tolerance: Type.Optional(
@@ -1616,6 +1623,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		specifications: params.specifications,
 		tolerance: params.tolerance,
 		expectedAxis: params.expectedAxis,
+		symmetryAxis: params.symmetryAxis,
 		body: params.body,
 		cell: params.cell,
 		points: params.points,

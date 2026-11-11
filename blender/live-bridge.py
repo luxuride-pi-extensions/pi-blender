@@ -1215,6 +1215,7 @@ GEOMETRY_PROBE_CHECKS = (
     "shape",
     "topology",
     "scale",
+    "sculpt",
 )
 GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT = 4000
 # The shape family is a summary, not a dump: it reports counts, a few scalars
@@ -2913,6 +2914,8 @@ def _probe_topology(obj):
         return {"available": False, "reason": "bmesh unavailable in this Blender build"}
 
     mesh = obj.data
+    if len(mesh.polygons) == 0:
+        return {"available": False, "reason": "the mesh has no faces to measure"}
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bm.verts.ensure_lookup_table()
@@ -3177,6 +3180,8 @@ def _probe_sculpt(obj, density_cap=None, request_axis=None):
         return {"available": False, "reason": "bmesh/bvhtree unavailable in this Blender build"}
 
     mesh = obj.data
+    if len(mesh.polygons) == 0:
+        return {"available": False, "reason": "the mesh has no faces to measure"}
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bm.verts.ensure_lookup_table()
@@ -3188,8 +3193,10 @@ def _probe_sculpt(obj, density_cap=None, request_axis=None):
 
         # Self-intersection: BVH overlap reports every pair, including faces
         # that share an edge or a vertex by construction. Those are excluded by
-        # index, then the remaining pairs are capped: an exact all-pairs pass on
-        # a sculpted mesh can hold the bridge lock for minutes.
+        # index, then the returned pairs are capped. The cap bounds the list and
+        # the loop, NOT the cost of bvh.overlap itself, which materialises every
+        # pair before this code runs; on a very heavy mesh that call is the
+        # expensive part and cannot be preempted.
         pair_cap = 20000
         overlaps = bvh.overlap(bvh)
         fold_pairs = 0
@@ -3211,16 +3218,14 @@ def _probe_sculpt(obj, density_cap=None, request_axis=None):
         sampled_faces = 0
         open_faces = 0
         thickness = None
-        # A surface with a boundary has no inside to cast into: an open plane
-        # reports that fact once instead of a confident zero from a ray that
-        # happened to graze its own face.
-        open_surface = any(len(edge.link_faces) == 1 for edge in bm.edges)
-        if open_surface:
-            open_faces = len(bm.faces)
+        # A face with a boundary edge has no inside to cast into. Skip that
+        # face and keep measuring the closed part: an unclosed eye socket on an
+        # otherwise solid body must not make the whole model unmeasured.
         for index, face in enumerate(bm.faces):
             if index % face_step:
                 continue
-            if open_surface:
+            if any(len(edge.link_faces) == 1 for edge in face.edges):
+                open_faces += 1
                 continue
             sampled_faces += 1
             origin = face.calc_center_median() - face.normal * 1e-5
@@ -3234,7 +3239,7 @@ def _probe_sculpt(obj, density_cap=None, request_axis=None):
 
         # Symmetry about the mesh's own bounds centre, matched to the nearest
         # mirrored vertex. A model that sits off to one side is still symmetric.
-        axis_name = str(request_axis or "x").lower()
+        axis_name = str(request_axis or "x").lower()  # object space
         axis = {"x": 0, "y": 1, "z": 2}.get(axis_name, 0)
         if verts:
             low = min(v[axis] for v in verts)
@@ -3281,8 +3286,8 @@ def _probe_sculpt(obj, density_cap=None, request_axis=None):
                 "sampledFaces": sampled_faces,
                 "openFaces": open_faces,
                 "sampled": face_step > 1,
-                "method": "face centre ray along the inverted normal",
-                "limit": "an open surface has no inside; those faces are counted in openFaces and excluded",
+                "method": "face centre ray along the inverted normal, object space",
+                "limit": "a face with a boundary edge has no inside; those faces are counted in openFaces and excluded",
             },
             "symmetry": {
                 "axis": axis_name if axis_name in ("x", "y", "z") else "x",
@@ -3735,6 +3740,9 @@ def handle_geometry_probe(request):
         # and no complaint, which reads as a route that was never worth
         # measuring.
         requested = list(requested) + ["path"]
+    if request.get("densityCap") is not None and "sculpt" not in requested:
+        # A cap with no check is a measurement the caller believes happened.
+        requested = list(requested) + ["sculpt"]
     expected_axis = request.get("expectedAxis") or "Z"
     axis_vector = Vector(
         {
@@ -3829,7 +3837,7 @@ def handle_geometry_probe(request):
             entry["sculpt"] = _probe_sculpt(
                 obj,
                 request.get("densityCap"),
-                request.get("expectedAxis"),
+                request.get("symmetryAxis") or "x",
             )
 
         measurements[obj.name] = entry

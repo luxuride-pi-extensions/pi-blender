@@ -38,6 +38,7 @@ export async function blenderGeometryProbe(options: GeometryProbeOptions): Promi
 		specifications: options.specifications,
 		tolerance: options.tolerance,
 		expectedAxis: options.expectedAxis,
+		symmetryAxis: options.symmetryAxis,
 		cell: options.cell,
 		body: options.body,
 		points: options.points,

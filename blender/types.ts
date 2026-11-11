@@ -1673,7 +1673,12 @@ export interface GeometryProbeSculpt {
 	 * faces that merely touch at a shared edge are not counted, and the pair
 	 * count is capped; `sampled` says the cap was reached.
 	 */
-	selfIntersections: { pairs: number; sampled: boolean; cap: number };
+	selfIntersections: {
+		pairs: number;
+		/** True when the returned list hit `cap`; the underlying BVH pass may have seen more. */
+		sampled: boolean;
+		cap: number;
+	};
 	/**
 	 * Shortest inward ray hit per sampled face, in object space. A wall thinner
 	 * than the printer's minimum is a model that prints as a hole.
@@ -1683,17 +1688,33 @@ export interface GeometryProbeSculpt {
 	 * counted in `openFaces` and excluded from the minimum rather than reported
 	 * as zero.
 	 */
-	minWallThickness: { distance: number | null; sampledFaces: number; openFaces: number; sampled: boolean };
+	minWallThickness: {
+		distance: number | null;
+		sampledFaces: number;
+		/** Faces skipped because a boundary edge left them no inside to hit. */
+		openFaces: number;
+		sampled: boolean;
+		method: string;
+		limit: string;
+	};
 	/**
 	 * RMS distance between each vertex and its nearest mirror partner across
 	 * the requested axis, measured about the mesh's own bounds centre. A model
 	 * placed off to one side is still symmetric.
 	 *
-	 * Method: KD-tree of all vertices in the mirrored coordinate. Limitation:
-	 * nearest-vertex matching, not surface matching, so uneven density on the
-	 * two halves reads as a small error.
+	 * Method: KD-tree of all vertices in the mirrored coordinate, in OBJECT
+	 * space (unapplied object scale is not baked in). Limitation: nearest-vertex
+	 * matching, not surface matching, so uneven density on the two halves reads
+	 * as a small error.
 	 */
-	symmetry: { axis: "x" | "y" | "z"; rms: number; max: number; sampled: boolean };
+	symmetry: {
+		axis: "x" | "y" | "z";
+		rms: number;
+		max: number;
+		sampled: boolean;
+		method: string;
+		limit: string;
+	};
 	/**
 	 * Distribution of edge dihedral angles in degrees. A lumpy surface has a
 	 * fat tail that a smooth one does not; a sculpt's shoulder should not have
@@ -2182,7 +2203,7 @@ export interface GeometryProbeOptions {
 	objects?: string[];
 	pairs?: string[][];
 	checks?: GeometryProbeCheck[];
-	/** Face/vertex ceiling for the `sculpt` density metric; omit to leave it unjudged. */
+	/** Face ceiling for the `sculpt` density metric; omit to leave it unjudged. */
 	densityCap?: number;
 	/** Reference dimensions; asking for them implies the `scale` check. */
 	specifications?: Record<string, GeometryProbeSpecification>;
@@ -2217,6 +2238,7 @@ export interface GeometryProbeOptions {
 	 */
 	detour?: number;
 	expectedAxis?: "X" | "Y" | "Z";
+	symmetryAxis?: "x" | "y" | "z";
 	timeoutMs?: number;
 	signal?: AbortSignal;
 }
