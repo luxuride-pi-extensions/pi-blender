@@ -144,16 +144,20 @@ export async function cancelJob(
 	if (!job) {
 		throw new Error(`Job "${id}" not found in job registry.`);
 	}
+	if (job.state === "cancelled") return job;
 	if (job.state !== "running") {
 		throw new Error(`Job "${id}" is already ${job.state}.`);
 	}
 	// Write the decision BEFORE aborting: the abort rejects the worker
 	// synchronously, and its catch would otherwise race this write and land as
 	// "failed" on a job the user just cancelled.
-	await updateJob(id, { state: "cancelled", cancelReason: reason, error: reason });
+	await updateJob(id, { state: "cancelled", cancelReason: reason });
 	inFlight.get(id)?.abort(new Error(reason));
 	inFlight.delete(id);
-	return (await getJob(id)) as DeferredJobRecord;
+	const settled = (await getJob(id)) as DeferredJobRecord;
+	if (settled.state === "cancelled") return settled;
+	// A worker outcome read before this write can land after it; the decision wins.
+	return (await updateJob(id, { state: "cancelled", cancelReason: reason })) as DeferredJobRecord;
 }
 
 async function finishJob(id: string, updates: Partial<DeferredJobRecord>): Promise<void> {

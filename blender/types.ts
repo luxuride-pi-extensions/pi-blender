@@ -2408,6 +2408,7 @@ export interface DeferredJobRecord {
 	updatedAt: string;
 	result?: unknown;
 	error?: string;
+	cancelReason?: string;
 	metadata?: Record<string, unknown>;
 }
 

@@ -343,6 +343,7 @@ async function runLockedBridgeRequest<T>(options: {
 	// A cold start (a window the user just opened with /blender-watch, still
 	// booting) gets the longer budget; an already-running bridge does not.
 	const deadline = Date.now() + (options.timeoutMs ?? (coldStart ? LIVE_BRIDGE_COLD_START_TIMEOUT_MS : LIVE_BRIDGE_TIMEOUT_MS));
+	try {
 	while (Date.now() < deadline) {
 		if (await fileExists(responsePath)) {
 			const responseRaw = await readFile(responsePath, "utf-8");
@@ -373,6 +374,12 @@ async function runLockedBridgeRequest<T>(options: {
 			return response.result;
 		}
 		await delay(LIVE_BRIDGE_POLL_MS, options.signal);
+	}
+	} catch (error) {
+		// A withdrawn request is best effort: the bridge may already be running
+		// it, but a request still queued must not execute after the caller gave up.
+		await rm(requestPath, { force: true });
+		throw error;
 	}
 
 	await rm(requestPath, { force: true });
