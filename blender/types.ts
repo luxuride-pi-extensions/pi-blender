@@ -228,6 +228,8 @@ export interface BlenderBranchRunRecord {
 	cameras?: BranchCameraFraming[];
 	/** The resolved plan this run's framing came from. */
 	cameraPlan?: ResolvedCameraPlan;
+	/** The multi-panel review sheet this run wrote, if asked for one. */
+	reviewSheet?: ReviewSheetResult;
 }
 
 export interface BranchRunOptions {
@@ -236,6 +238,8 @@ export interface BranchRunOptions {
 	moduleName: string;
 	/** Capture a render of the BRANCH, not of model.blend. Defaults to true. */
 	render?: boolean;
+	/** Also render the plan's other shots into one review sheet. Implies render. */
+	reviewSheet?: boolean;
 	view?: string;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
@@ -252,6 +256,27 @@ export interface BranchRunOptions {
 	frameSubject?: "module" | "apply";
 	/** Minimum camera distance; a larger subject still fits. Omitted to fit. */
 	cameraDistance?: number;
+}
+
+export interface ReviewSheetPanel {
+	name: string;
+	file: string;
+	cameraName: string;
+	shot: string;
+	/** Framing the panel was rendered with, so "same scale" is checkable. */
+	distance: number;
+	lensMm: number;
+	orthoScale: number;
+}
+
+export interface ReviewSheetResult {
+	/** Absent when the sheet could not be written; `error` says why. */
+	path?: string;
+	width?: number;
+	height?: number;
+	panels: ReviewSheetPanel[];
+	/** Panels that failed, or why the sheet could not be composed. */
+	error?: string;
 }
 
 export interface BranchRunResult {
@@ -297,6 +322,8 @@ export interface BranchRunResult {
 	cameraPlan: ResolvedCameraPlan;
 	/** Camera the render actually used, which an explicit view overrides. */
 	resolvedCameraName?: string;
+	/** The multi-panel review sheet, when the run was asked for one. */
+	reviewSheet?: ReviewSheetResult;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 }
@@ -1455,6 +1482,8 @@ export interface ModuleRunOptions {
 	workspace: string;
 	moduleName: string;
 	render?: boolean;
+	/** Also render the plan's other shots into one review sheet. Implies render. */
+	reviewSheet?: boolean;
 	view?: string;
 	timeoutSeconds?: number;
 	resolution?: { x: number; y: number; percentage?: number };
@@ -1517,6 +1546,8 @@ export interface ModuleRunResult {
 	cameras?: BranchCameraFraming[];
 	/** The camera plan this run resolved, when it ran headless. */
 	cameraPlan?: ResolvedCameraPlan;
+	/** The multi-panel review sheet this run wrote, when asked for one. */
+	reviewSheet?: ReviewSheetResult;
 	/** Behaviour the caller should know about, e.g. options this path ignored. */
 	warnings?: string[];
 	/**

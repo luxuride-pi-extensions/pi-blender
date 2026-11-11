@@ -420,7 +420,12 @@ Start pi in any project dir. The extension:
   between iterations turns every comparison into a camera comparison, while a
   NEW profile or shot list re-expands instead of reusing the old list. The
   camera options are the headless path's: a live run uses the session camera
-  and says so in its warnings. An explicit `view` still wins for the picture
+  and says so in its warnings. An explicit `view` still wins for the picture.
+  `reviewSheet: true` renders up to three more shots from the plan inside the
+  same Blender process and composes `modules/<name>/review.png`, returning the
+  panel map; the hero stays `render.png`, and the critic reads the sheet as its
+  one image. That is how a back, profile or asymmetry finding becomes visible
+  without a second process or a second image.
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

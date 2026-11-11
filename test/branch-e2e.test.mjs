@@ -28,6 +28,7 @@ const workspace = await loadTs(`${fileURLToPath(new URL("../blender/workspace.ts
 const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", import.meta.url))}`);
 const render = await loadTs(`${fileURLToPath(new URL("../blender/render.ts", import.meta.url))}`);
 const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
+const png = await loadTs(`${fileURLToPath(new URL("../blender/png.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
 async function blenderAvailable() {
@@ -916,6 +917,60 @@ test("a portrait frame fits a tall subject instead of cropping it", { skip }, as
 		assert.ok(framing.coverage.minX >= 0.02 && framing.coverage.maxX <= 0.98, `portrait width crops: ${JSON.stringify(framing.coverage)}`);
 		assert.ok(framing.coverage.minY >= 0.02 && framing.coverage.maxY <= 0.98, `portrait height crops: ${JSON.stringify(framing.coverage)}`);
 		assert.equal(framing.coverageOk, true);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a review sheet renders the plan's other angles in the same run", { skip }, async () => {
+	// One 3/4 image cannot show a collapsed back or left/right asymmetry. The
+	// sheet is composed inside the run process from panels rendered there, so it
+	// costs renders but no second Blender start, and the hero image stays where
+	// every earlier consumer expects it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "sheet", box("SheetPart", 2, 2, 2) + box("SheetLug", 0.4, 0.4, 0.4, 1.1, 0, 0));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "sheet",
+			render: false,
+			reviewSheet: true,
+			cameraProfile: "character",
+			timeoutSeconds: 300,
+		});
+		const sheet = result.reviewSheet;
+		assert.ok(sheet, `reviewSheet: true returns the sheet it wrote: ${JSON.stringify(result)}`);
+		assert.ok(result.renderOutputPath, "a sheet implies a hero render");
+		assert.equal(sheet.panels.length, 4, "character has front, left, back and hero");
+		assert.equal(sheet.panels[0].file, result.renderOutputPath, "the hero panel is the ordinary render");
+		assert.ok(existsSync(sheet.path), `the sheet file exists: ${JSON.stringify(sheet)}`);
+		for (const panel of sheet.panels) {
+			assert.ok(existsSync(panel.file), `panel ${panel.name} exists at ${panel.file}`);
+			assert.ok(panel.cameraName, `panel ${panel.name} records its camera`);
+			assert.ok(panel.distance > 0 && panel.lensMm > 0, `panel ${panel.name} records framing`);
+		}
+		const sheetImage = png.decodePng(readFileSync(sheet.path));
+		assert.equal(sheetImage.width, 1304);
+		const tiles = result.reviewSheet.panels.map((panel) => {
+			const image = png.decodePng(readFileSync(panel.file));
+			let sum = 0;
+			let sumSquares = 0;
+			for (let index = 0; index < image.pixels.length; index += 4) {
+				const luma = 0.2126 * image.pixels[index] + 0.7152 * image.pixels[index + 1] + 0.0722 * image.pixels[index + 2];
+				sum += luma;
+				sumSquares += luma * luma;
+			}
+			const count = image.pixels.length / 4;
+			const mean = sum / count;
+			return { name: panel.name, mean, deviation: Math.sqrt(sumSquares / count - mean * mean), bytes: readFileSync(panel.file) };
+		});
+		for (const tile of tiles) {
+			assert.ok(tile.deviation > 2, `panel ${tile.name} is not a blank tile (deviation ${tile.deviation})`);
+		}
+		assert.equal(new Set(tiles.map((tile) => tile.bytes.toString("base64"))).size, tiles.length, "panels are distinct renders");
+		assert.ok(sheet.width <= 1600 && sheet.height <= 1200, "the sheet stays inside the bounded size");
+		assert.equal(sheet.width, 2 * 640 + 3 * 8);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

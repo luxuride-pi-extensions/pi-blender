@@ -95,7 +95,10 @@ def render_scene(payload):
         scene.cycles.samples = int(samples)
 
     output_path = payload["outputPath"]
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not create the render directory: {exc}") from exc
     scene.render.image_settings.file_format = "PNG"
     scene.render.filepath = output_path
     bpy.ops.render.render(write_still=True)
@@ -111,3 +114,79 @@ def render_scene(payload):
             "percentage": int(scene.render.resolution_percentage),
         },
     }
+
+def compose_review_sheet(panels, output_path, columns=2, gutter=8):
+    """Tile rendered panels into one sheet without leaving Blender.
+
+    NumPy and `bpy.data.images` ship with Blender, so this needs no dependency
+    the extension does not already have. Panels are loaded as scene-linear
+    pixels and written back through an sRGB image, which is the round trip a
+    saved PNG takes; reading and writing the same buffer keeps the colours the
+    renders had. A panel that cannot be read is reported by name, not silently
+    replaced with a blank tile.
+    """
+    # pi-lens-ignore: ast-grep:unresolved-import-python (NumPy ships with Blender)
+    import numpy as np  # pyright: ignore[reportMissingImports]
+
+    if not panels:
+        raise RuntimeError("a review sheet needs at least one panel")
+    loaded = []
+    try:
+        for panel in panels:
+            path = panel["file"]
+            image = bpy.data.images.load(path, check_existing=False)
+            pixels = np.array(image.pixels[:], dtype=np.float32).reshape(
+                image.size[1], image.size[0], 4
+            )
+            loaded.append((panel, pixels))
+            bpy.data.images.remove(image)
+    except (OSError, RuntimeError) as error:
+        raise RuntimeError(f"could not read a review panel: {error}") from error
+
+    panel_width, panel_height = 640, 480
+    resized = []
+    for panel, pixels in loaded:
+        # Aspect is preserved by fitting inside the tile, never by stretching:
+        # a square or portrait hero squeezed into 4:3 would read as geometry.
+        scale = min(panel_width / pixels.shape[1], panel_height / pixels.shape[0])
+        target_width = max(1, int(pixels.shape[1] * scale))
+        target_height = max(1, int(pixels.shape[0] * scale))
+        if target_width != pixels.shape[1] or target_height != pixels.shape[0]:
+            row_index = np.linspace(0, pixels.shape[0] - 1, target_height).astype(np.int32)
+            column_index = np.linspace(0, pixels.shape[1] - 1, target_width).astype(np.int32)
+            pixels = pixels[np.ix_(row_index, column_index)]
+        tile = np.full((panel_height, panel_width, 4), 0.06, dtype=np.float32)
+        tile[:, :, 3] = 1.0
+        top = (panel_height - target_height) // 2
+        left = (panel_width - target_width) // 2
+        tile[top : top + target_height, left : left + target_width] = pixels
+        resized.append((panel, tile))
+    loaded = resized
+    rows = (len(loaded) + columns - 1) // columns
+    sheet_width = columns * panel_width + (columns + 1) * gutter
+    sheet_height = rows * panel_height + (rows + 1) * gutter
+    sheet = np.full((sheet_height, sheet_width, 4), 0.06, dtype=np.float32)
+    sheet[:, :, 3] = 1.0
+    for index, (_panel, pixels) in enumerate(loaded):
+        column = index % columns
+        row = index // columns
+        x = gutter + column * (panel_width + gutter)
+        y_from_top = gutter + row * (panel_height + gutter)
+        y = sheet_height - y_from_top - panel_height
+        sheet[y : y + panel_height, x : x + panel_width] = pixels
+
+    image = bpy.data.images.new(
+        "pi_review_sheet", width=sheet_width, height=sheet_height, alpha=True
+    )
+    image.colorspace_settings.name = "sRGB"
+    image.pixels.foreach_set(sheet.ravel())
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not create the review-sheet directory: {exc}") from exc
+    image.filepath_raw = output_path
+    image.file_format = "PNG"
+    image.save()
+    bpy.data.images.remove(image)
+    return {"path": output_path, "width": sheet_width, "height": sheet_height}
+

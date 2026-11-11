@@ -706,6 +706,13 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			minimum: 0,
 		}),
 	),
+	reviewSheet: Type.Optional(
+		Type.Boolean({
+			description:
+				"Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.",
+			default: false,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -737,6 +744,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
 		frameSubject: params.frameSubject as "module" | "apply" | undefined,
 		cameraDistance: params.cameraDistance,
+		reviewSheet: params.reviewSheet,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -829,6 +837,13 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 			minimum: 0,
 		}),
 	),
+	reviewSheet: Type.Optional(
+		Type.Boolean({
+			description:
+				"Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.",
+			default: false,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -860,6 +875,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
 		frameSubject: params.frameSubject as "module" | "apply" | undefined,
 		cameraDistance: params.cameraDistance,
+		reviewSheet: params.reviewSheet,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
