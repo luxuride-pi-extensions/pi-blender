@@ -1353,7 +1353,7 @@ test("a comparison with only one run is refused rather than self-compared", { sk
 
 test("an open mesh blocks the critic before it is spent", { skip }, async () => {
 	const ws = await makeWorkspace();
-	{
+	try {
 		writeScript(ws.workspacePath, "open", `${box("OpenPart", 2, 2, 2)}
 import bmesh
 _mesh = bpy.data.objects["OpenPart"].data
@@ -1375,5 +1375,7 @@ _bm.free()
 		assert.equal(result.preflight.blocking, true);
 		assert.ok(result.preflight.blockers.includes("nonManifold"), JSON.stringify(result.preflight.blockers));
 		assert.ok(result.renderOutputPath, "a structural failure does not discard the render");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
 	}
 });

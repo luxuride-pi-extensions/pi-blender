@@ -538,12 +538,27 @@ preflight = None
 if exit_code == 0:
     front = str(camera_plan.get("frontAxis") or "-Y")
     symmetry_axis = "x" if front in ("-Y", "Y") else "y"
-    preflight = validate_preflight(
-        bpy,
-        sorted(apply_objects),
-        profile=camera_plan.get("profile") or "prop",
-        symmetry_axis=symmetry_axis,
-    )
+    # Ownership, not just this run's delta. A paint iteration touches node
+    # values, so apply_objects is empty and a view of only that set would
+    # report a healthy material as an empty scene.
+    preflight_subject = sorted(set(apply_objects) | set(owned_objects))
+    try:
+        preflight = validate_preflight(
+            bpy,
+            preflight_subject,
+            profile=camera_plan.get("profile") or "prop",
+            symmetry_axis=symmetry_axis,
+        )
+    except Exception as exc:
+        # Measurement must never destroy a build that already succeeded: the
+        # save and render still happen, and the failure is a visible warning.
+        preflight = {
+            "profile": camera_plan.get("profile") or "prop",
+            "blocking": False,
+            "blockers": [],
+            "warnings": ["preflight"],
+            "checks": {"preflight": {"status": "warn", "reason": str(exc)}},
+        }
 
 cameras = [camera_framing] if camera_framing is not None else []
 camera_plan_report = dict(camera_plan)
@@ -695,7 +710,7 @@ interface BranchRunPayload {
 	cameras: BranchCameraFraming[];
 	/** The resolved camera plan and the framing it produced. */
 	cameraPlan: ResolvedCameraPlan;
-	preflight: PreflightResult;
+	preflight: PreflightResult | null;
 	/** The render this run took, or null when rendering was disabled. */
 	render: BranchRenderPayload | null;
 	/** Why the render failed, when the run itself succeeded. */
@@ -931,7 +946,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedObjects: payload.ownedObjects,
 		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
-		preflight: payload.preflight,
+		preflight: payload.preflight ?? undefined,
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
@@ -983,7 +998,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
-		preflight: payload.preflight,
+		preflight: payload.preflight ?? undefined,
 		reviewSheet: payload.reviewSheet ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,

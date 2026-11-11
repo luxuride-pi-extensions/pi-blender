@@ -9,6 +9,6 @@ test("the manager is told to route a blocking preflight to the worker", () => {
 	assert.match(manager, /send the `blockers` and their measured values back to the worker/);
 });
 
-test("a blocking verdict is a skip-critic decision, not a render failure", () => {
-	assert.doesNotMatch(manager, /preflight\.blocking[^.]*delete the render/i);
+test("the render is kept so the worker can see what is wrong", () => {
+	assert.match(manager, /The render still exists/);
 });

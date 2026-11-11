@@ -59,6 +59,20 @@ def main():
     )
 
     reset()
+    first = cube("First")
+    second = cube("Second", location=(0.6, 0, 0))
+    verdict = validate(bpy, [first.name, second.name], profile="hard_surface")
+    checks["hard surface blocks interpenetration"] = "selfIntersections" in verdict["blockers"]
+
+    reset()
+    first = cube("First")
+    second = cube("Second")
+    verdict = validate(bpy, [first.name, second.name], profile="print")
+    checks["coincident duplicates are counted"] = (
+        verdict["checks"]["selfIntersections"]["value"]["pairs"] > 0
+    )
+
+    reset()
     obj = cube()
     obj.scale = (0.5, 0.5, 0.5)
     verdict = validate(bpy, [obj.name], profile="prop")
@@ -75,6 +89,23 @@ def main():
     thickness = verdict["checks"]["wallThickness"]["value"]["distance"]
     checks["thin wall is measured"] = (
         thickness is not None and 0.0003 < thickness < 0.0005 and "wallThickness" in verdict["blockers"]
+    )
+
+    reset()
+    bpy.ops.mesh.primitive_plane_add(size=2)
+    panel = bpy.context.object
+    verdict = validate(bpy, [panel.name], profile="paint")
+    checks["a flat subject is not an empty scene"] = verdict["blocking"] is False
+
+    reset()
+    bpy.ops.mesh.primitive_plane_add(size=2)
+    shell = bpy.context.object
+    solidify = shell.modifiers.new("Wall", "SOLIDIFY")
+    solidify.thickness = 0.0005
+    verdict = validate(bpy, [shell.name], profile="print")
+    checks["a modifier wall is measured"] = (
+        verdict["checks"]["wallThickness"]["value"]["distance"] is not None
+        and verdict["checks"]["wallThickness"]["value"]["distance"] < 0.0008
     )
 
     reset()
