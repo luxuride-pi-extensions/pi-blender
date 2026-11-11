@@ -233,6 +233,8 @@ print(json.dumps({
     "lens": camera.data.lens,
     "target": [target.location.x, target.location.y, target.location.z] if target is not None else None,
     "distance": (camera.location - target.location).length if target is not None else None,
+    "rotation": [camera.rotation_euler.x, camera.rotation_euler.y, camera.rotation_euler.z],
+    "constraints": len(camera.constraints),
 }))
 print("__PI_BLENDER_JSON_END__")
 `,
@@ -789,18 +791,20 @@ test("the harness frames each module's own camera, with no camera in the brief",
 		// than no report: it claims a picture that does not exist.
 		const camera = await cameraReport(ws.root, ws.blendPath, "armCam");
 		assert.ok(camera, "the camera must reach model.blend, or the window cannot be pointed at it");
-		assert.ok(camera.target, "the aim is a Track To constraint on an empty, so re-framing cannot drift out of sync with the aim");
-		assert.ok(
-			Math.abs(camera.target[0] - framing.center[0]) < 1e-4 && Math.abs(camera.target[2] - framing.center[2]) < 1e-4,
-			`the target must sit on the measured centre (target ${JSON.stringify(camera.target)} vs centre ${JSON.stringify(framing.center)})`,
+		assert.equal(camera.constraints, 0, "the aim is baked into the camera rotation, so coverage is not read from a stale constraint");
+		assert.ok(camera.rotation.some((value) => Math.abs(value) > 1e-4), "the camera has a real rotation");
+		const distance = Math.hypot(
+			camera.location[0] - framing.center[0],
+			camera.location[1] - framing.center[1],
+			camera.location[2] - framing.center[2],
 		);
 		assert.ok(
-			Math.abs(camera.distance - framing.distance) < 1e-4,
-			`the camera's distance must be the solved distance (${camera.distance} vs ${framing.distance})`,
+			Math.abs(distance - framing.distance) < 1e-4,
+			`the camera's distance must be the solved distance (${distance} vs ${framing.distance})`,
 		);
 		// The eye must be OUTSIDE the part, at a distance the lens can actually
 		// frame: too close and a 50mm lens is inside the geometry.
-		assert.ok(camera.distance > framing.extent.reduce((a, b) => Math.hypot(a, b), 0) / 2, "the eye must be outside the part's bounding sphere");
+		assert.ok(distance > framing.extent.reduce((a, b) => Math.hypot(a, b), 0) / 2, "the eye must be outside the part's bounding sphere");
 
 		// The default render must come from that camera, not the studio one.
 		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
@@ -810,6 +814,72 @@ test("the harness frames each module's own camera, with no camera in the brief",
 			"with no view given, the render must use the module's own framed camera -- falling back to scene.camera is the origin-aimed studio camera",
 		);
 		assert.ok(result.renderOutputPath && existsSync(result.renderOutputPath));
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+
+test("the declared front and the frame subject change what the camera sees", { skip }, async () => {
+	// Two failures this catches, both invisible in a pure plan test: a +Y-facing
+	// model must be photographed from +Y, and a detail parented to a body must be
+	// framed on the detail rather than on the body the widened apply set carries.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "body", box("Body", 20, 20, 20));
+		await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "body",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		writeScript(
+			ws.workspacePath,
+			"detail",
+			`
+import bpy
+bpy.ops.mesh.primitive_cube_add(size=1)
+detail = bpy.context.object
+detail.name = "Detail"
+detail.parent = bpy.data.objects["Body"]
+detail.matrix_world.translation = (8.0, 0.0, 0.0)
+`,
+		);
+		const framed = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "detail",
+			render: false,
+			frameSubject: "module",
+			frontAxis: "+Y",
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		const framing = framed.cameras?.[0];
+		assert.ok(framing, "the detail run must report its framing");
+		assert.deepEqual(framing.subjects, ["Detail"], "frameSubject=module frames the detail, not its parent");
+		assert.ok(framing.extent[0] < 2, `the detail is ~1 unit wide, not the body's 20 (got ${framing.extent[0]})`);
+		assert.equal(framed.cameraPlan?.frontAxis, "+Y");
+		assert.ok(framing.direction?.[1] > 0.5, `a +Y front puts the camera at +Y (got ${JSON.stringify(framing.direction)})`);
+		assert.ok(framing.coverage, "coverage is reported");
+		assert.ok(framing.coverage.minX >= 0.02 && framing.coverage.maxX <= 0.98, "the detail is inside the safe frame");
+		assert.ok(framing.coverage.minY >= 0.02 && framing.coverage.maxY <= 0.98, "the detail is inside the safe frame vertically");
+
+		const widened = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "detail",
+			render: false,
+			frameSubject: "apply",
+			frontAxis: "+Y",
+			timeoutSeconds: 300,
+		});
+		const wideFraming = widened.cameras?.[0];
+		assert.ok(wideFraming);
+		assert.ok(wideFraming.subjects.includes("Body"), "the apply set carries the parent");
+		assert.ok(wideFraming.extent[0] >= 19, `framing the apply set frames the body (got ${wideFraming.extent[0]})`);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

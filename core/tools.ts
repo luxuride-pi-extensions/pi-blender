@@ -7,7 +7,7 @@
 
 import { Type } from "typebox";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
-import type { AssetExportOptions, ImportFormat } from "../blender/types.js";
+import type { AssetExportOptions, CameraFrontAxis, CameraProfile, CameraShotKind, ImportFormat } from "../blender/types.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
 	blenderAddReference,
@@ -658,6 +658,53 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
+	cameraProfile: Type.Optional(
+		Type.String({
+			description:
+				"Use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
+		}),
+	),
+	frontAxis: Type.Optional(
+		Type.String({
+			description:
+				"Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+			enum: ["-Y", "+Y", "-X", "+X"],
+		}),
+	),
+	cameraShots: Type.Optional(
+		Type.Array(
+			Type.String({
+				enum: [
+					"hero",
+					"front",
+					"back",
+					"left",
+					"right",
+					"top",
+					"ortho_front",
+					"ortho_side",
+					"ortho_top",
+					"interior_hero",
+					"interior_front",
+					"lineup_front",
+				],
+			}),
+			{ description: "Explicit shot list overriding the profile's default. The first shot is rendered." },
+		),
+	),
+	frameSubject: Type.Optional(
+		Type.String({
+			description:
+				"Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+			enum: ["module", "apply"],
+		}),
+	),
+	cameraDistance: Type.Optional(
+		Type.Number({
+			description: "Fixed camera distance for asset-pack lineup shots. Omit to fit the subject.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -684,6 +731,11 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
+		cameraProfile: params.cameraProfile as CameraProfile | undefined,
+		frontAxis: params.frontAxis as CameraFrontAxis | undefined,
+		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
+		frameSubject: params.frameSubject as "module" | "apply" | undefined,
+		cameraDistance: params.cameraDistance,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -728,6 +780,53 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 				'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
+	cameraProfile: Type.Optional(
+		Type.String({
+			description:
+				"Use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
+		}),
+	),
+	frontAxis: Type.Optional(
+		Type.String({
+			description:
+				"Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+			enum: ["-Y", "+Y", "-X", "+X"],
+		}),
+	),
+	cameraShots: Type.Optional(
+		Type.Array(
+			Type.String({
+				enum: [
+					"hero",
+					"front",
+					"back",
+					"left",
+					"right",
+					"top",
+					"ortho_front",
+					"ortho_side",
+					"ortho_top",
+					"interior_hero",
+					"interior_front",
+					"lineup_front",
+				],
+			}),
+			{ description: "Explicit shot list overriding the profile's default. The first shot is rendered." },
+		),
+	),
+	frameSubject: Type.Optional(
+		Type.String({
+			description:
+				"Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+			enum: ["module", "apply"],
+		}),
+	),
+	cameraDistance: Type.Optional(
+		Type.Number({
+			description: "Fixed camera distance for asset-pack lineup shots. Omit to fit the subject.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -754,6 +853,11 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
+		cameraProfile: params.cameraProfile as CameraProfile | undefined,
+		frontAxis: params.frontAxis as CameraFrontAxis | undefined,
+		cameraShots: params.cameraShots as CameraShotKind[] | undefined,
+		frameSubject: params.frameSubject as "module" | "apply" | undefined,
+		cameraDistance: params.cameraDistance,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,

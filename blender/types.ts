@@ -226,6 +226,8 @@ export interface BlenderBranchRunRecord {
 	renderOutputPath?: string | null;
 	/** Framing this run solved for the module's camera. Empty when it produced no mesh. */
 	cameras?: BranchCameraFraming[];
+	/** The resolved plan this run's framing came from. */
+	cameraPlan?: ResolvedCameraPlan;
 }
 
 export interface BranchRunOptions {
@@ -240,6 +242,16 @@ export interface BranchRunOptions {
 	renderEngine?: BlenderRenderEngine;
 	timeoutSeconds?: number;
 	signal?: AbortSignal;
+	/** Use-case profile that selects the default shot list. Defaults to "prop". */
+	cameraProfile?: CameraProfile;
+	/** World axis the subject faces; declared, never inferred. Defaults to "-Y". */
+	frontAxis?: CameraFrontAxis;
+	/** Explicit shot list, overriding the profile's default. */
+	cameraShots?: CameraShotKind[];
+	/** Frame this run's own touched geometry, or the widened apply set. */
+	frameSubject?: "module" | "apply";
+	/** Fixed distance for lineup shots; omitted to fit the subject. */
+	cameraDistance?: number;
 }
 
 export interface BranchRunResult {
@@ -281,6 +293,10 @@ export interface BranchRunResult {
 	renderError?: string;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
 	cameras: BranchCameraFraming[];
+	/** The camera plan this run resolved, including the shot list and the resolved primary. */
+	cameraPlan: ResolvedCameraPlan;
+	/** Camera the render actually used, which an explicit view overrides. */
+	resolvedCameraName?: string;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 }
@@ -305,6 +321,45 @@ export interface BranchApplyResult {
 	liveBlenderMessage: string;
 }
 
+
+/** Use-case profile that selects a default camera plan. */
+export type CameraProfile = "prop" | "character" | "hard_surface" | "interior" | "print" | "paint" | "asset_pack";
+/** Which world axis the model's front faces, declared by the brief. */
+export type CameraFrontAxis = "-Y" | "+Y" | "-X" | "+X";
+export type CameraShotKind =
+	| "hero"
+	| "front"
+	| "back"
+	| "left"
+	| "right"
+	| "top"
+	| "ortho_front"
+	| "ortho_side"
+	| "ortho_top"
+	| "interior_hero"
+	| "interior_front"
+	| "lineup_front";
+
+export interface CameraShot {
+	name: string;
+	kind: CameraShotKind;
+	/** Unit vector from the subject centre to the camera. */
+	direction: [number, number, number];
+	lensMm: number;
+	orthographic: boolean;
+}
+
+export interface ResolvedCameraPlan {
+	profile: CameraProfile;
+	frontAxis: CameraFrontAxis;
+	frameSubject: "module" | "apply";
+	shots: CameraShot[];
+	primary: CameraShot;
+	/** Explicit distance for lineups; omitted to fit each subject. */
+	distance?: number;
+	warnings: string[];
+}
+
 /**
  * Where the harness put a module's camera, and on what numbers.
  *
@@ -323,6 +378,12 @@ export interface BranchCameraFraming {
 	distance: number;
 	lensMm: number;
 	subjects: string[];
+	direction?: [number, number, number];
+	orthographic?: boolean;
+	orthoScale?: number | null;
+	fitDistance?: number | null;
+	coverage?: { minX: number; maxX: number; minY: number; maxY: number } | null;
+	shot?: string;
 }
 
 /**
@@ -1393,6 +1454,13 @@ export interface ModuleRunOptions {
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
 	signal?: AbortSignal;
+	/** Use-case profile that selects the default shot list. */
+	cameraProfile?: CameraProfile;
+	/** World axis the subject faces; declared, never inferred. */
+	frontAxis?: CameraFrontAxis;
+	cameraShots?: CameraShotKind[];
+	frameSubject?: "module" | "apply";
+	cameraDistance?: number;
 }
 
 export interface ModuleRunResult {
@@ -1441,6 +1509,8 @@ export interface ModuleRunResult {
 	 * camera exists at `<module>Cam`.
 	 */
 	cameras?: BranchCameraFraming[];
+	/** The camera plan this run resolved, when it ran headless. */
+	cameraPlan?: ResolvedCameraPlan;
 	/**
 	 * Content hash of the datablocks this run applied. Comparing it with the
 	 * previous run's is how a caller learns that an iteration changed nothing,

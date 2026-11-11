@@ -102,6 +102,11 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		samples: options.samples,
 		timeoutSeconds: options.timeoutSeconds,
 		signal: options.signal,
+		cameraProfile: options.cameraProfile,
+		frontAxis: options.frontAxis,
+		cameraShots: options.cameraShots,
+		frameSubject: options.frameSubject,
+		cameraDistance: options.cameraDistance,
 	});
 
 	// A single staged branch cannot contest itself, so a conflict here would mean
@@ -141,6 +146,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
+		cameraPlan: branchResult.cameraPlan,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration: branchResult.iteration,
 			sequence: branchResult.sequence,

@@ -403,6 +403,19 @@ Start pi in any project dir. The extension:
   refuses an interlaced or non-PNG file by name rather than decoding it wrongly.
   It costs nothing against a critic's image budget because the pixels never
   enter the model's context as an image
+- Branch runs frame a module from a declared camera plan, not one global
+  three-quarter direction. The brief states a `cameraProfile` and the world
+  `frontAxis`; the plan expands to an inspectable shot list (hero, orthographic
+  front/side/top, character front/left/back, interior 20 mm presets, asset-pack
+  lineup) and the first shot is rendered. Coverage is checked with
+  `world_to_camera_view` over the subject's bounds and the camera is moved out
+  until every corner is inside a safe frame, so a radius fit cannot silently
+  crop a tall or thin part. `frameSubject: "module"` frames the geometry this
+  run touched, which is how a detail parented to a body is photographed at
+  detail scale instead of body scale. The resolved plan is recorded and reused
+  by later iterations unless the brief changes it, because a front that moves
+  between iterations turns every comparison into a camera comparison. An
+  explicit `view` still wins for the picture
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching
