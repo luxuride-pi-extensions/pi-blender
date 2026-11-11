@@ -426,6 +426,13 @@ Start pi in any project dir. The extension:
   panel map; the hero stays `render.png`, and the critic reads the sheet as its
   one image. That is how a back, profile or asymmetry finding becomes visible
   without a second process or a second image.
+- Every branch run also measures its geometry before the render: bounds and unit
+  scale, unapplied scale, non-manifold and boundary edges, self-intersections,
+  minimum wall thickness (print/character), symmetry, UVs and procedural
+  materials. The verdict names the method and sample for each number, applies
+  profile thresholds, and sets `blocking` when a critical check fails. A
+  blocking verdict is a routing decision: the manager sends the numbers to the
+  worker instead of spending a critic on a picture that cannot answer them.
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

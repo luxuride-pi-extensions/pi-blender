@@ -42,6 +42,7 @@ import type {
 	BranchApplyResult,
 	BranchCameraFraming,
 	BranchConflict,
+	PreflightResult,
 	ResolvedCameraPlan,
 	ReviewSheetResult,
 	BranchRunOptions,
@@ -138,6 +139,7 @@ from module_state import (
     widen_apply_objects,
 )
 from render_scene import compose_review_sheet, render_scene
+from validation import validate as validate_preflight
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
@@ -531,6 +533,18 @@ def _render_review_sheet(plan, framing, render_request):
 
 camera_plan = payload.get("cameraPlan") or {}
 camera_framing = _frame_module_camera(module_name, camera_plan)
+
+preflight = None
+if exit_code == 0:
+    front = str(camera_plan.get("frontAxis") or "-Y")
+    symmetry_axis = "x" if front in ("-Y", "Y") else "y"
+    preflight = validate_preflight(
+        bpy,
+        sorted(apply_objects),
+        profile=camera_plan.get("profile") or "prop",
+        symmetry_axis=symmetry_axis,
+    )
+
 cameras = [camera_framing] if camera_framing is not None else []
 camera_plan_report = dict(camera_plan)
 camera_plan_report["resolved"] = camera_framing
@@ -644,6 +658,7 @@ print(json.dumps({
     "stateDigest": state_digest,
     "cameras": cameras,
     "cameraPlan": camera_plan_report,
+    "preflight": preflight,
     "reviewSheet": review_sheet,
     "render": render_result,
     "renderError": render_error,
@@ -680,6 +695,7 @@ interface BranchRunPayload {
 	cameras: BranchCameraFraming[];
 	/** The resolved camera plan and the framing it produced. */
 	cameraPlan: ResolvedCameraPlan;
+	preflight: PreflightResult;
 	/** The render this run took, or null when rendering was disabled. */
 	render: BranchRenderPayload | null;
 	/** Why the render failed, when the run itself succeeded. */
@@ -915,6 +931,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedObjects: payload.ownedObjects,
 		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
+		preflight: payload.preflight,
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
@@ -966,6 +983,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
+		preflight: payload.preflight,
 		reviewSheet: payload.reviewSheet ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
