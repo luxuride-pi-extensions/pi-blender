@@ -481,11 +481,12 @@ test("blender_module_run works with NO window, by branching and applying", { ski
 });
 
 test("a branch render and a background render resolve the same engine", { skip }, async () => {
-	// Both paths used to carry their own copy of the render script, and only one
-	// of them probed the engine enum. A branch render could therefore pick an
-	// identifier this build does not have and fail where blender_render worked.
-	// They now share render_scene, so the resolved engine must be identical for
-	// the same scene -- that equality is what says the copies are gone.
+	// Both paths used to carry their own copy of the render script. The branch
+	// renderer never chose an engine, so a branch image came from an unrecorded
+	// one, and blender_render's preference list was silently dropped when the
+	// assignment raised. They now share render_scene, so the resolved engine must
+	// be identical for the same scene -- that equality is what says the copies
+	// are gone. The explicit Cycles request pins the list-walking half.
 	const ws = await makeWorkspace();
 	try {
 		writeScript(ws.workspacePath, "engine", ADD_CUBE);
@@ -509,6 +510,24 @@ test("a branch render and a background render resolve the same engine", { skip }
 			staged.resolvedEngine,
 			"the branch render and blender_render must not pick different engines for the same scene",
 		);
+
+		// A build without Cycles cannot satisfy the request and says so; the
+		// equality above still covers the shared code on that build.
+		let cycles;
+		try {
+			cycles = await render.blenderRender({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				renderMethod: "background",
+				renderEngine: "cycles",
+				outputName: "cycles.png",
+			});
+		} catch (error) {
+			if (!/No usable render engine/.test(String(error))) throw error;
+		}
+		if (cycles) {
+			assert.equal(cycles.resolvedEngine, "CYCLES", "a requested engine must be used, not dropped into the probe");
+		}
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

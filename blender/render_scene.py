@@ -1,10 +1,11 @@
 """One scene-render implementation for every headless Blender path.
 
 `blender_render` and a module's branch run both produce a camera render, and
-they used to do it with two scripts: the render tool probed the engine enum,
-the branch renderer did not. A branch render could therefore pick an engine
-identifier this build does not have and fail where the tool succeeded. Both now
-call `render_scene`, so "which engine did that render use" has one answer.
+they used to do it with two scripts. The branch renderer never chose an engine
+at all, so the engine a branch image came from was unrecorded, and the render
+tool's preference list was silently dropped when assigning it raised. Both now
+call `render_scene`, so "which engine did that render use" has one answer and a
+preference list is actually walked.
 
 Imported by generated Blender scripts, not by the extension: everything here
 needs a live `bpy`.
@@ -42,7 +43,10 @@ def set_engine(scene, desired):
         }
     except (AttributeError, KeyError, TypeError):
         available = set()
-    for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"):
+    # Workbench is deliberately absent: it is a flat, unlit viewport mode, and as
+    # a last resort it would replace a requested Cycles/EEVEE image with one no
+    # critic can judge. An explicit `workbench` request still reaches it above.
+    for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
         if candidate in available:
             scene.render.engine = candidate
             return scene.render.engine

@@ -64,6 +64,8 @@ const BRANCH_FILE = "branch.blend";
  * budget, and a fresh blend carries Blender's 1920x1080 otherwise.
  */
 const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
+/** Extra budget a render may take beyond the script's own timeout. */
+const RENDER_TIMEOUT_MS = 360_000;
 
 /** The module's branch blend: its private copy of model.blend. */
 export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
@@ -379,11 +381,18 @@ if exit_code == 0:
 # the critic will judge; spawning a second Blender only to open the file again
 # bought nothing but a cold start.
 render_result = None
+render_error = None
 render_request = payload.get("render")
 if exit_code == 0 and render_request:
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
-    render_result = render_scene(render_request)
+    # A render failure must not discard the run: the geometry is already saved in
+    # the branch, and the caller can see which stage failed instead of a generic
+    # Blender crash.
+    try:
+        render_result = render_scene(render_request)
+    except Exception as exc:
+        render_error = str(exc)
 
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
@@ -400,6 +409,7 @@ print(json.dumps({
     "stateDigest": state_digest,
     "cameras": cameras,
     "render": render_result,
+    "renderError": render_error,
 }))
 print("__PI_BLENDER_JSON_END__")
 `;
@@ -431,6 +441,8 @@ interface BranchRunPayload {
 	cameras: BranchCameraFraming[];
 	/** The render this run took, or null when rendering was disabled. */
 	render: BranchRenderPayload | null;
+	/** Why the render failed, when the run itself succeeded. */
+	renderError: string | null;
 }
 
 interface BranchRenderPayload {
@@ -438,6 +450,7 @@ interface BranchRenderPayload {
 	cameraName: string | null;
 	resolvedEngine: string;
 	requestedEngine: string | null;
+	resolution: { x: number; y: number; percentage: number };
 }
 
 /**
@@ -548,7 +561,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 					: null,
 			},
 			signal: options.signal,
-			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+			timeoutMs: (options.timeoutSeconds ?? 300) * 1000 + (renderRequested ? RENDER_TIMEOUT_MS : 0),
 		});
 	} catch (error) {
 		// A headless launch that never produced JSON leaves the branch in an
@@ -576,6 +589,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// this record describes. An explicit view names itself; otherwise the label
 	// is the module's own framed camera, which is what the run actually used.
 	const renderOutputPath = payload.render?.outputPath ?? null;
+	const renderError = payload.renderError ?? undefined;
 	let viewLabel = options.view ?? "active-camera";
 	if (renderRequested && !requestedCameraName) {
 		viewLabel = payload.cameras[0]?.cameraName ?? "active-camera";

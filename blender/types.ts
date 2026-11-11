@@ -239,6 +239,8 @@ export interface BranchRunResult {
 	status: BranchRunStatus;
 	/** Engine the branch render actually used; absent when rendering was disabled. */
 	resolvedEngine?: string;
+	/** Why the render failed, when the run itself succeeded and the branch was kept. */
+	renderError?: string;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
 	cameras: BranchCameraFraming[];
 	/** Content hash of the applied datablocks; empty only from a pre-digest Blender. */
@@ -1346,6 +1348,8 @@ export interface ModuleRunResult {
 	renderOutputPath: string | null;
 	/** Engine the headless render actually used; absent when rendering was disabled. */
 	resolvedEngine?: string;
+	/** Why the render failed, when the module run itself succeeded. */
+	renderError?: string;
 	/**
 	 * True when the script changed the blend's object or material content.
 	 *
