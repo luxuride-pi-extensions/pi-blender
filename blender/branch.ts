@@ -680,7 +680,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	}
 
 	// The plan is sticky: a later run that omits the contract reuses the last
-	// applied plan rather than silently snapping back to "prop from -Y". "Front"
+	// resolved plan rather than silently snapping back to "prop from -Y". "Front"
 	// moving between iterations makes every comparison a comparison of cameras.
 	const previousPlan = [...(manifest.branchRuns ?? [])]
 		.filter((run) => run.module === moduleName && run.cameraPlan)

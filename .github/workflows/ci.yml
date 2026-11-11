@@ -274,7 +274,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations -e camera-plan \
-                          -e live-ownership -e module-state)
+                          -e live-ownership -e module-state -e tool-surface)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
@@ -350,11 +350,10 @@ jobs:
             echo 'nothing answered. The step above ran them anyway, so'
             echo 'that number is measured rather than assumed.'
             echo
-            echo 'The other 22 test files need the same checkout and were'
-            echo 'not run at all: 184 tests NOT VERIFIED. Running them'
-            echo 'without it would fail all 22 on one describeMissingCore()'
-            echo 'error, which measures the missing checkout rather than'
-            echo 'this commit.'
+            echo 'The remaining 44 test files need the same checkout and'
+            echo 'were not run at all. Running them without it would fail on'
+            echo 'one describeMissingCore() error, which measures the missing'
+            echo 'checkout rather than this commit.'
             echo
             echo '`coverage-audit` is failing this run for the same'
             echo 'reason: `secrets.CONSUMER_TOKEN` is not set.'
