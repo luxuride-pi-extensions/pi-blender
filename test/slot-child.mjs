@@ -13,6 +13,9 @@ const jiti = createJiti(import.meta.url, { isolated: true, interopDefault: true 
 const leases = await jiti.import(modulePath);
 const slot = await leases.acquireHeadlessSlot(limit);
 process.send?.({ admitted: true, index: slot.index, path: slot.path });
+// A signal listener does not keep Node alive; the slot is held until the
+// parent kills this process.
+setInterval(() => undefined, 1 << 30);
 process.on("SIGTERM", () => {
 	leases.releaseHeadlessSlot(slot);
 	process.exit(0);

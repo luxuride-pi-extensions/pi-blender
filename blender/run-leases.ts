@@ -25,7 +25,7 @@
  * EPERM means running, not dead.
  */
 
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
 
@@ -197,7 +197,17 @@ function readSlot(path: string): SlotRecord | null {
 }
 
 function writeSlot(path: string, record: SlotRecord, exclusive: boolean): void {
-	writeFileSync(path, JSON.stringify(record), exclusive ? { flag: "wx" } : undefined);
+	const tmp = `${path}.${process.pid}.tmp`;
+	writeFileSync(tmp, JSON.stringify(record), { flag: "wx" });
+	try {
+		// A link is the exclusive, atomic publish: the slot appears complete or
+		// not at all, so a concurrent reader never sees a truncated record and
+		// frees an index that is already taken.
+		if (exclusive) linkSync(tmp, path);
+		else renameSync(tmp, path);
+	} finally {
+		rmSync(tmp, { force: true });
+	}
 }
 
 /**
@@ -268,13 +278,17 @@ function liveSlots(): { live: SlotRecord[]; free: number[] } {
 function tryLockAdmission(): boolean {
 	const path = join(slotsDir(), ADMISSION_LOCK_NAME);
 	try {
-		const fd = openSync(path, "wx");
-		writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-		closeSync(fd);
+		writeSlot(path, { owner: process.pid, limit: 0, at: new Date().toISOString() }, true);
 		return true;
 	} catch {
-		const parsed = readSlot(path);
-		const pid = parsed?.owner ?? null;
+		let pid: number | null = null;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf-8")) as { pid?: unknown; owner?: unknown };
+			const holder = parsed.pid ?? parsed.owner;
+			pid = typeof holder === "number" ? holder : null;
+		} catch {
+			// A torn or vanished lock is handled by the age check below.
+		}
 		let stale = pid !== null && !pidIsRunning(pid);
 		try {
 			stale = stale || Date.now() - statSync(path).mtimeMs > SLOT_STALE_MS;
@@ -340,7 +354,7 @@ export async function acquireHeadlessSlot(
 	}
 	const effective = Math.max(1, Math.trunc(limit));
 	const deadline = Date.now() + (options?.deadlineMs ?? SLOT_WAIT_DEADLINE_MS);
-	let lastLive = 0;
+	let lastLive = liveSlots().live.length;
 	for (;;) {
 		if (options?.signal?.aborted) throw new Error("Headless slot wait was aborted.");
 		if (tryLockAdmission()) {

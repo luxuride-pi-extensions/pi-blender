@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { fork } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,6 +53,30 @@ test("a slot left by a dead process is swept, not waited on forever", async () =
 	);
 	const slot = await acquireHeadlessSlot(1);
 	assert.equal(slot.index, 0);
+	releaseHeadlessSlot(slot);
+});
+
+test("a dead owner whose Blender still runs keeps its slot", async () => {
+	const dir = join(bridge, "owner-dead-blender-live");
+	mkdirSync(join(dir, "headless-slots"), { recursive: true });
+	writeFileSync(
+		join(dir, "headless-slots", "slot-0.json"),
+		JSON.stringify({ owner: 2_147_483_647, blenderPid: process.pid, limit: 1, at: new Date().toISOString() }),
+	);
+	const { acquireHeadlessSlot } = await loadTs(LEASES, { PI_BLENDER_BRIDGE_DIR: dir });
+	await assert.rejects(acquireHeadlessSlot(1, { deadlineMs: 400 }), /Timed out waiting for a headless run slot/);
+});
+
+test("an unparseable slot is reclaimed once it is old", async () => {
+	const dir = join(bridge, "torn-slot");
+	mkdirSync(join(dir, "headless-slots"), { recursive: true });
+	const path = join(dir, "headless-slots", "slot-0.json");
+	writeFileSync(path, "");
+	const old = (Date.now() - 60_000) / 1000;
+	utimesSync(path, old, old);
+	const { acquireHeadlessSlot, releaseHeadlessSlot } = await loadTs(LEASES, { PI_BLENDER_BRIDGE_DIR: dir });
+	const slot = await acquireHeadlessSlot(1);
+	assert.equal(slot.index, 0, "an old torn slot wedged its index");
 	releaseHeadlessSlot(slot);
 });
 
@@ -113,6 +137,12 @@ test("a real child process holds a slot, and its death releases it", async () =>
 	assert.ok(existsSync(admitted.path));
 	const record = JSON.parse(readFileSync(admitted.path, "utf-8"));
 	assert.equal(record.owner, child.pid);
+
+	await assert.rejects(
+		acquireHeadlessSlot(1, { deadlineMs: 400 }),
+		/Timed out waiting for a headless run slot/,
+		"a live holder did not exclude a second process",
+	);
 
 	child.kill("SIGKILL");
 	await new Promise((resolve) => child.on("exit", resolve));
