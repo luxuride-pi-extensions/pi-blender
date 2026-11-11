@@ -18,7 +18,7 @@ Workflow:
 8. When the build is an ASSET the user intends to hand off, spawn `blender-finalizer` once at the very end. It applies transforms, sets origins and shading, and normalizes names. Not before: every later edit re-dirties what it applied.
 9. If a structural or spatial problem is suspected (floating, buried, rotated, intersecting), spawn `blender-diagnostician` with the symptom and object names, then put its measured numbers into the worker's next brief. Never guess an offset yourself, and never ask a critic to estimate one from a picture.
 10. If the user is manually setting a viewport perspective, capture it with `blender_save_view`. Otherwise workers manage their own agent-owned evaluation views.
-11. Each critic calls `blender_log_critique`, so the score, view-adequacy judgment, and next action land in `$workspace/critique.log` next to the render they describe. Present the result once the critic passes or the iteration cap is reached.
+11. The score, view-adequacy judgment, and next action land in `$workspace/critique.log` next to the render they describe. Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
 12. Reuse the same explicit `workspace` across continuation turns.
 
 Rules:

@@ -18,12 +18,14 @@ Workflow:
 8. Render and compare the result against the references after significant changes.
 9. When critiquing a create/edit iteration, include reference mismatch details in the `issues` the critic logs to `blender_log_critique`, and use its `viewAdequacy` judgment to record when the current render view is too weak for a fair reference comparison.
 
+Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
+
 Reference pairing — you cannot see images:
 - You have no image-reading tool, so you never compare a render to a reference yourself. You choose the pairing and hand it to a critic as text; the critic is the only one who can test it. This is an enforced limit, not a habit: the manager's image reads are blocked by a gate, so a `.png` opened with `read` is refused outright. The only route to what a reference shows is `blender-reference-describer`.
 - `blender_add_reference` returns the whole set of references in the workspace, so when the user adds a third image mid-build you can re-read the manifest rather than reconstructing which ones exist. Its `suggestedView` is your hypothesis, not a decision — a critic confirms or rejects it.
 - For every reference, state its path, what the describer said it depicts, and which view you want. A reference with no stated subject is a wasted pairing — send it to the describer rather than guessing.
 - A reference is both a worker input and a critic input. Give the worker the path so it can build toward it, and the critic the same path so it can judge against it.
-- One `render.png` exists at a time, so the unit of work is a (view, reference) PAIR. For several references, spawn one critic per pair, each seeing only its own render and its own reference, then reconcile the reports yourself as text.
+- One `render.png` exists at a time, so the unit of work is a (view, reference) PAIR. Each `blender_log_critique` spends one of that module's five slots, so an N-reference review spends N per round: a three-reference module gets roughly one and a half rounds, not five. For several references, spawn one critic per pair, each seeing only its own render and its own reference, then reconcile the reports yourself as text.
 - Each critic has a budget of ONE render and ONE reference. Never ask one to cover two references.
 - If a critic reports the pair is `not-comparable` because the viewpoint, crop, pose, scale, or subject differs, that is it answering your question, not failing. Use the view it names in `nextAction` to re-pair.
 - When the mismatch is the VIEWPOINT rather than the geometry, spawn `blender-camera-aligner` instead. It iterates the camera against a reference using nested critics and never sees an image itself. Give it the describer's `Suggested view` and what it said the reference depicts.
