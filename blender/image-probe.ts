@@ -109,13 +109,15 @@ export async function blenderImageProbe(options: ImageProbeOptions): Promise<Ima
 	const range = exposure.lumaPercentiles.p99 - exposure.lumaPercentiles.p1;
 	if (exposure.sampleCount > 0 && range < 0.05) {
 		warnings.push(
-			`The subject's luma spans only ${round(range, 3)} from p1 to p99, so the lighting is flat: a shadow, a highlight and a material change are all nearly the same value. A critic cannot judge shape or material from this render; fix the lighting before briefing a model change.`,
+			`The subject's luma spans only ${round(range, 3)} from p1 to p99. If the subject is not a single flat material, this is a flat-light render: a shadow, a highlight and a material change are all nearly the same value, so a critic cannot judge shape or material until the lighting changes.`,
 		);
 	}
-	const overClipped = Math.max(exposure.clippedHigh.any, exposure.clippedLow.any);
+	// A single saturated channel is a coloured highlight, not a blown one:
+	// only all three channels pinned at the same end hide material detail.
+	const overClipped = exposure.clippedHigh.all + exposure.clippedLow.all;
 	if (exposure.sampleCount > 0 && overClipped > 0.02) {
 		warnings.push(
-			`${round(overClipped * 100, 1)}% of subject pixels are clipped (${round(exposure.clippedHigh.any * 100, 1)}% at white, ${round(exposure.clippedLow.any * 100, 1)}% at black). A blown highlight is indistinguishable from a white material and a crushed shadow from a dark one; this is an exposure or lighting problem, not evidence about the model.`,
+			`${round(overClipped * 100, 1)}% of the ${exposure.sampleCount} sampled subject pixels are clipped (${round(exposure.clippedHigh.all * 100, 1)}% white on all channels, ${round(exposure.clippedLow.all * 100, 1)}% black). If the subject is not itself pure white or black, this is an exposure or lighting problem and detail there cannot be judged from this render.`,
 		);
 	}
 
@@ -254,8 +256,8 @@ function runsOfOccupiedRows(image: DecodedImage, mask: Uint8Array): { from: numb
 function measureExposure(image: DecodedImage, mask: Uint8Array): {
 	sampled: boolean;
 	sampleCount: number;
-	clippedHigh: { r: number; g: number; b: number; any: number };
-	clippedLow: { r: number; g: number; b: number; any: number };
+	clippedHigh: { r: number; g: number; b: number; any: number; all: number };
+	clippedLow: { r: number; g: number; b: number; any: number; all: number };
 	lumaPercentiles: { p1: number; p50: number; p99: number };
 } {
 	const subjectCount = mask.reduce((sum, value) => sum + value, 0);
@@ -266,10 +268,12 @@ function measureExposure(image: DecodedImage, mask: Uint8Array): {
 	let highG = 0;
 	let highB = 0;
 	let highAny = 0;
+	let highAll = 0;
 	let lowR = 0;
 	let lowG = 0;
 	let lowB = 0;
 	let lowAny = 0;
+	let lowAll = 0;
 	const lumas: number[] = [];
 
 	for (let index = 0; index < mask.length; index++) {
@@ -285,10 +289,12 @@ function measureExposure(image: DecodedImage, mask: Uint8Array): {
 		if (g >= 255) highG++;
 		if (b >= 255) highB++;
 		if (r >= 255 || g >= 255 || b >= 255) highAny++;
+		if (r >= 255 && g >= 255 && b >= 255) highAll++;
 		if (r <= 0) lowR++;
 		if (g <= 0) lowG++;
 		if (b <= 0) lowB++;
 		if (r <= 0 || g <= 0 || b <= 0) lowAny++;
+		if (r <= 0 && g <= 0 && b <= 0) lowAll++;
 		lumas.push((LUMA_R * r + LUMA_G * g + LUMA_B * b) / 255);
 	}
 
@@ -302,8 +308,8 @@ function measureExposure(image: DecodedImage, mask: Uint8Array): {
 	return {
 		sampled: stride > 1,
 		sampleCount: sampledPixels,
-		clippedHigh: { r: round(highR / divisor, 5), g: round(highG / divisor, 5), b: round(highB / divisor, 5), any: round(highAny / divisor, 5) },
-		clippedLow: { r: round(lowR / divisor, 5), g: round(lowG / divisor, 5), b: round(lowB / divisor, 5), any: round(lowAny / divisor, 5) },
+		clippedHigh: { r: round(highR / divisor, 5), g: round(highG / divisor, 5), b: round(highB / divisor, 5), any: round(highAny / divisor, 5), all: round(highAll / divisor, 5) },
+		clippedLow: { r: round(lowR / divisor, 5), g: round(lowG / divisor, 5), b: round(lowB / divisor, 5), any: round(lowAny / divisor, 5), all: round(lowAll / divisor, 5) },
 		lumaPercentiles: { p1: at(0.01), p50: at(0.5), p99: at(0.99) },
 	};
 }

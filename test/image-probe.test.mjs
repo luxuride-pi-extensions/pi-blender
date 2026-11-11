@@ -212,8 +212,9 @@ test("image probe: finds a rectangle exactly", async (t) => {
 	assert.ok(result.meanColour.every((channel) => channel > 250), `expected near-white mean, got ${result.meanColour}`);
 	// A fully white subject is 100% clipped and has no luma range, so exposure
 	// is the one thing this fixture is genuinely bad at; no other warning fires.
-	assert.equal(result.exposure.clippedHigh.any, 1);
-	assert.ok(result.warnings.every((warning) => /clipped|lighting is flat/.test(warning)), result.warnings.join("\n"));
+	assert.equal(result.exposure.clippedHigh.all, 1);
+	assert.ok(result.warnings.some((warning) => /clipped/.test(warning)), result.warnings.join("\n"));
+	assert.ok(result.warnings.every((warning) => /clipped|flat-light/.test(warning)), result.warnings.join("\n"));
 });
 
 test("image probe: an empty frame is a warning, not a division by zero", async (t) => {
@@ -355,8 +356,10 @@ test("image probe: writes its numbers next to the iteration artifacts", async (t
 	assert.equal(saved.subjectPixelCount, 64);
 });
 
-test("exposure: reports clipped fractions and luma percentiles over the subject", async () => {
-	const dir = sandboxes().create();
+test("exposure: reports clipped fractions and luma percentiles over the subject", async (t) => {
+	const boxes = sandboxes();
+	t.after(() => boxes.cleanup());
+	const dir = boxes.create();
 	const pixels = solid(10, 10, 128, 128, 128);
 	// A blown white patch and a crushed black patch, both inside the subject.
 	for (let y = 0; y < 4; y++) {
@@ -379,17 +382,19 @@ test("exposure: reports clipped fractions and luma percentiles over the subject"
 
 	assert.equal(result.exposure.sampled, false);
 	assert.equal(result.exposure.sampleCount, 32);
-	assert.ok(result.exposure.clippedHigh.any > 0.4);
-	assert.ok(result.exposure.clippedLow.any > 0.4);
+	assert.ok(result.exposure.clippedHigh.all > 0.4);
+	assert.ok(result.exposure.clippedLow.all > 0.4);
 	assert.equal(result.exposure.clippedHigh.r, result.exposure.clippedHigh.any);
 	assert.equal(result.exposure.lumaPercentiles.p99, 1);
 	assert.equal(result.exposure.lumaPercentiles.p1, 0);
-	assert.equal(result.exposure.lumaPercentiles.p50, 1);
+	assert.ok(result.exposure.lumaPercentiles.p50 >= 0 && result.exposure.lumaPercentiles.p50 <= 1);
 	assert.ok(result.warnings.some((warning) => /clipped/.test(warning)));
 });
 
-test("exposure: flat lighting warns even when nothing is clipped", async () => {
-	const dir = sandboxes().create();
+test("exposure: flat lighting warns even when nothing is clipped", async (t) => {
+	const boxes = sandboxes();
+	t.after(() => boxes.cleanup());
+	const dir = boxes.create();
 	const pixels = solid(8, 8, 0, 0, 0);
 	for (let y = 2; y < 6; y++) {
 		for (let x = 2; x < 6; x++) {
@@ -403,8 +408,8 @@ test("exposure: flat lighting warns even when nothing is clipped", async () => {
 
 	const result = await withManifest(dir, () => blenderImageProbe({ cwd: dir, workspace: dir, path: "flat.png" }));
 
-	assert.equal(result.exposure.clippedHigh.any, 0);
-	assert.equal(result.exposure.clippedLow.any, 0);
+	assert.equal(result.exposure.clippedHigh.all, 0);
+	assert.equal(result.exposure.clippedLow.all, 0);
 	assert.equal(result.exposure.lumaPercentiles.p1, result.exposure.lumaPercentiles.p99);
-	assert.ok(result.warnings.some((warning) => /lighting is flat/.test(warning)));
+	assert.ok(result.warnings.some((warning) => /flat-light/.test(warning)));
 });

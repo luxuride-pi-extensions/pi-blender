@@ -2226,8 +2226,8 @@ export interface ImageProbeResult {
 	exposure: {
 		sampled: boolean;
 		sampleCount: number;
-		clippedHigh: { r: number; g: number; b: number; any: number };
-		clippedLow: { r: number; g: number; b: number; any: number };
+		clippedHigh: { r: number; g: number; b: number; any: number; all: number };
+		clippedLow: { r: number; g: number; b: number; any: number; all: number };
 		lumaPercentiles: { p1: number; p50: number; p99: number };
 	};
 	warnings: string[];
