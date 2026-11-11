@@ -56,7 +56,8 @@ export const WARNING_SEVERITY: Record<SessionContextWarningCode, number> = {
  * Default wait for a bridge request when the caller does not supply one.
  *
  * Callers that run user scripts pass an explicit budget (`timeoutSeconds * 1000`,
- * default 120 s from blender_execute_python / blender_module_run), because a
+ * default 120 s from blender_execute_python, 300 s from blender_module_run),
+ * because a
  * heavy bpy script legitimately outlives this window. Raising this default
  * instead would make every genuinely-dead bridge take 2 minutes to report.
  */

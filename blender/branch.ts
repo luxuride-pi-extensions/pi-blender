@@ -22,13 +22,17 @@
  * and model.blend is left holding whichever branch was applied first.
  */
 
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
+import { collectModuleOwnership } from "./generations.js";
+import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
+import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "./types.js";
 import type {
 	BlenderBranchRunRecord,
 	BlenderModuleRunRecord,
@@ -42,6 +46,7 @@ import type {
 } from "./types.js";
 import {
 	buildModuleScriptPreamble,
+	DEFAULT_CHECKPOINT_RETENTION,
 	getModuleDir,
 	getModuleRunCheckpointName,
 	getModuleScriptPath,
@@ -64,6 +69,9 @@ const BRANCH_FILE = "branch.blend";
  * budget, and a fresh blend carries Blender's 1920x1080 otherwise.
  */
 const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
+/** Extra budget a render may take beyond the script's own timeout. */
+const RENDER_TIMEOUT_MS = 360_000;
+const BRANCH_SAVED_MARKER = "branch-saved";
 
 /** The module's branch blend: its private copy of model.blend. */
 export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
@@ -95,7 +103,6 @@ export function getBranchBlendPath(workspacePath: string, moduleName: string): s
 function buildBranchRunScript(): string {
 	return `
 import contextlib
-import hashlib
 import io
 import json
 import math
@@ -120,18 +127,25 @@ from mathutils import Vector  # pyright: ignore[reportMissingImports]
 # of this algorithm are two answers to "did anything change", and the apply side
 # only trusts a run if both paths agree.
 from fingerprint import content_changed, snapshot
+from module_state import (
+    diff_snapshots,
+    owned_after,
+    owned_materials_after,
+    state_digest as compute_state_digest,
+    widen_apply_objects,
+)
+from render_scene import render_scene
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
 iteration_path = payload["iterationPath"]
 script_path = payload["scriptPath"]
 module_name = payload["moduleName"]
-owned_objects = set(payload.get("ownedObjects") or [])
+owned_objects = list(payload.get("ownedObjects") or [])
+owned_materials = list(payload.get("ownedMaterials") or [])
 
 
 before = snapshot(bpy)
-before_objects = set(before["objects"])
-before_materials = set(before["materials"])
 
 globals_dict = {
     "__name__": "__main__",
@@ -159,8 +173,7 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
         os.chdir(previous_cwd)
 
 after = snapshot(bpy)
-after_objects = set(after["objects"])
-after_materials = set(after["materials"])
+delta = diff_snapshots(before, after)
 
 # The same content fingerprint the live bridge reports, from the same snapshot
 # pair. Computed BEFORE framing: the auto-framed camera and its target are
@@ -168,43 +181,27 @@ after_materials = set(after["materials"])
 # every successful framing run as a change and make the flag useless.
 changed = content_changed(before, after)
 
-touched_objects = sorted(
-    name for name in (before_objects | after_objects) if before["objects"].get(name) != after["objects"].get(name)
-)
-touched_materials = sorted(
-    name for name in (before_materials | after_materials) if before["materials"].get(name) != after["materials"].get(name)
-)
+touched_objects = delta["touchedObjects"]
+touched_materials = delta["touchedMaterials"]
 
 # The APPLY set is wider than the touched set, because a datablock that travels
 # alone is invalid: a parented object without its parent is not a usable object,
 # and a parent without its children strands them. The widening happens HERE and
 # is reported in the record, rather than being discovered at apply time — a
 # widened apply set is exactly what turns into a conflict against a sibling.
-
-# Objects the module DELETED. These are removals on apply, never appends, and
-# the distinction matters: a deleted object is also "touched" in the sense that
-# its fingerprint disappeared, so classifying it by touch alone would put it in
-# the apply set and the apply would then fail looking for it in a branch that
-# correctly no longer contains it.
-deleted = before_objects - after_objects
-
-apply_objects = (set(touched_objects) - deleted)
-for name in list(apply_objects):
-    obj = bpy.data.objects.get(name)
-    if obj is None:
-        continue
-    ancestor = obj.parent
-    while ancestor is not None:
-        apply_objects.add(ancestor.name)
-        ancestor = ancestor.parent
-    for descendant in obj.children_recursive:
-        apply_objects.add(descendant.name)
-
-# A deleted object that was only a relative of something touched is NOT counted
-# as deleted by this module: it never asked for its removal, and dropping a
-# sibling because a parent moved would be the module's apply destroying another
-# module's work. Only objects the module itself removed are applied as removals.
-removed_objects = sorted(deleted - (apply_objects & set(after_objects)))
+#
+# A removal is exactly a name that disappeared between the two snapshots. A
+# cascade deletion reports every object it took with it, so the apply removes
+# them together; a relative that merely MOVED is not a removal, and the apply
+# never takes one out because a parent changed.
+apply_objects, removed_objects = widen_apply_objects(
+    bpy,
+    touched_objects,
+    delta["removedObjects"],
+)
+# widen_apply_objects answers with a list (it is shared with the live bridge,
+# which reports JSON). Framing below adds to this set, so take a set here.
+apply_objects = set(apply_objects)
 
 # ---- auto-framing -----------------------------------------------------------
 # The module's camera is framed HERE, from the bounds of the objects this run
@@ -339,27 +336,17 @@ cameras = [camera_framing] if camera_framing is not None else []
 # runs, so the digest has a stable subject whether or not this run changed it.
 #
 # Two exclusions, both to keep the number about geometry a critic would notice.
-# The camera AND its target empty, which is the pair framing rewrites on every
-# run. The suffix test has to cover both names: filtering on CAMERA_SUFFIX alone
+# The camera AND its target are excluded, because framing rewrites that pair on
+# every run. The suffix test has to cover both names: filtering on CAMERA_SUFFIX alone
 # leaves the target empty in the digest, and because the after-snapshot is taken
 # BEFORE framing creates the pair, the first run hashes a datablock that does
 # not exist yet as a dash while every later run hashes its real content -- so
 # the very first run would always read as a change and every rebuild after it as
 # a second one.
-FRAMING_DATABLOCK_SUFFIXES = (CAMERA_SUFFIX, CAMERA_SUFFIX + "Target")
 bpy.context.view_layer.update()
-owned_objects |= apply_objects
-owned_objects -= set(removed_objects)
-digest_objects = [
-    name for name in sorted(owned_objects)
-    if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
-]
-state_digest_source = [
-    name + "=" + after["objects"].get(name, "-") for name in digest_objects
-]
-for material_name in sorted(touched_materials):
-    state_digest_source.append(material_name + "=" + after["materials"].get(material_name, "-"))
-state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest()
+owned_objects = owned_after(owned_objects, apply_objects, removed_objects)
+owned_materials = owned_materials_after(owned_materials, touched_materials)
+state_digest = compute_state_digest(after, owned_objects, owned_materials)
 
 # The save happens HERE, after the framing and after the apply set is settled --
 # not inside the try above. Saving earlier wrote a branch file without the camera,
@@ -367,11 +354,35 @@ state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest
 # from its own branch: the framing existed in memory and nowhere else.
 if exit_code == 0:
     bpy.ops.wm.save_mainfile()
+    # A process-level render failure (crash, OOM, timeout) produces no JSON at
+    # all, so the caller cannot tell "nothing was saved" from "the branch is on
+    # disk and only the picture failed" without a marker written before the risky
+    # stage.
+    with open(os.path.join(payload["runDir"], "branch-saved"), "w") as marker:
+        marker.write(module_name)
 
 # Framing deliberately does NOT happen again in the apply. This run's render was
 # taken on this branch, so the framing that reaches model.blend is the framing of
 # the geometry the critic judged; re-solving it against the merged scene would
 # silently disagree with that picture.
+
+# Render inside the SAME process that just authored the branch. The branch
+# blend is saved above, so this is the file the apply will merge and the image
+# the critic will judge; spawning a second Blender only to open the file again
+# bought nothing but a cold start.
+render_result = None
+render_error = None
+render_request = payload.get("render")
+if exit_code == 0 and render_request:
+    if not render_request.get("cameraName") and cameras:
+        render_request["cameraName"] = cameras[0]["cameraName"]
+    # A render failure must not discard the run: the geometry is already saved in
+    # the branch, and the caller can see which stage failed instead of a generic
+    # Blender crash.
+    try:
+        render_result = render_scene(render_request)
+    except Exception as exc:
+        render_error = str(exc)
 
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
@@ -381,12 +392,15 @@ print(json.dumps({
     "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
-    "addedObjects": sorted(after_objects - before_objects),
+    "addedObjects": delta["addedObjects"],
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
     "ownedObjects": sorted(owned_objects),
+    "ownedMaterials": owned_materials,
     "stateDigest": state_digest,
     "cameras": cameras,
+    "render": render_result,
+    "renderError": render_error,
 }))
 print("__PI_BLENDER_JSON_END__")
 `;
@@ -410,12 +424,26 @@ interface BranchRunPayload {
 	 * and the apply set alone cannot say what the module is responsible for.
 	 */
 	ownedObjects: string[];
+	/** Materials this module owns after this run; carried into the next one. */
+	ownedMaterials: string[];
 	/**
-	 * Content hash over those owned objects. Absent only from a pre-digest run.
+	 * Content hash over the owned objects and materials, or null when there is no subject.
 	 */
-	stateDigest: string;
+	stateDigest: string | null;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
 	cameras: BranchCameraFraming[];
+	/** The render this run took, or null when rendering was disabled. */
+	render: BranchRenderPayload | null;
+	/** Why the render failed, when the run itself succeeded. */
+	renderError: string | null;
+}
+
+interface BranchRenderPayload {
+	outputPath: string;
+	cameraName: string | null;
+	resolvedEngine: string;
+	requestedEngine: string | string[] | null;
+	resolution: { x: number; y: number; percentage: number };
 }
 
 /**
@@ -494,6 +522,24 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
+	const renderRequested = options.render !== false;
+	// A saved view or a named camera is resolved here, before the run, because it
+	// belongs in the render payload. The module's own auto-framed camera is not
+	// known until the script has run, so it is chosen inside that same process
+	// from `cameras` rather than guessed at here.
+	let requestedCameraName: string | undefined;
+	const savedView = options.view ? manifest.savedViews[options.view] : undefined;
+	if (savedView) {
+		requestedCameraName = getSavedViewCameraObjectName(savedView) ?? undefined;
+	} else if (options.view && options.view !== "active-camera") {
+		// Accept either a named camera object or a saved view; "active-camera"
+		// keeps the branch's own camera, same as the live module render.
+		requestedCameraName = options.view;
+	}
+
+	// Ownership is read from the manifest before the run, so the digest subject
+	// survives a script that changes nothing this time.
+	const priorOwnership = collectModuleOwnership(manifest, moduleName);
 	let payload: BranchRunPayload;
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
@@ -505,33 +551,50 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				branchPath,
 				workspacePath: manifest.workspacePath,
 				iterationPath: runDir,
+				runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
 				// The generated run script is executed as a string, not as a file
 				// in the assets dir, so nothing about sys.path comes for free and
 				// the shared fingerprint module has to be pointed at explicitly.
 				assetsDir: getBlenderAssetsDir(),
-				// Ownership is CARRIED FORWARD from the module's earlier runs, not
-				// re-derived from the script or from the diff. The fingerprints are
-				// content-based, so a script that removes and rebuilds its part
-				// byte-for-byte applies nothing and looks identical to a script that
-				// did nothing; without a prior record the digest would have an empty
+				// Ownership is CARRIED FORWARD from the module's earlier APPLIED
+				// generations, not re-derived from the script or from the diff. The
+				// fingerprints are content-based, so a script that removes and rebuilds
+				// its part byte-for-byte applies nothing and looks identical to a script
+				// that did nothing; without a prior record the digest would have an empty
 				// subject on exactly the rebuild iterations it exists to measure.
-				ownedObjects: [
-					...((manifest.branchRuns ?? [])
-						.filter((run) => run.module === moduleName)
-						.flatMap((run) => run.ownedObjects ?? [])),
-				],
+				ownedObjects: priorOwnership.objects,
+				ownedMaterials: priorOwnership.materials,
+				render: renderRequested
+					? {
+							outputPath: join(moduleDir, RENDER_FILE),
+							cameraName: requestedCameraName,
+							resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
+							samples: options.samples,
+							renderEngine: mapBackgroundRenderEngine(options.renderEngine ?? null),
+						}
+					: null,
 			},
 			signal: options.signal,
-			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+			timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000 + (renderRequested ? RENDER_TIMEOUT_MS : 0),
 		});
 	} catch (error) {
-		// A headless launch that never produced JSON leaves the branch in an
-		// unknown state, so it is removed rather than left for an apply to find.
-		await rm(branchPath, { force: true }).catch(() => undefined);
-		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		// A launch that never produced JSON leaves the branch in an unknown state
+		// UNLESS the run script marked it saved before rendering. Then the build is
+		// real, and only the picture failed: keep it so the caller can apply it.
+		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
+		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
+		if (!branchSaved) {
+			await rm(branchPath, { force: true }).catch(() => undefined);
+			await rm(checkpointPath, { force: true }).catch(() => undefined);
+		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		if (branchSaved) {
+			throw new Error(
+				`${(error as Error).message}\nThe branch was saved before the render failed and is intact at ${branchPath}.`,
+			);
+		}
 		throw error;
 	}
 
@@ -550,37 +613,19 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
-	let renderOutputPath: string | null = null;
+	// The render already happened in the run process, against the branch blend
+	// this record describes. An explicit view names itself; otherwise the label
+	// is the module's own framed camera, which is what the run actually used.
+	const renderOutputPath = payload.render?.outputPath ?? null;
+	const renderError = payload.renderError ?? undefined;
+	if (renderRequested && !renderOutputPath) {
+		// The path is stable per module, so a failed render would otherwise leave
+		// the PREVIOUS iteration's picture where a critic expects this one.
+		await rm(join(moduleDir, RENDER_FILE), { force: true }).catch(() => undefined);
+	}
 	let viewLabel = options.view ?? "active-camera";
-	if (options.render !== false) {
-		let cameraName: string | undefined;
-		const savedView = options.view ? manifest.savedViews[options.view] : undefined;
-		if (savedView) {
-			cameraName = getSavedViewCameraObjectName(savedView) ?? undefined;
-		} else if (options.view && options.view !== "active-camera") {
-			// Accept either a named camera object or a saved view; "active-camera"
-			// keeps the branch's own camera, same as the live module render.
-			cameraName = options.view;
-		} else {
-			// No explicit view: render from THIS MODULE'S OWN auto-framed camera.
-			// Falling through to scene.camera would render from the studio camera,
-			// which is aimed at the world origin and points at nothing once a build
-			// has parts — the exact defect the framing exists to remove. Falls back
-			// to the scene camera only when the run produced no mesh to frame.
-			cameraName = payload.cameras[0]?.cameraName;
-			viewLabel = cameraName ?? "active-camera";
-		}
-		renderOutputPath = await renderBranch({
-			cwd: options.cwd,
-			workspacePath: manifest.workspacePath,
-			branchPath,
-			moduleName,
-			outputPath: join(moduleDir, RENDER_FILE),
-			cameraName,
-			resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
-			samples: options.samples,
-			signal: options.signal,
-		});
+	if (renderRequested && !requestedCameraName) {
+		viewLabel = payload.cameras[0]?.cameraName ?? "active-camera";
 	}
 
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
@@ -599,7 +644,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
-		stateDigest: payload.stateDigest,
+		ownedMaterials: payload.ownedMaterials,
+		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
@@ -608,7 +654,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.branchRuns = [...(current.branchRuns ?? []), record];
+			current.branchRuns = appendBranchRun(current, record);
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,
@@ -630,6 +676,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		scriptPath,
 		branchPath,
 		iteration,
+		sequence,
 		runDir,
 		checkpointPath,
 		exitCode: payload.exitCode,
@@ -642,90 +689,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
+		ownedMaterials: payload.ownedMaterials,
 		renderOutputPath,
+		renderError,
+		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
-		stateDigest: payload.stateDigest,
+		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 	};
-}
-
-/**
- * Render a branch blend with a headless Blender.
- *
- * Deliberately the same engine the live render uses (blender/render.ts
- * buildRenderScript), including the enum-probing fallback, so a branch render and
- * a live render of the same scene agree: a critic comparing two images is
- * looking at the geometry, not at two different renderers.
- */
-async function renderBranch(options: {
-	cwd: string;
-	workspacePath: string;
-	branchPath: string;
-	/** Named on the run lease, so an open run says which module it renders. */
-	moduleName?: string;
-	outputPath: string;
-	cameraName: string | undefined;
-	resolution: { x: number; y: number; percentage?: number };
-	samples?: number;
-	signal?: AbortSignal;
-}): Promise<string> {
-	const script = `
-import bpy
-import json
-import os
-import sys
-
-payload = json.loads(sys.argv[sys.argv.index("--") + 1])
-scene = bpy.context.scene
-
-camera_name = payload.get("cameraName")
-if camera_name:
-    camera_object = bpy.data.objects.get(camera_name)
-    if camera_object is None:
-        raise RuntimeError("Camera not found: %s" % camera_name)
-    scene.camera = camera_object
-
-if scene.camera is None:
-    fallback = bpy.data.objects.get("Camera")
-    if fallback is not None:
-        scene.camera = fallback
-if scene.camera is None:
-    raise RuntimeError("No camera available for rendering")
-
-resolution = payload.get("resolution") or {}
-scene.render.resolution_x = int(resolution.get("x", scene.render.resolution_x))
-scene.render.resolution_y = int(resolution.get("y", scene.render.resolution_y))
-scene.render.resolution_percentage = int(resolution.get("percentage", scene.render.resolution_percentage))
-
-samples = payload.get("samples")
-if samples is not None and hasattr(scene, "cycles"):
-    scene.cycles.samples = int(samples)
-
-output_path = payload["outputPath"]
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-scene.render.image_settings.file_format = "PNG"
-scene.render.filepath = output_path
-bpy.ops.render.render(write_still=True)
-
-print("__PI_BLENDER_JSON_START__")
-print(json.dumps({"outputPath": output_path, "cameraName": scene.camera.name if scene.camera else None}))
-print("__PI_BLENDER_JSON_END__")
-`;
-
-	return await runBlenderJson<{ outputPath: string }>({
-		cwd: options.cwd,
-		blendPath: options.branchPath,
-		label: `branch render ${options.moduleName ?? ""}`.trim(),
-		scriptSource: script,
-		payload: {
-			cameraName: options.cameraName,
-			outputPath: options.outputPath,
-			resolution: options.resolution,
-			samples: options.samples,
-		},
-		signal: options.signal,
-		timeoutMs: 360_000,
-	}).then((result) => result.outputPath);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1013,12 +984,11 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
  */
 export async function blenderBranchApply(options: BranchApplyOptions): Promise<BranchApplyResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
-	const branchRuns = manifest.branchRuns ?? [];
 
 	const staged = options.modules
 		.map((raw) => {
 			const name = normalizeModuleName(raw);
-			const record = [...branchRuns].reverse().find((run) => run.module === name && run.status === "staged");
+			const record = latestStagedBranch(manifest, name);
 			if (!record) {
 				throw new Error(
 					`No staged branch run for module "${name}". A module is applyable only after a branch run has staged it. Re-run the module to stage a fresh branch.`,
@@ -1041,7 +1011,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// winner the rule leaves holding model.blend, and this is the one case where
 	// last-writer behaviour is not auto-merging, because the earlier apply is
 	// already on disk and this decision cannot undo it.
-	const allStaged = branchRuns.filter((run) => run.status === "staged");
+	const allStaged = contestableStagedRuns(manifest);
 
 	const applied: BranchApplyResult["applied"] = [];
 	const skipped: BranchApplyResult["skipped"] = [];
@@ -1088,7 +1058,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 					removeObjects: record.removedObjects,
 				},
 				signal: options.signal,
-				timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+				timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 			});
 		} finally {
 			await release();
@@ -1119,9 +1089,10 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			}
 			// An apply is a module run as far as revert is concerned: it changed
 			// model.blend, so it needs a run record with a checkpoint the revert
-			// can restore. Recorded HERE rather than at run time. The checkpoint is
-			// the state the RUN replaced, taken when its branch was copied, so it
-			// can predate this apply by however long the branch was staged.
+			// can restore. Recorded HERE rather than at run time, because the
+			// checkpoint is the state the run replaced, taken when the branch was
+			// copied — an apply may land later, or a sibling may land first, so it
+			// can predate this apply.
 			const moduleRuns = (current.moduleRuns ?? []) as BlenderModuleRunRecord[];
 			current.moduleRuns = [
 				...moduleRuns,
@@ -1155,7 +1126,87 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	return { workspacePath: manifest.workspacePath, blendPath: manifest.blendPath, applied, skipped, missing, liveBlenderMessage };
 }
 
-/** Staged branch runs, for a caller that wants to plan an apply. */
-export function stagedBranchRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
-	return (manifest.branchRuns ?? []).filter((run) => run.status === "staged");
+/**
+ * The staged records that may still contest a datablock.
+ *
+ * Only the NEWEST run of a module can contest: a re-run (staged, applied, or
+ * live) supersedes the branch it replaces, and a record whose branch was
+ * abandoned must not block that module's objects forever. Superseded records
+ * stay in the manifest -- the deliberate checkpoint history -- but they are dead
+ * as live claims, which is the distinction the retention rule did not make.
+ */
+export function contestableStagedRuns(
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
+): BlenderBranchRunRecord[] {
+	const newest = new Map<string, number>();
+	for (const run of manifest.branchRuns ?? []) {
+		// A failed or conflicted attempt proved nothing about the module's state,
+		// so it does not supersede a branch that is still waiting to be applied.
+		if (run.status !== "staged" && run.status !== "applied") continue;
+		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
+	}
+	for (const run of manifest.moduleRuns ?? []) {
+		if (run.status !== "ok") continue;
+		newest.set(run.name, Math.max(newest.get(run.name) ?? 0, run.sequence));
+	}
+	return (manifest.branchRuns ?? []).filter(
+		(run) => run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence),
+	);
+}
+
+/** Append a finished run and apply the per-module retention window. */
+export function appendBranchRun(
+	current: Pick<BlenderWorkspaceManifest, "branchRuns">,
+	record: BlenderBranchRunRecord,
+): BlenderBranchRunRecord[] {
+	return pruneBranchRunHistory([...(current.branchRuns ?? []), record]);
+}
+
+/**
+ * The staged record an apply should use for a module.
+ *
+ * Newest by SEQUENCE, not by array order: a late finisher appends later with a
+ * lower sequence, and a superseded record must never be the one applied.
+ */
+export function latestStagedBranch(
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
+	moduleName: string,
+): BlenderBranchRunRecord | undefined {
+	return contestableStagedRuns(manifest)
+		.filter((run) => run.module === moduleName)
+		.sort((a, b) => b.sequence - a.sequence)[0];
+}
+
+/**
+ * Keep the branch history that can still be used.
+ *
+ * A finish record costs a checkpoint path, a script path and a handful of name
+ * arrays, and nothing used to remove it: a long multi-module build grew the
+ * manifest without limit. The window is per MODULE and counted in records, not
+ * in global iterations: claims are globally unique, so a 40-module round
+ * advances the iteration clock by 40 and an iteration-keyed window would erase
+ * every module's history each round -- including the ownedObjects carry-forward
+ * and the digest a rebuild compares against.
+ *
+ * The newest staged record for a module is always inside the window, because it
+ * has that module's highest sequence; a staged record superseded by a later run
+ * is dropped normally.
+ */
+export function pruneBranchRunHistory(
+	runs: BlenderBranchRunRecord[],
+	keep = DEFAULT_CHECKPOINT_RETENTION,
+): BlenderBranchRunRecord[] {
+	const window = Math.max(1, Math.trunc(keep));
+	const byModule = new Map<string, BlenderBranchRunRecord[]>();
+	for (const run of runs) {
+		const list = byModule.get(run.module);
+		if (list) list.push(run);
+		else byModule.set(run.module, [run]);
+	}
+	const kept: BlenderBranchRunRecord[] = [];
+	for (const list of byModule.values()) {
+		list.sort((a, b) => b.sequence - a.sequence);
+		kept.push(...list.slice(0, window));
+	}
+	return kept;
 }

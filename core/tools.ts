@@ -6,6 +6,7 @@
  */
 
 import { Type } from "typebox";
+import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
 import type { AssetExportOptions, ImportFormat } from "../blender/types.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
@@ -634,7 +635,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. Prefer blender_branch_run + blender_branch_apply when you want to author several modules against the same state and merge them in one pass. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
+	"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. A branch staged this way can be merged with other staged branches in one conflict-checked pass by blender_branch_apply, which the manager holds. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",
@@ -655,19 +656,6 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
-	viewportShading: Type.Optional(
-		Type.Union(
-			[
-				Type.Literal("wireframe"),
-				Type.Literal("solid"),
-				Type.Literal("material-preview"),
-				Type.Literal("rendered"),
-			],
-			{
-				description: "Viewport shading for the module render. Defaults to material-preview.",
-			},
-		),
-	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -683,7 +671,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	timeoutSeconds: Type.Optional(
 		Type.Number({
 			description: "Execution timeout in seconds.",
-			default: 120,
+			default: DEFAULT_MODULE_TIMEOUT_SECONDS,
 		}),
 	),
 }),
@@ -694,7 +682,6 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
-		viewportShading: params.viewportShading,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
