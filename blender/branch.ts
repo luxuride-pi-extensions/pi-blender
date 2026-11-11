@@ -22,7 +22,7 @@
  * and model.blend is left holding whichever branch was applied first.
  */
 
-import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
@@ -460,7 +460,28 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// a sibling has been applied since, which is what makes concurrent branches
 	// meaningful rather than a race.
 	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
+	const capturedAt = new Date();
 	await copyFile(manifest.blendPath, branchPath);
+
+	// The revert checkpoint must describe the state this run REPLACES. Copying
+	// the branch rather than re-reading model.blend makes it the SAME read: an
+	// apply landing between two reads would put a sibling's merged work into the
+	// checkpoint, and a revert would then silently keep work this run never saw.
+	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
+	try {
+		await copyFile(branchPath, checkpointPath);
+		// The checkpoint's mtime is the revert guard's clock, and copyFile stamps
+		// it when the copy FINISHES, after the read it represents. Dating it to
+		// the read closes that window: a run that applied while the bytes were
+		// being copied is then still seen as later. Erring early can only add
+		// refusals, never lose a sibling's work.
+		await utimes(checkpointPath, capturedAt, capturedAt);
+	} catch (error) {
+		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		throw error;
+	}
 
 	const rawScript = await readFile(scriptPath, "utf-8");
 	let effectiveScriptPath = scriptPath;
@@ -509,12 +530,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		// A headless launch that never produced JSON leaves the branch in an
 		// unknown state, so it is removed rather than left for an apply to find.
 		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw error;
 	}
 
 	if (payload.exitCode !== 0) {
 		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw new Error(
 			formatBlenderFailure({
@@ -560,11 +583,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		});
 	}
 
-	// The checkpoint is model.blend as it is NOW, which is the state the apply
-	// will replace — so it is taken before the apply, at run time, and is the
-	// point blender_module_revert restores.
-	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
-	await copyFile(manifest.blendPath, checkpointPath);
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const record: BlenderBranchRunRecord = {
@@ -1101,8 +1119,9 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			}
 			// An apply is a module run as far as revert is concerned: it changed
 			// model.blend, so it needs a run record with a checkpoint the revert
-			// can restore. Recorded HERE rather than at run time, because the
-			// checkpoint is the state the apply replaced and is written by the run.
+			// can restore. Recorded HERE rather than at run time. The checkpoint is
+			// the state the RUN replaced, taken when its branch was copied, so it
+			// can predate this apply by however long the branch was staged.
 			const moduleRuns = (current.moduleRuns ?? []) as BlenderModuleRunRecord[];
 			current.moduleRuns = [
 				...moduleRuns,
