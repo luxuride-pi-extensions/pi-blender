@@ -1537,9 +1537,15 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			]),
 			{
 				description:
-					"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `pair` measures only the pairs you NAME; `joint` sweeps the whole scope for pairs nobody named — bounding boxes that overlap or come within 50mm while the surfaces are further apart than the tolerance — and is the check that finds a riser pipe modelled clear of the pipe it continues; it also reports `coincident-surface`, the two parts sharing a stretch of geometry that renders as z-fighting colour banding, which no verdict can see because a flush-laid panel is in contact and so is a clean one, and `buried`, a part swallowed whole by another, which is a correct render of a wrong model; `clearance` answers whether the room is USABLE — it samples the floor with a person-sized body, dilates every obstruction by that reach, and reports `islandCount` (free floor cut into pieces nobody can walk between) and `unreachableArea` (floor that reaches no edge at all), which is what catches a sofa laid wall to wall; it takes its room from the same `objects` you scope it to, so measure one room rather than the house; `path` asks whether the WALK between two points is longer than the line between them — pass `points` (door centres, the ends of a corridor) and it walks every pair over the same floor raster, walls included, and reports a `detour` ratio: 1.0 is a corridor, one bend is about 1.1–1.3, and a stair-step of several offset doors runs to 1.9 or more, which is the shape a render cannot show because from above it is still a house; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect, and its island count is what catches a mesh split into drifting pieces; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
+					"Measurement families to run. Omit for all. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `pair` measures only the pairs you NAME; `joint` sweeps the whole scope for pairs nobody named — bounding boxes that overlap or come within 50mm while the surfaces are further apart than the tolerance — and is the check that finds a riser pipe modelled clear of the pipe it continues; it also reports `coincident-surface`, the two parts sharing a stretch of geometry that renders as z-fighting colour banding, which no verdict can see because a flush-laid panel is in contact and so is a clean one, and `buried`, a part swallowed whole by another, which is a correct render of a wrong model; `clearance` answers whether the room is USABLE — it samples the floor with a person-sized body, dilates every obstruction by that reach, and reports `islandCount` (free floor cut into pieces nobody can walk between) and `unreachableArea` (floor that reaches no edge at all), which is what catches a sofa laid wall to wall; it takes its room from the same `objects` you scope it to, so measure one room rather than the house; `path` asks whether the WALK between two points is longer than the line between them — pass `points` (door centres, the ends of a corridor) and it walks every pair over the same floor raster, walls included, and reports a `detour` ratio: 1.0 is a corridor, one bend is about 1.1–1.3, and a stair-step of several offset doors runs to 1.9 or more, which is the shape a render cannot show because from above it is still a house; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect, and its island count is what catches a mesh split into drifting pieces; `sculpt` reports self-intersections, minimum wall thickness, symmetry error, dihedral distribution and density against `densityCap` — the numbers that decide whether an organic surface reads as natural, which one render cannot show; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
 			},
 		),
+	),
+	densityCap: Type.Optional(
+		Type.Number({
+			description:
+				"Face ceiling for the `sculpt` check's density budget, e.g. 50000. Omit to report vertex/face counts without judging them.",
+		}),
 	),
 	tolerance: Type.Optional(
 		Type.Number({
@@ -1614,6 +1620,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		cell: params.cell,
 		points: params.points,
 		detour: params.detour,
+		densityCap: params.densityCap,
 		timeoutMs: params.timeoutMs,
 		signal: context?.signal,
 	});

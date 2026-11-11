@@ -758,6 +758,8 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	points?: [number, number][];
 	/** `path` zig-zag threshold, default 1.45. */
 	detour?: number;
+	/** Face/vertex ceiling for the `sculpt` density metric. */
+	densityCap?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<GeometryProbeResult> {
@@ -780,6 +782,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			body: options.body,
 			points: options.points,
 			detour: options.detour,
+			densityCap: options.densityCap,
 		},
 		signal: options.signal,
 		timeoutMs: options.timeoutMs,

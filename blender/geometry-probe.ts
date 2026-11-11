@@ -42,6 +42,7 @@ export async function blenderGeometryProbe(options: GeometryProbeOptions): Promi
 		body: options.body,
 		points: options.points,
 		detour: options.detour,
+		densityCap: options.densityCap,
 		signal: options.signal,
 		// A probe on a heavy scene builds BVH trees for every sampled mesh, so
 		// give it more headroom than a plain bridge round-trip, but stay far
