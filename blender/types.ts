@@ -126,6 +126,15 @@ export interface BlenderModuleRunRecord {
 	 * reader can tell which of the two paths changed model.blend.
 	 */
 	viaBranchApply?: string;
+	/**
+	 * Everything this module owns after the run, recorded so a later headless run
+	 * keeps a digest subject instead of restarting from empty.
+	 */
+	ownedObjects?: string[];
+	/** Materials this module owns, for the same reason. */
+	ownedMaterials?: string[];
+	/** Content hash of the state this run left in model.blend, when it produced one. */
+	stateDigest?: string;
 }
 
 /** Where a staged branch run is in its life. */
@@ -181,6 +190,8 @@ export interface BlenderBranchRunRecord {
 	 * say what a module is responsible for.
 	 */
 	ownedObjects?: string[];
+	/** Materials this module owns after this run; carried into the next run. */
+	ownedMaterials?: string[];
 	/**
 	 * Content hash of the applied datablocks, so the next iteration can be
 	 * compared against this one without spending a render or a critic on the
@@ -204,6 +215,7 @@ export interface BranchRunOptions {
 	view?: string;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
+	renderEngine?: BlenderRenderEngine;
 	timeoutSeconds?: number;
 	signal?: AbortSignal;
 }
@@ -216,6 +228,8 @@ export interface BranchRunResult {
 	scriptPath: string;
 	branchPath: string;
 	iteration: number;
+	/** Claimed iteration, shared by every module run; it is also the record's order. */
+	sequence: number;
 	runDir: string;
 	checkpointPath: string;
 	exitCode: number;
@@ -235,11 +249,17 @@ export interface BranchRunResult {
 	applyObjects: string[];
 	/** Everything this module owns after this run; carried into the next run. */
 	ownedObjects: string[];
+	/** Materials this module owns after this run; carried into the next run. */
+	ownedMaterials: string[];
 	renderOutputPath: string | null;
 	status: BranchRunStatus;
+	/** Engine the branch render actually used; absent when rendering was disabled. */
+	resolvedEngine?: string;
+	/** Why the render failed, when the run itself succeeded and the branch was kept. */
+	renderError?: string;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
 	cameras: BranchCameraFraming[];
-	/** Content hash of the applied datablocks; empty only from a pre-digest Blender. */
+	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 }
 
@@ -1315,6 +1335,9 @@ export interface BlenderRunResult {
 	label?: string;
 }
 
+/** One timeout for both module paths; the schema default must not drift from it. */
+export const DEFAULT_MODULE_TIMEOUT_SECONDS = 300;
+
 export interface ModuleRunOptions {
 	cwd: string;
 	workspace: string;
@@ -1322,9 +1345,6 @@ export interface ModuleRunOptions {
 	render?: boolean;
 	view?: string;
 	timeoutSeconds?: number;
-	/** Render-quality parity with blender_render (module renders used to be hard-coded). */
-	viewportShading?: BlenderViewportShading;
-	renderEngine?: BlenderRenderEngine;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
 	signal?: AbortSignal;
@@ -1342,6 +1362,10 @@ export interface ModuleRunResult {
 	stdout: string;
 	exitCode: number;
 	renderOutputPath: string | null;
+	/** Engine the headless render actually used; absent when rendering was disabled. */
+	resolvedEngine?: string;
+	/** Why the render failed, when the module run itself succeeded. */
+	renderError?: string;
 	/**
 	 * True when the script changed the blend's object or material content.
 	 *
@@ -1377,8 +1401,8 @@ export interface ModuleRunResult {
 	 * previous run's is how a caller learns that an iteration changed nothing,
 	 * without rendering the same bytes and paying a critic to look at them.
 	 *
-	 * Absent on a live-session run: `changed` there is a yes/no content
-	 * comparison rather than a comparable hash.
+	 * Absent when the module owns no datablocks yet, and on runs recorded before
+	 * the live path reported ownership.
 	 */
 	stateDigest?: string;
 	/** True when the previous run of this module produced this same digest. */

@@ -113,3 +113,29 @@ test("the schema parser is not vacuous", () => {
 		"async",
 	]);
 });
+
+test("module_run offers only options both paths can honour", () => {
+	const moduleRun = toolBlocks().find((b) => b.name === "blender_module_run");
+	assert.deepEqual(schemaKeys(moduleRun), [
+		"workspace",
+		"moduleName",
+		"render",
+		"view",
+		"resolution",
+		"samples",
+		"timeoutSeconds",
+	]);
+	const block = moduleRun.lines.join("\n");
+	assert.doesNotMatch(block, /viewportShading/, "a headless module render is a camera render; shading is not a module option");
+	assert.match(block, /default: DEFAULT_MODULE_TIMEOUT_SECONDS/, "the schema default comes from the one constant");
+
+	const types = readFileSync(new URL("../blender/types.ts", import.meta.url), "utf8");
+	const options = types.slice(types.indexOf("export interface ModuleRunOptions"), types.indexOf("export interface ModuleRunResult"));
+	assert.ok(options.includes("export interface ModuleRunOptions"), "the options slice is not empty");
+	assert.doesNotMatch(options, /viewportShading|renderEngine/);
+	assert.match(types, /DEFAULT_MODULE_TIMEOUT_SECONDS = 300;/);
+
+	const module = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
+	assert.match(module, /viewportShading: "material-preview"/, "the live module render states the one shading it uses");
+	assert.match(module, /options\.timeoutSeconds \?\? DEFAULT_MODULE_TIMEOUT_SECONDS/, "the live path shares the schema timeout default");
+});

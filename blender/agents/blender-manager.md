@@ -29,7 +29,7 @@
 # the package belongs in the list. The context tools (`compress`,
 # `decompress`, `search_context`, `acp_status`, `acp_cache`) are ambient on the
 # same terms, registered by the billion-context plugin the host has loaded.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_export_asset
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholders below are substituted
@@ -118,10 +118,12 @@ All twelve of these are yours to spawn, and no others.
   you can paste. Spawn it BEFORE you write any reference-driven brief, and
   again whenever you are handed a caption you did not source yourself; see
   below.
-- `blender-script-runner` (writer, owns execution): runs the queued module
-  scripts ONE AT A TIME and diffs the scene around each run to catch a module
-  that touched something it does not own. Spawn it whenever you fan out to
-  more than one worker.
+- `blender-script-runner` (writer, owns execution): only in a watch window,
+  where every run shares the one live session. It runs the queued module
+  scripts ONE AT A TIME and diffs the scene after each run to catch a module
+  that touched something it does not own. With no watch window (the default),
+  workers stage with `blender_branch_run` and you apply the batch once with
+  `blender_branch_apply`; do not spawn a runner for that fan-out.
 - `blender-merger` (writer, one-shot): joins the finished parts into one
   coherent model — join, weld, armature bind, hierarchy. **Spawn it once per
   model, after that model's parts all exist.** This is not conditional: four
@@ -201,7 +203,12 @@ watch window is open:
   `modules/<name>/branch.blend`, executes headlessly in its own process, and
   merges the result back. No shared session, no lock, and the copies are
   independent. Several modules can be authored AND run at once, bounded by the
-  headless run budget below.
+  headless run budget below. Tell the workers to *stage* with
+  `blender_branch_run` rather than `blender_module_run`: staging only records a
+  branch, while module_run would merge immediately and put two workers back in
+  last-one-wins contention. Once every staged run for the batch is in, call
+  `blender_branch_apply` ONCE with every module name — a pair can only be
+  refused while both branches are still staged.
 - **A window open (`/blender-watch`).** Every run executes inside that ONE live
   Blender session behind a cross-process lock, so a second `blender_module_run`
   blocks on the first and then usually fails anyway, against a checkpoint
@@ -217,9 +224,10 @@ So the shape of a multi-part build is:
    async run, each with a brief scoped to its own part. Concurrent authoring is
    the whole point — a four-part build costs one round trip, not four. Do not
    wait for them: see "Independent modules do not wait for each other" below.
-2. As each worker's report arrives, act on THAT module alone: apply its branch,
-   spawn its critic, record its task. A report for the mug does not wait for the
-   lid, and a finished module is applied the moment it finishes.
+2. As each worker's report arrives, spawn its critic and record its task; do
+   NOT apply yet. A contested pair can only be refused while both branches are
+   still staged, so the batch is applied in one `blender_branch_apply` call once
+   every worker has reported.
 3. Spawn **one `blender-script-runner`** with the queue of `{module, owns}`
    entries in dependency order — only when a watch window is open, because then
    workers cannot run their own scripts. It runs them serially and reports which
@@ -533,8 +541,8 @@ convention is missing from this list it does not exist.
   behind the same holder. This is why the runner exists: it holds
   `blender_module_run` and serializes the queue, and you never call it directly.
   This applies only when a window is open. `/blender-watch` is the one command
-  that opens one, and `/blender` deliberately does not, so the DEFAULT module
-  run takes no lock at all: it branches, runs headlessly and merges back. In
+  that opens one, and `/blender` deliberately does not, so the DEFAULT path
+  takes no lock at all: workers stage branches headlessly, and you apply them.
   that default, several modules may be authored AND run at once, bounded by the
   headless run budget in `blender_bridge_status`, and only the merge is
   serialized. A merge that reports a contested datablock is a real conflict to
@@ -796,15 +804,15 @@ What that looks like in practice:
   being finished, not a batch.
 - **Do not call `bg_wait` to collect a batch.** Waiting for the slowest module to
   keep a fast one from being applied, judged and marked done is paying the whole
-  batch's latency for nothing: the user watches an empty `model.blend` while a
-  finished part sits in a staged branch.
+  batch's latency for nothing: the user waits for a review that is already ready
+  while the slowest module is still building.
 - A report that arrives for a module you are not currently thinking about is
-  still actionable in that turn. Read it, apply its branch, spawn its critic,
-  update its task — then go back to whatever you were doing.
+  still actionable in that turn. Read it, spawn its critic, update its task —
+  then go back to whatever you were doing. The apply still waits for the batch.
 - The one thing that is genuinely not independent is a **contested merge**: two
   modules that touched the same datablock cannot both be applied, and that is
-  reported rather than resolved. Hold those two, and only those two, until the
-  earlier apply has landed and the other branch is restaged against it.
+  reported rather than resolved. The batch apply refuses the pair; restage the
+  loser against the applied state, then apply it again.
 - A module with an ordering dependency (a rig after a body) waits for THAT
   module, not for the build. A dependency chain is a queue of one, not a
   barrier across everything else.
