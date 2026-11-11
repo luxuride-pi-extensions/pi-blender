@@ -9,7 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fork } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +47,10 @@ test("a slot is not granted past the limit until one is released", async () => {
 test("a slot left by a dead process is swept, not waited on forever", async () => {
 	const { acquireHeadlessSlot, releaseHeadlessSlot } = await loadTs(LEASES, env);
 	// 2_147_483_647 is above any Linux pid the kernel will hand out.
-	writeFileSync(join(bridge, "headless-slots", "slot-0.json"), JSON.stringify({ pid: 2_147_483_647 }));
+	writeFileSync(
+		join(bridge, "headless-slots", "slot-0.json"),
+		JSON.stringify({ owner: 2_147_483_647, limit: 1, at: new Date().toISOString() }),
+	);
 	const slot = await acquireHeadlessSlot(1);
 	assert.equal(slot.index, 0);
 	releaseHeadlessSlot(slot);
@@ -89,4 +93,39 @@ test("concurrent contenders never hold more slots than the limit", async () => {
 	const slot = await acquireHeadlessSlot(limit);
 	assert.equal(slot.index, 0);
 	releaseHeadlessSlot(slot);
+});
+
+test("a real child process holds a slot, and its death releases it", async () => {
+	const { acquireHeadlessSlot, releaseHeadlessSlot } = await loadTs(LEASES, { ...env, PI_BLENDER_BRIDGE_DIR: join(bridge, "child-process") });
+	const child = fork(new URL("./slot-child.mjs", import.meta.url), [LEASES, "1", JITI], {
+		env: { ...process.env, PI_BLENDER_BRIDGE_DIR: join(bridge, "child-process") },
+		stdio: ["ignore", "ignore", "inherit", "ipc"],
+	});
+	const admitted = await new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error("the child never acquired a slot")), 15_000);
+		child.on("message", (message) => {
+			clearTimeout(timer);
+			resolve(message);
+		});
+		child.on("error", reject);
+	});
+	assert.equal(admitted.admitted, true);
+	assert.ok(existsSync(admitted.path));
+	const record = JSON.parse(readFileSync(admitted.path, "utf-8"));
+	assert.equal(record.owner, child.pid);
+
+	child.kill("SIGKILL");
+	await new Promise((resolve) => child.on("exit", resolve));
+	const slot = await acquireHeadlessSlot(1);
+	assert.equal(slot.index, admitted.index, "the dead owner's slot was not reclaimed");
+	releaseHeadlessSlot(slot);
+});
+
+test("runBlenderProcess takes and announces a slot", async () => {
+	// The primitive is only useful if every headless spawn goes through it, and
+	// that wiring is invisible to the admission tests above.
+	const source = readFileSync(new URL("../blender/utils.ts", import.meta.url), "utf8");
+	assert.match(source, /const slot = await acquireHeadlessSlot\(budget\.effective/);
+	assert.match(source, /claimHeadlessSlot\(slot, pid\)/);
+	assert.match(source, /releaseHeadlessSlot\(slot\)/);
 });

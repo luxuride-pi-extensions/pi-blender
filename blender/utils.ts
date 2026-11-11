@@ -7,7 +7,13 @@ import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
-import { acquireHeadlessSlot, acquireRunLease, releaseHeadlessSlot, releaseRunLease } from "./run-leases.js";
+import {
+	acquireHeadlessSlot,
+	acquireRunLease,
+	claimHeadlessSlot,
+	releaseHeadlessSlot,
+	releaseRunLease,
+} from "./run-leases.js";
 import type {
 	BlenderRunResult,
 	BlenderSavedView,
@@ -225,6 +231,7 @@ export async function runBlenderProcess(options: {
 			timeout: options.timeoutMs,
 			onSpawn: (pid) => {
 				leasedPid = pid;
+				claimHeadlessSlot(slot, pid);
 				acquireRunLease(pid, options.label);
 			},
 		});
