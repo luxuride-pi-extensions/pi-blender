@@ -21,7 +21,7 @@ import bpy  # pyright: ignore[reportMissingImports]
 def _apply_modifier(obj, modifier):
     if obj.mode != "OBJECT":
         raise ValueError("density pass needs object mode; switch out of edit or sculpt first")
-    others = [other for other in obj.modifiers if other is not modifier]
+    others = [other for other in obj.modifiers if other.name != modifier.name]
     if others:
         names = ", ".join(other.name for other in others)
         raise ValueError(
