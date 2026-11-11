@@ -19,8 +19,16 @@ import bpy  # pyright: ignore[reportMissingImports]
 
 
 def _apply_modifier(obj, modifier):
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    if obj.mode != "OBJECT":
+        raise ValueError("density pass needs object mode; switch out of edit or sculpt first")
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    evaluated = obj.evaluated_get(depsgraph)
+    baked = bpy.data.meshes.new_from_object(evaluated)
+    previous = obj.data
+    obj.data = baked
+    obj.modifiers.remove(modifier)
+    if previous.users == 0:
+        bpy.data.meshes.remove(previous)
 
 
 def _median_edge(obj):
@@ -65,16 +73,17 @@ def ensure_density(obj, strokes, *, max_faces=500_000, subdivide="auto", voxel_s
     edge = _median_edge(obj)
     cuts = 0
     if subdivide == "auto" and target_edge > 0 and edge > 0 and edge > target_edge:
-        cuts = min(6, max(0, int(math.ceil(math.log2(edge / target_edge)))))
+        # subdivide_edges(cuts=n) splits every edge into n+1 segments.
+        cuts = min(6, max(0, int(math.ceil(edge / target_edge)) - 1))
     elif isinstance(subdivide, int):
         cuts = max(0, subdivide)
 
-    projected = before["faces"] * (4 ** cuts)
+    projected = before["faces"] * (cuts + 1) ** 2
     if projected > max_faces:
         # Clamp to the largest cut count that stays inside the cap. A refusal
         # would leave a primitive too coarse to sculpt; a silent overshoot
         # would spend every later stage on geometry the caller never asked for.
-        while cuts > 0 and before["faces"] * (4 ** cuts) > max_faces:
+        while cuts > 0 and before["faces"] * (cuts + 1) ** 2 > max_faces:
             cuts -= 1
         clamped = True
         reasons.append(
@@ -94,7 +103,7 @@ def ensure_density(obj, strokes, *, max_faces=500_000, subdivide="auto", voxel_s
 
     if decimate_to is not None:
         # A ratio is not an exact face count: decimation counts triangles while
-        # the target is faces, so one pass can land above it. Two passes are
+        # the target is faces, so one pass can land above it. Extra passes are
         # bounded and still deterministic; the result is reported, not assumed.
         for _ in range(3):
             if len(obj.data.polygons) <= int(decimate_to):
@@ -103,8 +112,8 @@ def ensure_density(obj, strokes, *, max_faces=500_000, subdivide="auto", voxel_s
             decimate = obj.modifiers.new(name="sculpt-density-decimate", type="DECIMATE")
             decimate.ratio = ratio
             _apply_modifier(obj, decimate)
-            reasons.append(f"decimated to a {int(decimate_to)} face target")
             uv_survived = uv_survived and len(obj.data.uv_layers) > 0
+        reasons.append(f"decimated to {len(obj.data.polygons)} faces against a {int(decimate_to)} face target")
 
     after = {"vertices": len(obj.data.vertices), "faces": len(obj.data.polygons)}
     if after["faces"] > max_faces:
@@ -116,6 +125,7 @@ def ensure_density(obj, strokes, *, max_faces=500_000, subdivide="auto", voxel_s
         "before": before,
         "after": after,
         "cuts": cuts,
+        "hadUvs": had_uvs,
         "uvsSurvived": uv_survived,
         "clamped": clamped,
         "reasons": reasons,

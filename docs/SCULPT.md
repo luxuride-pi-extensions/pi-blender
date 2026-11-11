@@ -26,7 +26,7 @@ strokes = [
 
 # A six-face cube has nowhere to round; a stroke needs vertices to move.
 ensure_density(bpy.context.object, strokes, max_faces=200_000, decimate_to=40_000)
-report = apply_strokes(bpy, bpy.context.object, strokes)
+report = apply_strokes(bpy.context.object, strokes)
 print(report)
 ```
 
@@ -41,7 +41,7 @@ by nearest mirrored position, so it is a symmetry *repair*, not a duplicate.
 | --- | --- |
 | `displace` / `inflate` | Move along vertex normals (or an explicit `direction`) inside the radius. |
 | `grab` | Move by `offset`, weighted by falloff. |
-| `crease` | Normal displacement plus a tangential pull toward `axis`. |
+| `crease` | Normal displacement plus a tangential pull toward `axis`; `pinch` pulls harder. |
 | `pinch` | Like `crease`, with the tangential term stronger. |
 | `flatten` | Project vertices toward the plane through `center` with `normal`. |
 | `smooth` / `smooth_laplacian` | Iterative neighbour averaging, masked by falloff. |

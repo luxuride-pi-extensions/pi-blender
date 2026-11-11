@@ -10,7 +10,7 @@ vertex positions on every machine, headless, with no window.
 Import from a module script (Blender puts the assets dir on `sys.path`):
 
     from sculpt import apply_strokes
-    apply_strokes(bpy, bpy.context.object, [
+    apply_strokes(bpy.context.object, [
         {"op": "displace", "center": [0, 0, 1], "radius": 0.4, "strength": 0.08},
         {"op": "flatten", "center": [0, 0, 1], "radius": 0.4, "strength": 0.5},
         {"op": "mirror", "axis": "x"},
@@ -20,11 +20,9 @@ Coordinates are object-local. A stroke without `center` uses the mesh bounding
 -box centre, which makes a table independent of the object's world transform.
 """
 
-import math
-
-# pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender)
 import bmesh  # pyright: ignore[reportMissingImports]
 from mathutils import Vector  # pyright: ignore[reportMissingImports]
+from mathutils.kdtree import KDTree  # pyright: ignore[reportMissingImports]
 
 
 def _smoothstep(t):
@@ -82,10 +80,9 @@ def _crease(bm, stroke, pinch=False):
         if weight == 0:
             continue
         normal = vert.normal * (strength * weight)
-        if pinch:
-            tangential = delta - axis * delta.dot(axis)
-            if tangential.length > 1e-9:
-                normal -= tangential.normalized() * (strength * weight * 0.5)
+        tangential = delta - axis * delta.dot(axis)
+        if tangential.length > 1e-9:
+            normal -= tangential.normalized() * (strength * weight * (0.5 if pinch else 0.15))
         vert.co += normal
 
 
@@ -128,17 +125,28 @@ def _mirror(bm, stroke):
     axis = str(stroke.get("axis", "x")).lower()
     index = {"x": 0, "y": 1, "z": 2}[axis]
     tolerance = float(stroke.get("tolerance", 1e-5))
-    pairs = [v for v in bm.verts if abs(v.co[index]) > tolerance]
-    for vert in pairs:
-        mirrored = vert.co.copy()
-        mirrored[index] = -mirrored[index]
-        # Pair with the nearest vertex on the other side; a vertex that has no
-        # partner is left alone rather than duplicated.
-        nearest = min((other for other in pairs if other is not vert), key=lambda other: (other.co - mirrored).length, default=None)
-        if nearest is not None and (nearest.co - mirrored).length <= tolerance * 10:
-            averaged = (vert.co + nearest.co) * 0.5
-            averaged[index] = math.copysign(abs(averaged[index]), vert.co[index])
-            vert.co = averaged
+    candidates = [vert for vert in bm.verts if abs(vert.co[index]) > tolerance]
+    if not candidates:
+        return
+    tree = KDTree(len(candidates))
+    for position, vert in enumerate(candidates):
+        tree.insert(vert.co, position)
+    tree.balance()
+    # Averaging with the partner's raw position would pull both sides onto the
+    # mirror plane. The partner is mirrored into this side first, and every
+    # write is deferred so later pairs still see the original surface.
+    averaged = {}
+    for vert in candidates:
+        query = vert.co.copy()
+        query[index] = -query[index]
+        _, position, distance = tree.find(query)
+        if distance > tolerance * 10:
+            continue
+        partner = candidates[position].co.copy()
+        partner[index] = -partner[index]
+        averaged[vert] = (vert.co + partner) * 0.5
+    for vert, position in averaged.items():
+        vert.co = position
 
 
 _OPS = {
@@ -154,7 +162,7 @@ _OPS = {
 }
 
 
-def apply_strokes(bpy_module, obj, strokes):
+def apply_strokes(obj, strokes):
     """Apply a stroke table to `obj.data` in place and return a small report.
 
     The mesh is written back once with `bm.to_mesh`, not vertex by vertex, and
@@ -162,6 +170,8 @@ def apply_strokes(bpy_module, obj, strokes):
     """
     if obj is None or obj.type != "MESH":
         raise ValueError("sculpt strokes need a mesh object")
+    if obj.mode != "OBJECT":
+        raise ValueError("sculpt strokes need object mode; switch out of edit or sculpt first")
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     try:

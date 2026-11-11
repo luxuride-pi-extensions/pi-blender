@@ -8,9 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
-
-# pi-lens-ignore: ast-grep:unresolved-import-python
-from sculpt_topology import ensure_density  # noqa: E402  # pyright: ignore[reportMissingImports]
+from sculpt_topology import ensure_density  # pyright: ignore[reportMissingImports]
 
 checks = {}
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -40,6 +38,7 @@ report = ensure_density(obj, [{"radius": 0.5}], subdivide=6, max_faces=100)
 checks["cap_clamps"] = report["clamped"] is True and report["after"]["faces"] <= 100
 checks["clamp_has_reason"] = any("cap" in reason for reason in report["reasons"])
 
+print("PASS: density pass reports the geometry it leaves")
 print(json.dumps({"ok": all(checks.values()), "checks": checks}))
 if not all(checks.values()):
     raise SystemExit(1)
