@@ -599,7 +599,12 @@ if exit_code == 0:
 render_result = None
 render_error = None
 render_request = payload.get("render")
-if exit_code == 0 and render_request:
+# An unchanged rebuild produced the same bytes the previous render already shows.
+# Rendering again would spend a picture, a critic image budget slot and the time
+# to decode it on a question the fingerprint already answered. forceRender is the
+# caller's way to say the PICTURE inputs changed (view, resolution, engine), which
+# the content fingerprint deliberately does not cover.
+if exit_code == 0 and render_request and (changed or payload.get("forceRender")):
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
     # A render failure must not discard the run: the geometry is already saved in
@@ -804,6 +809,30 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		previousPlan,
 	);
 
+	// The picture an unchanged run may reuse. Only an applied generation has a
+	// picture the critic can be pointed at; a staged branch's render was never
+	// merged, so reusing it would show work that is not in model.blend.
+	const previousRenderRun = [...(manifest.branchRuns ?? [])]
+		.filter((run) => run.module === moduleName && run.status === "applied" && run.renderOutputPath)
+		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0];
+	// Only the fields a picture depends on. The resolved plan carries framing
+	// numbers that are recomputed per run; comparing them would force a render
+	// every time and defeat the fast path the key exists for.
+	const renderKey = JSON.stringify({
+		profile: cameraPlan.profile,
+		frontAxis: cameraPlan.frontAxis,
+		shots: cameraPlan.shots,
+		frameSubject: cameraPlan.frameSubject ?? null,
+		distance: cameraPlan.distance ?? null,
+		view: requestedCameraName ?? options.view ?? null,
+		resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
+		samples: options.samples ?? null,
+		renderEngine: options.renderEngine ?? null,
+		reviewSheet: options.reviewSheet === true,
+	});
+	const forceRender =
+		options.forceRender === true || !previousRenderRun || previousRenderRun.renderKey !== renderKey;
+
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.
 	const priorOwnership = collectModuleOwnership(manifest, moduleName);
@@ -834,6 +863,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				ownedObjects: priorOwnership.objects,
 				ownedMaterials: priorOwnership.materials,
 				cameraPlan,
+				forceRender,
 				reviewSheet: options.reviewSheet === true,
 				render: renderRequested
 					? {
@@ -885,9 +915,15 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// The render already happened in the run process, against the branch blend
 	// this record describes. An explicit view names itself; otherwise the label
 	// is the module's own framed camera, which is what the run actually used.
-	const renderOutputPath = payload.render?.outputPath ?? null;
+	const renderSkipped =
+		renderRequested && !payload.render && !forceRender && !payload.changed && !payload.renderError;
+	const renderOutputPath = renderSkipped
+		? (previousRenderRun?.renderOutputPath ?? null)
+		: (payload.render?.outputPath ?? null);
+	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
+	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
-	if (renderRequested && !renderOutputPath) {
+	if (renderRequested && !renderOutputPath && !renderSkipped) {
 		// The path is stable per module, so a failed render would otherwise leave
 		// the PREVIOUS iteration's picture where a critic expects this one.
 		await rm(join(moduleDir, RENDER_FILE), { force: true }).catch(() => undefined);
@@ -917,9 +953,12 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 		renderOutputPath,
+		changed: payload.changed,
+		reused: renderSkipped,
+		renderKey,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
-		reviewSheet: payload.reviewSheet ?? undefined,
+		reviewSheet,
 	};
 
 	await updateManifest(
@@ -952,6 +991,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		checkpointPath,
 		exitCode: payload.exitCode,
 		changed: payload.changed,
+		reused: renderSkipped,
 		stdout: payload.stdout.trim(),
 		stderr: payload.stderr.trim(),
 		touchedObjects: payload.touchedObjects,
@@ -966,7 +1006,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
-		reviewSheet: payload.reviewSheet ?? undefined,
+		reviewSheet,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
@@ -1353,6 +1393,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const skipped: BranchApplyResult["skipped"] = [];
 	const missing: string[] = [];
 	const contested: Array<{ record: BlenderBranchRunRecord; conflicts: BranchConflict[] }> = [];
+	const unchanged: BlenderBranchRunRecord[] = [];
 	const absent: BlenderBranchRunRecord[] = [];
 	const eligible: BlenderBranchRunRecord[] = [];
 
@@ -1364,6 +1405,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		if (conflicts.length > 0) {
 			contested.push({ record, conflicts });
 			skipped.push({ module: record.module, conflicts });
+			continue;
+		}
+		// The script ran and the fingerprint says the branch has the same content
+		// it copied. Applying it would write a "new" generation that is byte-for-byte
+		// the old one, and spend a save on it. It is not staged any more either, so
+		// it cannot contest the next run.
+		if (record.changed === false) {
+			unchanged.push(record);
+			skipped.push({ module: record.module, conflicts: [], reason: "unchanged" });
 			continue;
 		}
 		if (!(await fileExists(record.branchPath))) {
@@ -1444,6 +1494,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			return target;
 		};
 
+		for (const record of unchanged) mark(record.sequence, "unchanged");
 		for (const { record, conflicts } of contested) mark(record.sequence, "conflict", conflicts);
 		for (const record of absent) {
 			mark(record.sequence, "failed", [

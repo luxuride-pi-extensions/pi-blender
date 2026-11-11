@@ -108,6 +108,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		frameSubject: options.frameSubject,
 		cameraDistance: options.cameraDistance,
 		reviewSheet: options.reviewSheet,
+		forceRender: options.forceRender,
 	});
 
 	// A single staged branch cannot contest itself, so a conflict here would mean
@@ -121,10 +122,44 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		signal: options.signal,
 	});
 	const skipped = applyResult.skipped.filter((entry) => entry.module === moduleName);
-	if (skipped.length > 0 || applyResult.missing.includes(moduleName)) {
+	const unchanged = skipped.some((entry) => entry.reason === "unchanged");
+	if (unchanged && branchResult.changed === false) {
+		// Nothing to merge: the apply recognized the branch as byte-identical and
+		// left model.blend alone. That is a successful run, not a failed merge.
+		return {
+			workspacePath: branchResult.workspacePath,
+			blendPath: branchResult.blendPath,
+			module: branchResult.module,
+			moduleDir: branchResult.moduleDir,
+			scriptPath: branchResult.scriptPath,
+			iteration: branchResult.iteration,
+			checkpointPath: branchResult.checkpointPath,
+			createdCheckpoint: true,
+			stdout: branchResult.stdout.trim(),
+			exitCode: branchResult.exitCode,
+			renderOutputPath: branchResult.renderOutputPath,
+			resolvedEngine: branchResult.resolvedEngine,
+			renderError: branchResult.renderError,
+			changed: false,
+			executionMode: "headless-apply",
+			liveBlenderMessage: applyResult.liveBlenderMessage,
+			cameras: branchResult.cameras,
+			cameraPlan: branchResult.cameraPlan,
+			reviewSheet: branchResult.reviewSheet,
+			reused: branchResult.reused,
+			warnings: ["unchanged rebuild; model.blend was not rewritten", ...branchResult.cameraPlan.warnings],
+			...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+				iteration: branchResult.iteration,
+				sequence: branchResult.sequence,
+				stateDigest: branchResult.stateDigest,
+			})),
+		};
+	}
+	const blocking = skipped.filter((entry) => entry.reason !== "unchanged");
+	if (blocking.length > 0 || applyResult.missing.includes(moduleName)) {
 		throw new Error(
 			`Module "${moduleName}" ran headlessly but was NOT merged into model.blend: ` +
-				`${skipped[0]?.conflicts.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`).join("; ") ?? "its branch blend went missing"}. ` +
+				`${blocking[0]?.conflicts.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`).join("; ") ?? "its branch blend went missing"}. ` +
 				`The work is intact in ${branchResult.branchPath}. Resolve the conflict and re-run.`,
 		);
 	}
@@ -149,6 +184,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		cameras: branchResult.cameras,
 		cameraPlan: branchResult.cameraPlan,
 		reviewSheet: branchResult.reviewSheet,
+		reused: branchResult.reused,
 		warnings: branchResult.cameraPlan.warnings.length ? branchResult.cameraPlan.warnings : undefined,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration: branchResult.iteration,

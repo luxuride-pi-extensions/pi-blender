@@ -1350,3 +1350,47 @@ test("a comparison with only one run is refused rather than self-compared", { sk
 		rmSync(ws.root, { recursive: true, force: true });
 	}
 });
+
+test("an unchanged rebuild reuses the picture instead of rendering it", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "static", replaceBox("StaticPart", 2, 2, 2));
+	const first = await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	assert.equal(first.reused, false);
+	const before = readFileSync(first.renderOutputPath);
+	const second = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	assert.equal(second.changed, false);
+	assert.equal(second.reused, true);
+	assert.equal(second.renderOutputPath, first.renderOutputPath);
+	assert.deepEqual(readFileSync(second.renderOutputPath), before);
+});
+
+test("a changed picture option forces a render even when the content did not change", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "static", replaceBox("StaticPart", 2, 2, 2));
+	const first = await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	const before = readFileSync(first.renderOutputPath);
+	const second = await branch.blenderBranchRun({
+		cwd: ws.root, workspace: ws.workspacePath, moduleName: "static",
+		resolution: { x: 320, y: 240 }, timeoutSeconds: 300,
+	});
+	assert.equal(second.changed, false);
+	assert.equal(second.reused, false);
+	assert.notDeepEqual(readFileSync(second.renderOutputPath), before);
+});
+
+test("an unchanged branch is reported and not applied", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "base", replaceBox("BasePart", 1, 1, 1));
+	writeScript(ws.workspacePath, "extra", replaceBox("ExtraPart", 1, 1, 1, 3, 0, 0));
+	await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", timeoutSeconds: 300 });
+	const extra = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "extra", timeoutSeconds: 300 });
+	assert.equal(extra.changed, true);
+	const again = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", timeoutSeconds: 300 });
+	assert.equal(again.changed, false);
+	const applied = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["base", "extra"], timeoutSeconds: 300 });
+	assert.deepEqual(applied.applied.map((entry) => entry.module), ["extra"]);
+	assert.ok(applied.skipped.some((entry) => entry.module === "base" && entry.reason === "unchanged"));
+	const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+	assert.equal(manifest.branchRuns.find((run) => run.module === "base" && run.sequence === again.sequence).status, "unchanged");
+});

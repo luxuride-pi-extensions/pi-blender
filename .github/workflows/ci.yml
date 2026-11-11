@@ -145,7 +145,7 @@ jobs:
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
       # not exist -- which is the state this step creates. Exactly ten files
-      # and 62 tests survive:
+      # and 63 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
@@ -156,6 +156,7 @@ jobs:
       #   module-state.test.mjs          6
       #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
+      #   unchanged-routing.test.mjs     1
       #   windowless-tools.test.mjs      5
       #
       # Every other file fails at import on one hard error --
@@ -167,7 +168,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the ten core-free suites
+      - name: typecheck and the eleven core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -185,6 +186,7 @@ jobs:
             test/module-state.test.mjs \
             test/tool-params.test.mjs \
             test/tool-surface.test.mjs \
+            test/unchanged-routing.test.mjs \
             test/windowless-tools.test.mjs
 
       # ----------------------------------------------------------------------
@@ -338,9 +340,10 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "62 tests ran, in 10 files: camera-plan, concurrency-budget,"
+            echo "63 tests ran, in 11 files: camera-plan, concurrency-budget,"
             echo "generations, headless-changed, live-ownership, module-paths,"
-            echo "module-state, tool-params, tool-surface and windowless-tools."
+            echo "module-state, tool-params, tool-surface, unchanged-routing and"
+            echo "windowless-tools."
             echo "Those are the only files measured to pass without a"
             echo "pi-manager-core checkout."
             echo

@@ -618,6 +618,15 @@ Compression is not a context-management flourish here. It is what makes a
 twenty-module run finish, and you are the only role in the session that can do
 it.
 
+## A no-op does not buy a critic
+
+When `iteration_state` reports `unchangedSinceLastRun: true` and the mixed-in
+structural checks have no blockers, do not spawn a critic: the picture is the
+previous picture, and the digest already says the geometry is the same. Report
+the unchanged run and move on to what the brief actually asked for. A change
+outside the scene (a texture file on disk) is invisible to the fingerprint;
+rerun with `forceRender: true` only when you know the picture inputs changed.
+
 ## Image budget
 
 Base64 image payloads stay in the transcript and are resent on every request,
