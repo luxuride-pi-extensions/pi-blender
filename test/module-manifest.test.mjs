@@ -15,7 +15,7 @@ import { loadTs } from "./paths.mjs";
 // The manifest publish runs inside BlenderModuleRevert's neighbours, so it is
 // exported purely to be assertable here; loading the module still needs jiti,
 // because pi-blender is TypeScript with NodeNext ".js" specifiers.
-const { applySuccessfulRun } = await loadTs("../blender/module.ts");
+const { applySuccessfulRun, laterModuleRuns } = await loadTs("../blender/module.ts");
 
 function manifest(overrides = {}) {
 	return {
@@ -133,5 +133,30 @@ describe("the iteration counter only ever goes up", () => {
 		applySuccessfulRun(m, run(), null);
 
 		assert.deepEqual(m.renderOutputs, []);
+	});
+});
+
+describe("a revert refuses work from the same apply pass", () => {
+	const applied = (name, at, sequence) => ({
+		name,
+		iteration: sequence,
+		sequence,
+		at,
+		checkpointPath: `/w/modules/${name}/runs/${sequence}/pre-${sequence}.blend`,
+		viaBranchApply: `/w/modules/${name}/branch.blend`,
+	});
+	const takenAt = Date.parse("2026-11-11T00:00:00.000Z");
+
+	it("refuses whichever sibling in a batch is reverted", () => {
+		const one = applied("one", "2026-11-11T00:00:01.000Z", 1);
+		const two = applied("two", "2026-11-11T00:00:01.001Z", 2);
+		assert.deepEqual(laterModuleRuns([one, two], one, takenAt, "one").map((run) => run.name), ["two"]);
+		assert.deepEqual(laterModuleRuns([one, two], two, takenAt, "two").map((run) => run.name), ["one"]);
+	});
+
+	it("does not treat a run of the same module as a sibling", () => {
+		const first = applied("one", "2026-11-11T00:00:01.000Z", 1);
+		const second = applied("one", "2026-11-11T00:00:01.001Z", 2);
+		assert.deepEqual(laterModuleRuns([first, second], second, takenAt, "one").map((run) => run.name), []);
 	});
 });

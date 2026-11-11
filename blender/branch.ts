@@ -898,6 +898,7 @@ def apply_branch(branch):
 
 outcomes = []
 saved = False
+aborted = False
 for branch in branches:
     missing = probe(branch)
     if not missing:
@@ -905,6 +906,7 @@ for branch in branches:
             result = apply_branch(branch)
         except Exception as exc:
             missing = [f"<branch could not be read: {exc}>"]
+            aborted = True
         else:
             outcomes.append({
                 "module": branch["module"],
@@ -928,8 +930,15 @@ for branch in branches:
 
 # ONE save for the whole apply. A failure before this point leaves model.blend
 # exactly as it was, so a hard failure cannot remove one module's objects and
-# then leave the file without the branch that was meant to replace them.
-if saved:
+# then leave the file without the branch that was meant to replace them. An
+# in-process failure may already have removed datablocks, so it suppresses the
+# save entirely and downgrades every outcome: nothing was written.
+if aborted:
+    reason = next((name for outcome in outcomes for name in outcome["missing"]), "the batch was aborted")
+    for outcome in outcomes:
+        outcome["applied"] = False
+        outcome["missing"] = outcome["missing"] or [reason]
+if saved and not aborted:
     bpy.ops.wm.save_mainfile()
 
 print("__PI_BLENDER_JSON_START__")
@@ -1133,16 +1142,24 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		}
 	}
 
-	const outcomeBySequence = new Map<number, BranchApplyOutcome>();
-	outcomes.forEach((outcome, index) => {
-		const record = eligible[index];
-		if (record) outcomeBySequence.set(record.sequence, outcome);
+	const outcomeByModule = new Map<string, BranchApplyOutcome>();
+	outcomes.forEach((outcome) => {
+		outcomeByModule.set(outcome.module, outcome);
 	});
+	const outcomeFor = (record: BlenderBranchRunRecord) =>
+		outcomeByModule.get(record.module) ?? outcomeBySequenceFallback(record, outcomes);
+
+	// Records whose branch the process could not read are identified by module;
+	// index is only a fallback for a payload that lost its module name.
+	function outcomeBySequenceFallback(record: BlenderBranchRunRecord, all: BranchApplyOutcome[]) {
+		const index = eligible.findIndex((entry) => entry.sequence === record.sequence);
+		return index >= 0 ? all[index] : undefined;
+	}
 
 	// A branch the process skipped because its blend disagreed with its record is
 	// reported with the datablocks that were missing; it did not touch model.blend.
 	const short = eligible.flatMap((record) => {
-		const outcome = outcomeBySequence.get(record.sequence);
+		const outcome = outcomeFor(record);
 		return outcome && !outcome.applied ? [{ record, outcome }] : [];
 	});
 	for (const { record, outcome } of short) {
@@ -1171,16 +1188,20 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 				{ objectName: record.branchPath, modules: ["the branch blend is missing from disk"] },
 			]);
 		}
-		for (const { record } of short) {
-			mark(record.sequence, "conflict");
+		for (const { record, outcome } of short) {
+			mark(record.sequence, "conflict", outcome.missing.map((name) => ({
+				objectName: name,
+				modules: ["missing from its branch"],
+			})));
 		}
 
+		const batchAt = nowIso();
 		for (const record of eligible) {
-			const outcome = outcomeBySequence.get(record.sequence);
+			const outcome = outcomeFor(record);
 			if (!outcome?.applied) continue;
 			mark(record.sequence, "applied");
 			const target = current.branchRuns?.find((run) => run.sequence === record.sequence);
-			if (target) target.appliedAt = nowIso();
+			if (target) target.appliedAt = batchAt;
 			applied.push({
 				module: record.module,
 				iteration: record.iteration,
@@ -1199,7 +1220,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 					name: record.module,
 					iteration: record.iteration,
 					checkpointPath: record.checkpointPath,
-					at: nowIso(),
+					at: batchAt,
 					sequence: record.sequence,
 					exitCode: 0,
 					status: "ok",

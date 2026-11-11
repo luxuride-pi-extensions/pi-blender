@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
@@ -406,6 +406,29 @@ export function applySuccessfulRun(
 	}
 }
 
+/**
+ * Runs a revert would discard.
+ *
+ * A whole apply pass stamps every record it writes with one `at`, so two
+ * siblings from that pass are equally late and either revert refuses. Sequence
+ * orders runs from before that convention; it is not sufficient on its own,
+ * because a sibling can claim a lower sequence and still land after the
+ * checkpoint was taken.
+ */
+export function laterModuleRuns<
+	T extends { name: string; iteration: number; sequence?: number; at: string; viaBranchApply?: string },
+>(moduleRuns: T[], target: T | undefined, checkpointTakenAt: number, moduleName: string): T[] {
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	const targetAt = target ? Date.parse(target.at) : Number.NEGATIVE_INFINITY;
+	return moduleRuns.filter(
+		(run) =>
+			run !== target &&
+			(sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER) ||
+				(run.name !== moduleName && run.viaBranchApply && target?.viaBranchApply && Math.abs(Date.parse(run.at) - targetAt) < 1_000) ||
+				(run.name !== moduleName && Date.parse(run.at) > checkpointTakenAt)),
+	);
+}
+
 export async function blenderModuleRevert(options: ModuleRevertOptions): Promise<ModuleRevertResult> {
 	const moduleName = normalizeModuleName(options.moduleName);
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
@@ -444,15 +467,13 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	}
 
 	// Guard against the destructive case: reverting module A after module B ran
-	// throws away B's work too, because they share one model.blend.
-	const targetAt = target ? Date.parse(target.at) : Number.NEGATIVE_INFINITY;
-	const laterRuns = moduleRuns.filter(
-		(run) =>
-			run !== target &&
-			(run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER) ||
-				(run.name !== moduleName && run.checkpointPath === target?.checkpointPath) ||
-				(run.name !== moduleName && Date.parse(run.at) >= targetAt)),
-	);
+	// throws away B's work too, because they share one model.blend. Sequence
+	// order alone is not enough: a sibling that claimed a LOWER sequence can
+	// apply after this checkpoint was taken, so a run that landed after it is
+	// "later" whatever number it claimed. A pre-`sequence` record still blocks:
+	// `undefined > n` is false, which would let the revert discard it silently.
+	const checkpointTakenAt = (await stat(checkpointPath)).mtimeMs;
+	const laterRuns = laterModuleRuns(moduleRuns, target, checkpointTakenAt, moduleName);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");
