@@ -364,6 +364,26 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 }
 
 /**
+ * Retire the history a revert made false.
+ *
+ * Both record kinds are generations: a live run and an applied branch run. A
+ * revert removes their content from model.blend, so leaving them behind would
+ * let the next digest comparison pick a state that is gone — and report the
+ * reverted-away content as the current baseline. Staged branch records survive:
+ * their work is still in a branch blend and can be applied after the revert.
+ */
+export function pruneRevertedGenerations(
+	current: Pick<BlenderWorkspaceManifest, "moduleRuns" | "branchRuns">,
+	target: { name: string; sequence: number } | undefined,
+): void {
+	if (!target) return;
+	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence);
+	current.branchRuns = (current.branchRuns ?? []).filter(
+		(run) => run.module !== target.name || run.sequence < target.sequence || run.status !== "applied",
+	);
+}
+
+/**
  * Fold a successful module run into the manifest state on disk.
  *
  * Extracted from the run itself so the one rule that matters here is a rule
@@ -495,9 +515,7 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.moduleRuns = target
-				? (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence)
-				: (current.moduleRuns ?? []);
+			pruneRevertedGenerations(current, target);
 		},
 		{ signal: options.signal },
 	);

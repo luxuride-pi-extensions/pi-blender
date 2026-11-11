@@ -650,6 +650,10 @@ test("an unchanged iteration is reported as unchanged, without a render", { skip
 		});
 		assert.equal(repeat.unchangedSinceLastRun, true, "re-running the same script must be reported as no change");
 		assert.equal(repeat.comparedWithIteration, first.iteration);
+		assert.ok(
+			repeat.stateDigest && first.stateDigest && repeat.stateDigest === first.stateDigest,
+			"unchanged must come from two real, equal digests — not from both sides being empty",
+		);
 
 		// Now change the geometry, which must move the digest.
 		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));

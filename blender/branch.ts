@@ -188,7 +188,6 @@ apply_objects, removed_objects = widen_apply_objects(
     bpy,
     touched_objects,
     delta["removedObjects"],
-    after["objects"],
 )
 
 # ---- auto-framing -----------------------------------------------------------
@@ -385,9 +384,9 @@ interface BranchRunPayload {
 	 */
 	ownedObjects: string[];
 	/**
-	 * Content hash over those owned objects. Absent only from a pre-digest run.
+	 * Content hash over those owned objects, or null when there is no subject.
 	 */
-	stateDigest: string;
+	stateDigest: string | null;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
 	cameras: BranchCameraFraming[];
 }
@@ -551,7 +550,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
-		stateDigest: payload.stateDigest,
+		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 		renderOutputPath,
 		cameras: payload.cameras,
@@ -597,7 +596,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedObjects: payload.ownedObjects,
 		renderOutputPath,
 		cameras: payload.cameras,
-		stateDigest: payload.stateDigest,
+		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 	};
 }

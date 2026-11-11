@@ -248,7 +248,7 @@ export interface BranchRunResult {
 	status: BranchRunStatus;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
 	cameras: BranchCameraFraming[];
-	/** Content hash of the applied datablocks; empty only from a pre-digest Blender. */
+	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 }
 

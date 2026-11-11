@@ -44,7 +44,7 @@ def diff_snapshots(before, after):
     }
 
 
-def widen_apply_objects(bpy, touched_objects, deleted_objects, after_objects):
+def widen_apply_objects(bpy, touched_objects, deleted_objects):
     """Widen the apply set to the datablocks that cannot travel alone.
 
     A parented object without its parent is not a usable object, and a parent
@@ -52,12 +52,12 @@ def widen_apply_objects(bpy, touched_objects, deleted_objects, after_objects):
     apply time, and is reported, because a widened apply set is exactly what
     turns into a conflict against a sibling.
 
-    A deleted object that was only a RELATIVE of something touched is not a
-    removal by this module: it never asked for one, and dropping it because a
-    parent moved would make this module's apply destroy another module's work.
+    A removed object is exactly a name that disappeared between the two
+    snapshots. A cascade deletion reports every object it took with it, because
+    the module did delete them; the apply tolerates removals that are already
+    absent from model.blend.
     """
     deleted = set(deleted_objects)
-    after = set(after_objects)
     apply_objects = set(touched_objects) - deleted
     for name in list(apply_objects):
         obj = bpy.data.objects.get(name)
@@ -69,7 +69,7 @@ def widen_apply_objects(bpy, touched_objects, deleted_objects, after_objects):
             ancestor = ancestor.parent
         for descendant in obj.children_recursive:
             apply_objects.add(descendant.name)
-    removed_objects = sorted(deleted - (apply_objects & after))
+    removed_objects = sorted(deleted)
     return sorted(apply_objects), removed_objects
 
 

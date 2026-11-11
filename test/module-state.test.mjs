@@ -72,7 +72,7 @@ class Bpy:
     data = Data()
 
 apply_objects, removed = module_state.widen_apply_objects(
-    Bpy(), ["Grip"], ["Gone"], {"Grip", "Handle", "Other"},
+    Bpy(), ["Grip"], ["Gone"],
 )
 print(json.dumps({"apply": apply_objects, "removed": removed}))
 `);

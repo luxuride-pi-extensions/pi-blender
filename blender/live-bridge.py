@@ -547,7 +547,6 @@ def handle_execute_python(request):
         bpy,
         delta["touchedObjects"],
         delta["removedObjects"],
-        after["objects"],
     )
     owned_objects = owned_after(
         request.get("ownedObjects") or [],
