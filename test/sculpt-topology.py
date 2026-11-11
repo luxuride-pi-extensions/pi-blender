@@ -38,11 +38,21 @@ report = ensure_density(obj, [{"radius": 0.5}], subdivide=6, max_faces=100)
 checks["cap_clamps"] = report["clamped"] is True and report["after"]["faces"] <= 100
 checks["clamp_has_reason"] = any("cap" in reason for reason in report["reasons"])
 
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=2)
+obj = bpy.context.object
+bpy.ops.object.mode_set(mode="EDIT")
+try:
+    ensure_density(obj, [{"radius": 0.5}], subdivide=2)
+except ValueError:
+    checks["edit_mode_rejected"] = True
+else:
+    checks["edit_mode_rejected"] = False
+if obj.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
 all_ok = all(checks.values())
 print(json.dumps({"ok": all_ok, "checks": checks}))
 if not all_ok:
     raise SystemExit(1)
 print("PASS: density pass reports the geometry it leaves")
-print(json.dumps({"ok": all(checks.values()), "checks": checks}))
-if not all(checks.values()):
-    raise SystemExit(1)

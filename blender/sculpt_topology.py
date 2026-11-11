@@ -21,6 +21,12 @@ import bpy  # pyright: ignore[reportMissingImports]
 def _apply_modifier(obj, modifier):
     if obj.mode != "OBJECT":
         raise ValueError("density pass needs object mode; switch out of edit or sculpt first")
+    others = [other for other in obj.modifiers if other is not modifier]
+    if others:
+        names = ", ".join(other.name for other in others)
+        raise ValueError(
+            f"the density pass bakes the evaluated stack; apply these modifiers first: {names}"
+        )
     depsgraph = bpy.context.evaluated_depsgraph_get()
     evaluated = obj.evaluated_get(depsgraph)
     baked = bpy.data.meshes.new_from_object(evaluated)
