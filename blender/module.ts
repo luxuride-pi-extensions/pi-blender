@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
@@ -495,12 +495,17 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	}
 
 	// Guard against the destructive case: reverting module A after module B ran
-	// throws away B's work too, because they share one model.blend.
-	// A pre-`sequence` record still blocks a revert: `undefined > n` is false,
-	// which would let the revert discard its work without a guard.
+	// throws away B's work too, because they share one model.blend. Sequence
+	// order alone is not enough: a sibling that claimed a LOWER sequence can
+	// apply after this checkpoint was taken, so a run that landed after it is
+	// "later" whatever number it claimed. A pre-`sequence` record still blocks:
+	// `undefined > n` is false, which would let the revert discard it silently.
 	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	const checkpointTakenAt = (await stat(checkpointPath)).mtimeMs;
 	const laterRuns = moduleRuns.filter(
-		(run) => sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER),
+		(run) =>
+			run !== target &&
+			(sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER) || Date.parse(run.at) > checkpointTakenAt),
 	);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
