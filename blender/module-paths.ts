@@ -56,9 +56,20 @@ export function planCheckpointRetention(latestIteration: number, keep = DEFAULT_
  * Delete run directories older than the retention window.
  *
  * Best-effort by design: a leftover checkpoint costs disk, a failed history
- * operation mid-loop costs the session. Manifest records are deliberately left
- * alone -- blender_module_revert already reports a recorded-but-deleted
- * checkpoint as missing, which is a truer history than silently rewriting it.
+ * operation mid-loop costs the session. `moduleRuns` records are left alone --
+ * blender_module_revert already reports a recorded-but-deleted checkpoint as
+ * missing, which is a truer history than silently rewriting it. `branchRuns` are
+ * windowed by pruneBranchRunHistory to the newest five per MODULE (not per
+ * global iteration), so the manifest's branch section is bounded at
+ * 5 x module count.
+ *
+ * That retention rule covers HISTORY, not live claims. A `staged` branch is live
+ * state: it owns datablocks and contests siblings. Superseded staged records
+ * stay in the manifest but stop contesting (contestableStagedRuns keeps only the
+ * newest run per module, counting an applied branch or a successful live run as
+ * supersession), so an abandoned branch cannot block its module's objects for
+ * the rest of the build. There is no discard tool; re-running the module is the
+ * way to retire it.
  */
 export async function pruneOldModuleRuns(
 	workspacePath: string,

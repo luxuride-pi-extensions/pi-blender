@@ -42,6 +42,7 @@ import type {
 } from "./types.js";
 import {
 	buildModuleScriptPreamble,
+	DEFAULT_CHECKPOINT_RETENTION,
 	getModuleDir,
 	getModuleRunCheckpointName,
 	getModuleScriptPath,
@@ -608,7 +609,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.branchRuns = [...(current.branchRuns ?? []), record];
+			current.branchRuns = appendBranchRun(current, record);
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,
@@ -1018,7 +1019,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const staged = options.modules
 		.map((raw) => {
 			const name = normalizeModuleName(raw);
-			const record = [...branchRuns].reverse().find((run) => run.module === name && run.status === "staged");
+			const record = latestStagedBranch(manifest, name);
 			if (!record) {
 				throw new Error(
 					`No staged branch run for module "${name}". A module is applyable only after a branch run has staged it. Re-run the module to stage a fresh branch.`,
@@ -1041,7 +1042,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// winner the rule leaves holding model.blend, and this is the one case where
 	// last-writer behaviour is not auto-merging, because the earlier apply is
 	// already on disk and this decision cannot undo it.
-	const allStaged = branchRuns.filter((run) => run.status === "staged");
+	const allStaged = contestableStagedRuns(manifest);
 
 	const applied: BranchApplyResult["applied"] = [];
 	const skipped: BranchApplyResult["skipped"] = [];
@@ -1155,7 +1156,87 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	return { workspacePath: manifest.workspacePath, blendPath: manifest.blendPath, applied, skipped, missing, liveBlenderMessage };
 }
 
-/** Staged branch runs, for a caller that wants to plan an apply. */
-export function stagedBranchRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
-	return (manifest.branchRuns ?? []).filter((run) => run.status === "staged");
+/**
+ * The staged records that may still contest a datablock.
+ *
+ * Only the NEWEST run of a module can contest: a re-run (staged, applied, or
+ * live) supersedes the branch it replaces, and a record whose branch was
+ * abandoned must not block that module's objects forever. Superseded records
+ * stay in the manifest -- the deliberate checkpoint history -- but they are dead
+ * as live claims, which is the distinction the retention rule did not make.
+ */
+export function contestableStagedRuns(
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
+): BlenderBranchRunRecord[] {
+	const newest = new Map<string, number>();
+	for (const run of manifest.branchRuns ?? []) {
+		// A failed or conflicted attempt proved nothing about the module's state,
+		// so it does not supersede a branch that is still waiting to be applied.
+		if (run.status !== "staged" && run.status !== "applied") continue;
+		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
+	}
+	for (const run of manifest.moduleRuns ?? []) {
+		if (run.status !== "ok") continue;
+		newest.set(run.name, Math.max(newest.get(run.name) ?? 0, run.sequence));
+	}
+	return (manifest.branchRuns ?? []).filter(
+		(run) => run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence),
+	);
+}
+
+/** Append a finished run and apply the per-module retention window. */
+export function appendBranchRun(
+	current: Pick<BlenderWorkspaceManifest, "branchRuns">,
+	record: BlenderBranchRunRecord,
+): BlenderBranchRunRecord[] {
+	return pruneBranchRunHistory([...(current.branchRuns ?? []), record]);
+}
+
+/**
+ * The staged record an apply should use for a module.
+ *
+ * Newest by SEQUENCE, not by array order: a late finisher appends later with a
+ * lower sequence, and a superseded record must never be the one applied.
+ */
+export function latestStagedBranch(
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
+	moduleName: string,
+): BlenderBranchRunRecord | undefined {
+	return contestableStagedRuns(manifest)
+		.filter((run) => run.module === moduleName)
+		.sort((a, b) => b.sequence - a.sequence)[0];
+}
+
+/**
+ * Keep the branch history that can still be used.
+ *
+ * A finish record costs a checkpoint path, a script path and a handful of name
+ * arrays, and nothing used to remove it: a long multi-module build grew the
+ * manifest without limit. The window is per MODULE and counted in records, not
+ * in global iterations: claims are globally unique, so a 40-module round
+ * advances the iteration clock by 40 and an iteration-keyed window would erase
+ * every module's history each round -- including the ownedObjects carry-forward
+ * and the digest a rebuild compares against.
+ *
+ * The newest staged record for a module is always inside the window, because it
+ * has that module's highest sequence; a staged record superseded by a later run
+ * is dropped normally.
+ */
+export function pruneBranchRunHistory(
+	runs: BlenderBranchRunRecord[],
+	keep = DEFAULT_CHECKPOINT_RETENTION,
+): BlenderBranchRunRecord[] {
+	const window = Math.max(1, Math.trunc(keep));
+	const byModule = new Map<string, BlenderBranchRunRecord[]>();
+	for (const run of runs) {
+		const list = byModule.get(run.module);
+		if (list) list.push(run);
+		else byModule.set(run.module, [run]);
+	}
+	const kept: BlenderBranchRunRecord[] = [];
+	for (const list of byModule.values()) {
+		list.sort((a, b) => b.sequence - a.sequence);
+		kept.push(...list.slice(0, window));
+	}
+	return kept;
 }
