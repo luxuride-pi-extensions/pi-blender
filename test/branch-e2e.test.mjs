@@ -446,6 +446,76 @@ test("an apply is recorded as a module run, so revert can restore what it replac
 	}
 });
 
+test("the revert checkpoint describes the state the run started from", { skip }, async () => {
+	// The checkpoint used to be taken AFTER the script, so a sibling's apply that
+	// landed while this module was inside Blender ended up in it. Reverting this
+	// module then silently kept the sibling's work, which is the one thing a
+	// checkpoint exists to prevent.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "base", ADD_CUBE);
+		await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", render: false, timeoutSeconds: 300 });
+
+		const marker = join(ws.workspacePath, "slow.started");
+		const fastDone = join(ws.workspacePath, "fast.done");
+		writeScript(
+			ws.workspacePath,
+			"slow",
+			`
+import bpy, os, time
+bpy.data.objects["Mug"].location.x = 3.0
+open(${JSON.stringify(marker)}, "w").write("started")
+bpy.context.view_layer.update()
+for _ in range(1200):
+    if os.path.exists(${JSON.stringify(fastDone)}):
+        break
+    time.sleep(0.1)
+else:
+    raise RuntimeError("the fast module never completed")
+`,
+		);
+		const beforeSlow = readFileSync(ws.blendPath);
+		const slowPromise = branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "slow",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		const deadline = Date.now() + 60_000;
+		while (!existsSync(marker)) {
+			if (Date.now() > deadline) throw new Error("the slow branch never reached its script");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+
+		// Apply a sibling while the slow run is still polling inside its script.
+		// The poll keeps the overlap causal rather than a race with a sleep: the
+		// slow run cannot finish until this test has seen the fast apply return.
+		writeScript(ws.workspacePath, "fast", box("Fast", 1.0, 1.0, 1.0, 0, 5, 0));
+		await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "fast", render: false, timeoutSeconds: 300 });
+		writeFileSync(fastDone, "done");
+
+		const slow = await slowPromise;
+		assert.deepEqual(
+			readFileSync(slow.checkpointPath),
+			beforeSlow,
+			"the checkpoint must be byte-identical to model.blend before the run started, not a later read",
+		);
+		const checkpointNames = await objectNames(ws.root, slow.checkpointPath);
+		assert.ok(checkpointNames.includes("Mug"), "the checkpoint is model.blend before this run");
+		assert.ok(
+			!checkpointNames.includes("Fast"),
+			"a sibling applied during the run must not appear in this run's checkpoint",
+		);
+
+		const modelNames = await objectNames(ws.root, ws.blendPath);
+		assert.ok(modelNames.includes("Fast"), "the sibling's apply really did land while the slow run was in flight");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("blender_module_run works with NO window, by branching and applying", { skip }, async () => {
 	// The default state of a session: /blender no longer opens a window, so this
 	// is the path a manager takes unless the user ran /blender-watch. Asserted
@@ -738,6 +808,10 @@ test("an unchanged iteration is reported as unchanged, without a render", { skip
 		});
 		assert.equal(repeat.unchangedSinceLastRun, true, "re-running the same script must be reported as no change");
 		assert.equal(repeat.comparedWithIteration, first.iteration);
+		assert.ok(
+			repeat.stateDigest && first.stateDigest && repeat.stateDigest === first.stateDigest,
+			"unchanged must come from two real, equal digests — not from both sides being empty",
+		);
 
 		// Now change the geometry, which must move the digest.
 		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 9.0, 0.2, 0.2, 4.0, 0, 0));
@@ -847,6 +921,18 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
 			render: false,
 			timeoutSeconds: 300,
 		});
+		// Re-run the paint module untouched: its geometry set is empty, so the
+		// digest can only survive if material ownership was carried forward.
+		const repainted = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "glaze",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.ok(painted.stateDigest, "a material-only edit still has a subject");
+		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
+		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
 		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
