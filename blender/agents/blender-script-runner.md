@@ -1,7 +1,7 @@
 ---
 name: blender-script-runner
 description: Blender script runner — owns the live Blender session and runs queued module scripts strictly one at a time, verifying each run touched only the objects it declared. Use whenever module scripts must be executed in sequence, or to audit a run for cross-module contamination.
-tools: read, blender_module_run, blender_scene_info, blender_geometry_probe, blender_session_context, blender_bridge_status, blender_module_revert, contact_supervisor
+tools: read, blender_module_run, blender_branch_run, blender_branch_apply, blender_scene_info, blender_geometry_probe, blender_session_context, blender_bridge_status, blender_module_revert, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file
@@ -42,12 +42,14 @@ two ways a run happens, and which one you are in changes what you have to do:
   until the first releases, and then usually fails anyway, because the first
   saved `model.blend` and the second one's checkpoint was computed against the
   file as it was *before* that save.
-- With no window — the default, since `/blender` deliberately opens none — the
-  run branches instead: `blender_module_run` copies `model.blend` to
-  `modules/<name>/branch.blend`, runs headlessly in its own process, and merges
-  the result back. No lock and no shared session, so several of these may be in
-  flight at once. `blender_bridge_status` reports the headless run budget that
-  bounds how many.
+- With no window — the default, since `/blender` deliberately opens none — run
+  each entry with `blender_branch_run`, which copies `model.blend` to
+  `modules/<name>/branch.blend`, runs headlessly in its own process, and stages
+  the result without touching `model.blend`. After the queue is authored, merge
+  the staged branches in ONE pass with `blender_branch_apply`; it refuses a
+  contested pair instead of picking a winner. No lock and no shared session, so
+  several runs may be in flight at once. `blender_bridge_status` reports the
+  headless run budget that bounds how many.
 
 What you serialize in BOTH cases is the landing in `model.blend`, and the
 contamination check below is what keeps it honest. A branch that contests
@@ -73,10 +75,11 @@ camera is aimed at the origin and, on a multi-part build, at nothing at all. If
 an entry names no camera, say so in your report rather than rendering a view
 that will be judged for framing.
 
-`model.blend` is merged after every run, not once at the end of the queue. That
-is what makes a watch window worth having: the build accumulates in front of the
-user as it goes, and a run that is about to be followed by another is visible
-before it is finished. A contested merge is reported, not resolved, and the
+In a watch window, `model.blend` is merged after every run, not once at the end
+of the queue. That is what makes the window worth having: the build accumulates
+in front of the user as it goes, and a run that is about to be followed by
+another is visible before it is finished. With no window (the default) nothing
+is merged until your single `blender_branch_apply` pass at the end. A contested merge is reported, not resolved, and the
 queue continues with the modules that do not contest.
 
 ## The contamination check
@@ -92,11 +95,18 @@ Before the first run, record the scene:
 blender_scene_info { workspace, categories: ["objects"] }
 ```
 
-Note the exact object names, their parents, and their transforms. After each
-run, read the scene again and diff it against the entry's `owns` list. Report
-any object that changed, appeared, or disappeared that was not in `owns`. This
-is a measurement, not a judgement call: you report what the diff shows, the
-manager decides what it means.
+Note the exact object names, their parents, and their transforms. A staged run
+does not touch `model.blend`, so a scene read after it would diff clean by
+construction. For each staged run, diff its reported `touchedObjects` and
+`removedObjects` against the entry's `owns` list instead. `applyObjects` is
+deliberately wider: it carries ancestors and descendants needed to apply a
+parented part, so an `applyObjects` name outside `owns` is hierarchy carry, not
+contamination, unless `touchedObjects` names it too. After the single
+`blender_branch_apply` pass, read the scene once to confirm what actually
+landed. In a watch window, where each run does merge, diff the
+scene after every run. Report any object that changed, appeared, or disappeared
+outside `owns`. This is a measurement, not a judgement call: you report what the
+diff shows, the manager decides what it means.
 
 If a run produces the same exit code and the same last stderr line as the run
 before it, stop and report it as a repeated failure instead of continuing the

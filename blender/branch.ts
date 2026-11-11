@@ -983,7 +983,6 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
  */
 export async function blenderBranchApply(options: BranchApplyOptions): Promise<BranchApplyResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
-	const branchRuns = manifest.branchRuns ?? [];
 
 	const staged = options.modules
 		.map((raw) => {
