@@ -359,6 +359,129 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
+  # THE bpy CODE PATHS.
+  #
+  # Everything above proves the TypeScript callers and the shipped Python's
+  # syntax. This job is the only one that executes the probes against a real
+  # Blender, because every one of them otherwise skips itself on a runner with
+  # no Blender and the run still looks green.
+  #
+  # A portable Linux build, cached by exact version: flatpak is not available
+  # on hosted runners, and the download dominates the job when the cache misses.
+  # Seven suites must report zero skips; window-only and the two long e2e
+  # suites stay skipped by design
+  # everywhere because there is no X server. branch-e2e and headless-bridge-e2e
+  # are headless but deliberately excluded for runtime (dozens of launches).
+  # Five of the six import config.ts, so the job checks out pi-manager-core
+  # with CONSUMER_TOKEN; coverage-audit makes a missing token a red run.
+  # ===========================================================================
+  blender:
+    name: real Blender probes (headless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install pi-blender
+        run: npm ci --legacy-peer-deps
+
+      - name: detect the cross-repo token
+        id: token
+        env:
+          CONSUMER_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+        run: |
+          if [ -n "${CONSUMER_TOKEN}" ]; then
+            echo "has_token=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=" >> "$GITHUB_OUTPUT"
+            echo "::warning title=real-Blender suites need the sibling core::" \
+              "CONSUMER_TOKEN is not set, so pi-manager-core cannot be" \
+              "checked out and the suites that import config.ts cannot run." \
+              "coverage-audit fails the run for the missing token."
+          fi
+
+      - name: check out pi-manager-core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        uses: actions/checkout@v5
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          token: ${{ secrets.CONSUMER_TOKEN }}
+          fetch-depth: 1
+
+      - name: install the manager core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        working-directory: projects/pi-manager-core
+        run: npm ci
+
+      - name: cache Blender 4.2.3
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender
+          key: blender-4.2.3-linux-x64
+
+      - name: download and unpack Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/blender"
+          url="https://download.blender.org/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/blender.tar.xz"
+          tar -xJf "${RUNNER_TEMP}/blender.tar.xz" -C "${RUNNER_TEMP}/blender" --strip-components=1
+
+      - name: put Blender on PATH
+        run: |
+          set -euo pipefail
+          echo "${RUNNER_TEMP}/blender" >> "$GITHUB_PATH"
+          echo "BLENDER_PATH=${RUNNER_TEMP}/blender/blender" >> "$GITHUB_ENV"
+
+      - name: verify Blender
+        run: blender --version
+
+      # The probe suites skip themselves when detectBlender() finds nothing.
+      # A skip here is the exact failure this job exists to prevent, so it is
+      # turned into a failed step with the reason, not left as an annotation.
+      # Every suite here imports config.ts (some transitively), so they need
+      # the sibling core AND a real Blender. usage-guess is fully headless and
+      # had been skipping unnoticed; it is included for the same reason.
+      # Deliberately not included: window-layout (needs a UI), branch-e2e and
+      # headless-bridge-e2e (long-running, each launches many Blender
+      # processes). One invocation and one guard: a split would let one step
+      # go green while the other skipped.
+      - name: probes, object detail, scene, import and usage paths must not skip
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        env:
+          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
+        run: |
+          set -euo pipefail
+          if ! out="$(node --test --test-reporter=spec \
+            test/blender-probes.test.mjs \
+            test/object-detail.test.mjs \
+            test/compare-baseline.test.mjs \
+            test/import-asset.test.mjs \
+            test/scene-health.test.mjs \
+            test/scene-stats.test.mjs \
+            test/usage-guess.test.mjs 2>&1)"; then
+            printf '%s\n' "$out"
+            exit 1
+          fi
+          printf '%s\n' "$out"
+          if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
+            echo "::error title=Blender tests skipped despite a real Blender::At" \
+              "least one of the seven suites skipped. detectBlender() did not" \
+              "find the unpacked build, or one suite looked on the wrong" \
+              "channel, and this job verified less than it claims."
+            exit 1
+          fi
+
+  # ===========================================================================
   # THE ALWAYS-RUNNING AUDIT.
   #
   # A sibling of `test` with no `if` at all, so it executes on every trigger

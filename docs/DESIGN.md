@@ -677,6 +677,26 @@ a machine that configures Blender later is not blocked here.
 npm run check:setup     # read-only: reports problems, repairs nothing, exit 1 on any
 ```
 
+The `blender` CI job runs six headless suites against a portable Blender
+4.2.3 build, cached by version: probes, object detail, compare baselines,
+import/export, scene health and scene stats. It checks out `pi-manager-core`
+with `CONSUMER_TOKEN`, because five of the six import `config.ts`. To run the
+same suites locally, the probe suite needs `blender` on `PATH` (it does not
+read `BLENDER_PATH`); the others accept either channel. Then:
+
+```bash
+node --test --test-reporter=spec \
+  test/blender-probes.test.mjs test/object-detail.test.mjs \
+  test/compare-baseline.test.mjs test/import-asset.test.mjs \
+  test/scene-health.test.mjs test/scene-stats.test.mjs
+```
+
+Expect roughly 6–10 minutes against the job's 20-minute cap. The suites skip
+themselves when no Blender is found; CI fails unless the summary says
+`skipped 0`. The window-only tools stay skipped because there is no X server,
+and `branch-e2e` / `headless-bridge-e2e` are deliberately excluded for runtime
+(they launch Blender dozens of times), not because they need a window.
+
 `--check` is genuinely read-only, including the agent check: it compares the
 installed copies against the repo and fails on drift instead of silently
 repairing it first. That distinction matters — a check that writes before it
