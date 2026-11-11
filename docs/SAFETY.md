@@ -191,6 +191,7 @@ annotations: {
 | `blender_branch_run` | `false` | `true` | `false` | `false` | Headless execution against isolated private `branch.blend`; workspace-file-only. |
 | `blender_branch_apply` | `false` | `true` | `false` | `true` | Merges staged branch into `model.blend` and reloads live UI. |
 | `blender_module_revert` | `false` | `true` | `false` | `true` | Reverts `model.blend` checkpoint and reloads live UI, discarding unsaved edits. |
+| `blender_workspace_prune` | `false` | `true` | `false` | `false` | Removes old iteration renders; dry run unless `dryRun: false`; never deletes copied references or the newest/critique render. |
 | `blender_set_mode` | `false` | `false` | `true` | `true` | Switches viewport mode (OBJECT, EDIT, SCULPT, etc.) in live UI. |
 | `blender_log_critique` | `false` | `false` | `false` | `false` | Appends critique entry to `critique.log`; workspace-file-only. |
 | `blender_rank_assets` | `true` | `false` | `true` | `false` | Reads and ranks `critique.log`; workspace-file-only. |

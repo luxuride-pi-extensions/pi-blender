@@ -142,5 +142,6 @@ export type {
 export { claimWorkspace } from "./workspace.js";
 export { getBundledBlenderAgentsDir, getBundledBlenderSkillsDir } from "./utils.js";
 export { blenderWorkspaceInit } from "./workspace.js";
+export { blenderWorkspacePrune } from "./retention.js";
 export { blenderUsageGuess } from "./usage-guess.js";
 

@@ -96,6 +96,28 @@ export interface BlenderSessionViewportContext {
 	isCameraView: boolean;
 }
 
+export interface WorkspacePruneResult {
+	workspacePath: string;
+	dryRun: boolean;
+	keepIterations: number;
+	/** Iterations at or below this number are candidates for removal. */
+	cutoff: number;
+	/** Always retained, with the reason each one is protected. */
+	kept: { path: string; reason: string }[];
+	wouldRemove: { path: string; bytes: number; module?: string; iteration: number }[];
+	/** Removable bytes grouped by the module that produced them. */
+	byModule: { module: string; files: number; bytes: number }[];
+	totalBytes: number;
+	references: {
+		path: string;
+		files: number;
+		bytes: number;
+		retained: true;
+		reason: string;
+	};
+	note: string;
+}
+
 export interface BlenderRenderOutput {
 	path: string;
 	view: string;

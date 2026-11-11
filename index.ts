@@ -218,6 +218,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_scene_info",
 	"blender_add_reference",
 	"blender_module_revert",
+	// Retention is a workspace-level decision: which evidence may go is the
+	// manager's call, and the dry run keeps it inspectable before it is.
+	"blender_workspace_prune",
 	// The manager is the serialization point: workers stage with
 	// blender_branch_run, and the manager applies the batch once with
 	// blender_branch_apply after every staged run for the batch is in. A

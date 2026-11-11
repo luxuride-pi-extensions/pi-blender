@@ -42,6 +42,7 @@ import {
 	blenderUsageGuess,
 	blenderWindowLayout,
 	blenderWorkspaceInit,
+	blenderWorkspacePrune,
 } from "../blender/runtime.js";
 import { blenderCompare } from "../blender/compare.js";
 
@@ -2077,8 +2078,47 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 	},
 };
 
+export const blenderWorkspacePruneTool: CoreToolDefinition = {
+	name: "blender_workspace_prune",
+	label: "Blender Workspace Prune",
+	annotations: {
+		readOnlyHint: false,
+		destructiveHint: true,
+		idempotentHint: true,
+		openWorldHint: false,
+	},
+	description:
+	"Report or remove old iteration renders that no module's newest render and no current critique depends on. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. Checkpoints keep their own retention policy. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
+	parameters: Type.Object({
+		workspace: Type.String({ description: "Explicit workspace path." }),
+		dryRun: Type.Optional(
+			Type.Boolean({
+				description: "Report what would be removed without deleting anything. Defaults to true.",
+			}),
+		),
+		keepIterations: Type.Optional(
+			Type.Number({
+				description: "How many of the newest iterations to keep. Default 2, minimum 1.",
+			}),
+		),
+	}),
+	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+		const result = await blenderWorkspacePrune({
+			cwd: context?.cwd ?? process.cwd(),
+			workspace: params.workspace,
+			dryRun: params.dryRun,
+			keepIterations: params.keepIterations,
+		});
+		return {
+			content: [{ type: "text", text: result.note }],
+			details: result,
+		};
+	},
+};
+
 export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderWorkspaceInitTool,
+	blenderWorkspacePruneTool,
 	blenderExecutePythonTool,
 	blenderSessionContextTool,
 	blenderSceneInfoTool,
