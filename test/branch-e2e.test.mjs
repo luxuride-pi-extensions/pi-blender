@@ -528,6 +528,44 @@ test("a branch render and a background render resolve the same engine", { skip }
 		if (cycles) {
 			assert.equal(cycles.resolvedEngine, "CYCLES", "a requested engine must be used, not dropped into the probe");
 		}
+
+		const branchCycles = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "engine",
+			render: true,
+			renderEngine: "cycles",
+			timeoutSeconds: 300,
+		});
+		assert.equal(
+			branchCycles.resolvedEngine,
+			cycles?.resolvedEngine ?? "CYCLES",
+			"a module render must be able to request an engine too",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a failed render keeps the saved branch and names the stage that failed", { skip }, async () => {
+	// A render failure used to be indistinguishable from a failed run: the
+	// caller saw renderOutputPath null. The branch is saved before the render, so
+	// the build must survive and the reason must travel with it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "broken-render", ADD_CUBE);
+		const staged = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "broken-render",
+			render: true,
+			view: "NoSuchCamera",
+			timeoutSeconds: 300,
+		});
+		assert.equal(staged.exitCode, 0);
+		assert.equal(staged.renderOutputPath, null);
+		assert.match(String(staged.renderError), /Camera not found: NoSuchCamera/);
+		assert.ok(existsSync(staged.branchPath), "the geometry was saved before the render failed");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
@@ -789,6 +827,8 @@ bpy.ops.mesh.primitive_cube_add()
 bpy.context.object.name = "Mug"
 material = bpy.data.materials.new("Glaze")
 material.use_nodes = True
+# A zero-user material is dropped by the save, so the branch would not contain it.
+bpy.context.object.data.materials.append(material)
 `);
 		await module.blenderModuleRun({
 			cwd: ws.root,

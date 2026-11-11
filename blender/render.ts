@@ -85,7 +85,7 @@ function normalizeRenderConfig(options: RenderOptions): NormalizedRenderConfig {
  * walks this list. Same pattern as the studio template in workspace.ts, which
  * probes the enum for the same reason.
  */
-function mapBackgroundRenderEngine(engine: BlenderRenderEngine | null): string[] | undefined {
+export function mapBackgroundRenderEngine(engine: BlenderRenderEngine | null): string[] | undefined {
 	switch (engine) {
 		case "eevee":
 			return ["BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"];

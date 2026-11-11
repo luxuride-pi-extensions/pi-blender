@@ -204,6 +204,7 @@ export interface BranchRunOptions {
 	view?: string;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
+	renderEngine?: BlenderRenderEngine;
 	timeoutSeconds?: number;
 	signal?: AbortSignal;
 }

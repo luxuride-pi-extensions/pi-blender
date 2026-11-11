@@ -22,11 +22,13 @@
  * and model.blend is left holding whichever branch was applied first.
  */
 
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
+import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import type {
@@ -66,6 +68,7 @@ const BRANCH_FILE = "branch.blend";
 const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
 /** Extra budget a render may take beyond the script's own timeout. */
 const RENDER_TIMEOUT_MS = 360_000;
+const BRANCH_SAVED_MARKER = "branch-saved";
 
 /** The module's branch blend: its private copy of model.blend. */
 export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
@@ -370,6 +373,12 @@ state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest
 # from its own branch: the framing existed in memory and nowhere else.
 if exit_code == 0:
     bpy.ops.wm.save_mainfile()
+    # A process-level render failure (crash, OOM, timeout) produces no JSON at
+    # all, so the caller cannot tell "nothing was saved" from "the branch is on
+    # disk and only the picture failed" without a marker written before the risky
+    # stage.
+    with open(os.path.join(payload["runDir"], "branch-saved"), "w") as marker:
+        marker.write(module_name)
 
 # Framing deliberately does NOT happen again in the apply. This run's render was
 # taken on this branch, so the framing that reaches model.blend is the framing of
@@ -534,6 +543,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				branchPath,
 				workspacePath: manifest.workspacePath,
 				iterationPath: runDir,
+				runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
 				// The generated run script is executed as a string, not as a file
@@ -557,6 +567,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 							cameraName: requestedCameraName,
 							resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
 							samples: options.samples,
+							renderEngine: mapBackgroundRenderEngine(options.renderEngine ?? null),
 						}
 					: null,
 			},
@@ -564,10 +575,19 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 			timeoutMs: (options.timeoutSeconds ?? 300) * 1000 + (renderRequested ? RENDER_TIMEOUT_MS : 0),
 		});
 	} catch (error) {
-		// A headless launch that never produced JSON leaves the branch in an
-		// unknown state, so it is removed rather than left for an apply to find.
-		await rm(branchPath, { force: true }).catch(() => undefined);
+		// A launch that never produced JSON leaves the branch in an unknown state
+		// UNLESS the run script marked it saved before rendering. Then the build is
+		// real, and only the picture failed: keep it so the caller can apply it.
+		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
+		if (!branchSaved) {
+			await rm(branchPath, { force: true }).catch(() => undefined);
+		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		if (branchSaved) {
+			throw new Error(
+				`${(error as Error).message}\nThe branch was saved before the render failed and is intact at ${branchPath}.`,
+			);
+		}
 		throw error;
 	}
 
@@ -590,6 +610,11 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// is the module's own framed camera, which is what the run actually used.
 	const renderOutputPath = payload.render?.outputPath ?? null;
 	const renderError = payload.renderError ?? undefined;
+	if (renderRequested && !renderOutputPath) {
+		// The path is stable per module, so a failed render would otherwise leave
+		// the PREVIOUS iteration's picture where a critic expects this one.
+		await rm(join(moduleDir, RENDER_FILE), { force: true }).catch(() => undefined);
+	}
 	let viewLabel = options.view ?? "active-camera";
 	if (renderRequested && !requestedCameraName) {
 		viewLabel = payload.cameras[0]?.cameraName ?? "active-camera";
@@ -660,6 +685,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		applyObjects: payload.applyObjects,
 		ownedObjects: payload.ownedObjects,
 		renderOutputPath,
+		renderError,
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		stateDigest: payload.stateDigest,
