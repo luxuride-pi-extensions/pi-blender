@@ -32,9 +32,9 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_branch_run` | run a script against a branch copy without merging |
 | `blender_branch_apply` | merge a branch run's result into the workspace |
 | `blender_rank_assets` | rank a workspace's renders by critique score |
-| `blender_export_asset` | export an asset to glTF/GLB/FBX/OBJ |
+| `blender_export_asset` | export an asset to glTF/GLB/OBJ/STL |
 | `blender_bridge_status` | bridge alive/busy/pending, headless-run count |
-| `blender_focus_view` | frame the selected object in the live viewport |
+| `blender_focus_view` | frame a named object in the live viewport (window-only) |
 | `blender_window_layout` | read the live window/area layout and screenshot |
 | `blender_switch_workspace` | switch the live Blender window to another workspace |
 | `blender_import_asset` | import a model file into the workspace blend |
@@ -42,7 +42,7 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_get_python_api_docs` | look up a bpy symbol in the bundled API docs |
 | `blender_search_api_docs` | search the bundled bpy API docs |
 | `blender_search_manual_docs` | search the bundled Blender manual |
-| `blender_usage_guess` | suggest a tool sequence from a natural-language goal |
+| `blender_usage_guess` | guess what a saved blend is for (animation/rendering/shading/procedural/modelling scores) |
 | `blender_job_status` | poll a deferred render/montage/compare job |
 
 The `/blender` command engages manager mode over these tools; child agents
