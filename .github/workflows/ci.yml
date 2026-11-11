@@ -154,6 +154,7 @@ jobs:
       #   module-paths.test.mjs          7
       #   module-state.test.mjs          5
       #   tool-params.test.mjs           3
+      #   tool-surface.test.mjs          3
       #   windowless-tools.test.mjs      5
       #
       # Every other file fails at import on one hard error --
@@ -181,6 +182,7 @@ jobs:
             test/module-paths.test.mjs \
             test/module-state.test.mjs \
             test/tool-params.test.mjs \
+            test/tool-surface.test.mjs \
             test/windowless-tools.test.mjs
 
       # ----------------------------------------------------------------------

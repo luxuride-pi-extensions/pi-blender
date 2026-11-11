@@ -157,8 +157,10 @@ const BLENDER_MANAGER_ROSTER = new Set([
  * (line 30) — that line is what pi actually hands the manager, so a tool added
  * there and forgotten here blocks the manager from using its own kit. The
  * installed copy of the prompt keeps the frontmatter even though the injected
- * section strips it, so test/allowlists.mjs compares the two and fails loudly
- * rather than letting them drift.
+ * section strips it, so test/tool-surface.test.mjs compares the two in both
+ * directions and fails loudly rather than letting them drift. That test also
+ * asserts every registered Blender tool is reachable by some role, or is named
+ * in its user-session-only list.
  *
  * The previous list was `memory_*` and `scratchpad`, neither of which any
  * installed package provides, so the gate refused every tool the manager
@@ -216,6 +218,13 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_scene_info",
 	"blender_add_reference",
 	"blender_module_revert",
+	// The manager is the serialization point: workers stage with
+	// blender_branch_run, and the manager applies the batch once with
+	// blender_branch_apply after every staged run for the batch is in. A
+	// contested pair can only be refused while both branches are still staged,
+	// so applying per report would turn the check into last-one-wins.
+	"blender_branch_run",
+	"blender_branch_apply",
 	"blender_session_context",
 	"blender_bridge_status",
 	"blender_log_critique",
