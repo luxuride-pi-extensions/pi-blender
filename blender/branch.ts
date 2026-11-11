@@ -609,10 +609,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.branchRuns = pruneBranchRunHistory(
-				[...(current.branchRuns ?? []), record],
-				Math.max(current.latestIteration ?? iteration, iteration),
-			);
+			current.branchRuns = appendBranchRun(current, record);
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,
@@ -1022,7 +1019,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const staged = options.modules
 		.map((raw) => {
 			const name = normalizeModuleName(raw);
-			const record = [...branchRuns].reverse().find((run) => run.module === name && run.status === "staged");
+			const record = latestStagedBranch(branchRuns, name);
 			if (!record) {
 				throw new Error(
 					`No staged branch run for module "${name}". A module is applyable only after a branch run has staged it. Re-run the module to stage a fresh branch.`,
@@ -1182,31 +1179,59 @@ export function contestableStagedRuns(manifest: BlenderWorkspaceManifest): Blend
 	);
 }
 
+/** Append a finished run and apply the per-module retention window. */
+export function appendBranchRun(
+	current: Pick<BlenderWorkspaceManifest, "branchRuns">,
+	record: BlenderBranchRunRecord,
+): BlenderBranchRunRecord[] {
+	return pruneBranchRunHistory([...(current.branchRuns ?? []), record]);
+}
+
+/**
+ * The staged record an apply should use for a module.
+ *
+ * Newest by SEQUENCE, not by array order: a late finisher appends later with a
+ * lower sequence, and a superseded record must never be the one applied.
+ */
+export function latestStagedBranch(
+	runs: BlenderBranchRunRecord[],
+	moduleName: string,
+): BlenderBranchRunRecord | undefined {
+	return runs
+		.filter((run) => run.module === moduleName && run.status === "staged")
+		.sort((a, b) => b.sequence - a.sequence)[0];
+}
+
 /**
  * Keep the branch history that can still be used.
  *
  * A finish record costs a checkpoint path, a script path and a handful of name
  * arrays, and nothing used to remove it: a long multi-module build grew the
- * manifest without limit. The checkpoint retention window is the natural bound
- * because a record whose checkpoint is gone cannot be reverted to -- keep the
- * same window here. Active staged records are the exception: they still describe
- * pending work and are kept until a later run supersedes them.
+ * manifest without limit. The window is per MODULE and counted in records, not
+ * in global iterations: claims are globally unique, so a 40-module round
+ * advances the iteration clock by 40 and an iteration-keyed window would erase
+ * every module's history each round -- including the ownedObjects carry-forward
+ * and the digest a rebuild compares against.
+ *
+ * The newest staged record for a module is always inside the window, because it
+ * has that module's highest sequence; a staged record superseded by a later run
+ * is dropped normally.
  */
 export function pruneBranchRunHistory(
 	runs: BlenderBranchRunRecord[],
-	latestIteration: number,
 	keep = DEFAULT_CHECKPOINT_RETENTION,
 ): BlenderBranchRunRecord[] {
 	const window = Math.max(1, Math.trunc(keep));
-	const floor = latestIteration - window + 1;
-	const newest = new Map<string, number>();
-	for (const run of runs) newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
-	return runs.filter(
-		(run) => run.iteration >= floor || (run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence)),
-	);
-}
-
-/** Staged branch runs that may still contest, for a caller planning an apply. */
-export function stagedBranchRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
-	return contestableStagedRuns(manifest);
+	const byModule = new Map<string, BlenderBranchRunRecord[]>();
+	for (const run of runs) {
+		const list = byModule.get(run.module);
+		if (list) list.push(run);
+		else byModule.set(run.module, [run]);
+	}
+	const kept: BlenderBranchRunRecord[] = [];
+	for (const list of byModule.values()) {
+		list.sort((a, b) => b.sequence - a.sequence);
+		kept.push(...list.slice(0, window));
+	}
+	return kept;
 }

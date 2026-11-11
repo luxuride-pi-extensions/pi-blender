@@ -13,11 +13,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { loadTs } from "./paths.mjs";
 
-const { computeBranchConflicts, contestableStagedRuns, findRecordConflicts, pruneBranchRunHistory, recordOwnedDatablocks } = await loadTs(
+const { computeBranchConflicts, contestableStagedRuns, findRecordConflicts, appendBranchRun, latestStagedBranch, pruneBranchRunHistory, recordOwnedDatablocks } = await loadTs(
 	`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`,
 );
 
@@ -167,32 +168,82 @@ test("a failed later run does not retire a staged branch that still has work", (
 	assert.deepEqual(contestableStagedRuns(manifest([old], [failed])).map((run) => run.sequence), [1]);
 });
 
-test("branch history keeps the checkpoint window", () => {
+test("branch history keeps five records per module, not five globally", () => {
 	const runs = Array.from({ length: 9 }, (_, index) => ({ ...record("body"), iteration: index + 1, sequence: index + 1 }));
-	const kept = pruneBranchRunHistory(runs, 9);
-	assert.deepEqual(kept.map((run) => run.iteration), [5, 6, 7, 8, 9]);
+	const kept = pruneBranchRunHistory(runs);
+	assert.deepEqual(kept.sort((a, b) => a.iteration - b.iteration).map((run) => run.iteration), [5, 6, 7, 8, 9]);
 });
 
-test("a staged branch outside the window survives while it is the newest work", () => {
-	const staged = { ...record("body", { apply: ["Mug"] }), iteration: 1, sequence: 1 };
-	const later = { ...record("body"), iteration: 6, sequence: 6, status: "applied" };
-	assert.deepEqual(pruneBranchRunHistory([staged], 6).map((run) => run.iteration), [1], "its checkpoint is gone, but its work is still pending");
-	assert.deepEqual(pruneBranchRunHistory([staged, later], 6).map((run) => run.iteration), [6], "a later run retires it");
+test("a staged branch survives pruning while it is a module's newest work", () => {
+	const staged = { ...record("body", { apply: ["Mug"] }), iteration: 8, sequence: 8 };
+	const earlier = Array.from({ length: 6 }, (_, index) => ({ ...record("body"), iteration: index + 2, sequence: index + 2, status: "applied" }));
+	assert.deepEqual(
+		pruneBranchRunHistory([staged, ...earlier]).map((run) => run.sequence).sort((a, b) => a - b),
+		[4, 5, 6, 7, 8],
+		"the pending newest record is inside the window; the sixth-newest goes",
+	);
+	const superseded = { ...staged, sequence: 1, iteration: 1 };
+	assert.equal(pruneBranchRunHistory([superseded, ...earlier]).some((run) => run.sequence === 1), false);
+});
+
+test("a second round of a 40-module build still sees round one's ownership", () => {
+	// Sequences are globally unique and monotonic in production: one round of 40
+	// modules advances the clock by 40. An iteration-keyed window erased every
+	// module's previous record here, which killed the ownedObjects carry-forward.
+	let clock = 0;
+	let runs = [];
+	const modules = Array.from({ length: 40 }, (_, index) => `part-${index}`);
+	for (let round = 1; round <= 2; round += 1) {
+		for (const module of modules) {
+			clock += 1;
+			runs.push({
+				...record(module, { apply: [`${module}-object`] }),
+				ownedObjects: [`${module}-object`],
+				iteration: clock,
+				sequence: clock,
+				status: "applied",
+			});
+		}
+		runs = pruneBranchRunHistory(runs);
+	}
+	assert.equal(runs.length, modules.length * 2, "each module keeps both of its records");
+	const body = runs.filter((run) => run.module === "part-7" && run.ownedObjects?.includes("part-7-object"));
+	assert.equal(body.length, 2);
+	assert.ok(body.some((run) => run.sequence <= modules.length), "round two still has round one's ownership to carry");
+});
+
+test("an apply takes the newest staged record by sequence, not by append order", () => {
+	const newer = { ...record("body", { apply: ["New"] }), sequence: 9, iteration: 9 };
+	const older = { ...record("body", { apply: ["Old"] }), sequence: 4, iteration: 4 };
+	assert.equal(latestStagedBranch([newer, older], "body")?.sequence, 9);
+	assert.equal(latestStagedBranch([older, newer], "body")?.sequence, 9);
+	assert.equal(latestStagedBranch([{ ...older, status: "applied" }], "body"), undefined);
 });
 
 test("a long multi-module build does not grow the manifest without bound", () => {
-	// The cost that matters is the name arrays and paths on every record, and
-	// the history had no ceiling: 40 modules x 20 iterations is a realistic
-	// build. After each iteration the retained history must be the window only.
+	// 40 modules x 20 rounds with a global clock: the retained history must be
+	// five records per module, not five shaped by the iteration counter.
+	let clock = 0;
 	let runs = [];
 	const modules = Array.from({ length: 40 }, (_, index) => `part-${index}`);
-	for (let iteration = 1; iteration <= 20; iteration += 1) {
+	for (let round = 1; round <= 20; round += 1) {
 		for (const module of modules) {
-			runs.push({ ...record(module), iteration, sequence: iteration, status: "applied" });
+			clock += 1;
+			runs.push({ ...record(module), iteration: clock, sequence: clock, status: "applied" });
 		}
-		runs = pruneBranchRunHistory(runs, iteration);
+		runs = pruneBranchRunHistory(runs);
 	}
 	assert.equal(runs.length, modules.length * 5);
 	const bytes = Buffer.byteLength(JSON.stringify(runs), "utf8");
 	assert.ok(bytes < 300_000, `retained history is ${bytes} bytes; the manifest is a state file, not a log`);
+});
+
+test("the branch run path appends through the retention window", () => {
+	// The window is only useful if the run path uses it: a helper-only test stays
+	// green after the wiring is deleted.
+	const source = readFileSync(new URL("../blender/branch.ts", import.meta.url), "utf8");
+	assert.match(source, /current\.branchRuns = appendBranchRun\(current, record\)/);
+	const current = { branchRuns: Array.from({ length: 5 }, (_, index) => ({ ...record("body"), sequence: index + 1, iteration: index + 1 })) };
+	const appended = appendBranchRun(current, { ...record("body"), sequence: 6, iteration: 6 });
+	assert.deepEqual(appended.map((run) => run.sequence).sort((a, b) => a - b), [2, 3, 4, 5, 6]);
 });
