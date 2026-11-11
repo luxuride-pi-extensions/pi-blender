@@ -18,6 +18,8 @@ Workflow:
 8. Render and compare the result against the references after significant changes.
 9. When critiquing a create/edit iteration, include reference mismatch details in the `issues` the critic logs to `blender_log_critique`, and use its `viewAdequacy` judgment to record when the current render view is too weak for a fair reference comparison.
 
+Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
+
 Reference pairing — you cannot see images:
 - You have no image-reading tool, so you never compare a render to a reference yourself. You choose the pairing and hand it to a critic as text; the critic is the only one who can test it. This is an enforced limit, not a habit: the manager's image reads are blocked by a gate, so a `.png` opened with `read` is refused outright. The only route to what a reference shows is `blender-reference-describer`.
 - `blender_add_reference` returns the whole set of references in the workspace, so when the user adds a third image mid-build you can re-read the manifest rather than reconstructing which ones exist. Its `suggestedView` is your hypothesis, not a decision — a critic confirms or rejects it.

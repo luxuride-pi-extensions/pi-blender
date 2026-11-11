@@ -7,7 +7,7 @@ tool-by-tool usage reference.
 ## Layout
 
 ```
-index.ts            extension entry (24 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
+index.ts            extension entry (33 tools + /blender command + skills + prompt injection, launches Blender when /blender runs or a blender_* tool is used)
 launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge launch (on first blender_* use, + 15s liveness supervisor in the root session only)
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
@@ -149,7 +149,7 @@ For full details on boundaries, recoverability, and measurement pitfalls, see [d
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_window_layout`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (24 tools)
+- registers `blender_workspace_init`, `blender_execute_python`, `blender_read_only_python`, `blender_session_context`, `blender_window_layout`, `blender_switch_workspace`, `blender_focus_view`, `blender_scene_info`, `blender_object_detail`, `blender_geometry_probe`, `blender_image_probe`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_import_asset`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset`, `blender_get_python_api_docs`, `blender_search_api_docs`, `blender_search_manual_docs`, `blender_usage_guess`, `blender_job_status` (33 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point sun rig (key/fill/rim, all aimed at the origin), a

@@ -48,12 +48,14 @@ Rules:
    2. Opens `modules/<name>/render.png` (read tool / image) and inspects the look against the acceptance criteria. May call `blender_scene_info {categories: ["objects","uv","textures","paintSettings","armatures"]}` for facts.
    3. Returns: PASS or FAIL, concrete visual issues (framing/perspective problems called out as "view problem" vs "object problem"), suggested next brief edits. No source code.
    4. The critic (not the manager) logs the verdict with `blender_log_critique`, so the score, view-adequacy judgment and next action land in `critique.log` next to the render they describe.
+Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
+
 4. Manager decision:
    - PASS → mark module done; next module or present.
    - FAIL with "object problem" → send the worker a follow-up brief with the critic's issues (worker iterates on `script.py`, re-runs).
    - FAIL with "view problem" → do NOT re-render yourself. Spawn `blender-camera-aligner` with the view, the render, and (if any) the reference; it nests its own critics and returns a framing. Then re-spawn the critic against the new view.
    - Wrong direction → "view problem" or a bad approach → `blender_module_revert {workspace, moduleName, iteration?}`, then new brief.
-   - Max 3 worker iterations per module per instruction; then escalate to the user with the report + critique.
+   - Max 5 worker iterations per module per instruction; then escalate to the user with the report + critique.
 
 ## Routing: which agent, for which question
 

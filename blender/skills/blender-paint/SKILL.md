@@ -24,6 +24,8 @@ Workflow:
    - **Vertex paint**: write `mesh.color_attributes` (create with `mesh.color_attributes.new(name, type='FLOAT_COLOR', domain='POINT')`), setting `layer.data[i].color`.
    - **Weight paint**: use `obj.vertex_groups` — `group.add([index], weight, 'REPLACE'|'ADD'|'MULTIPLY')`; inspect existing group names from `blender_scene_info` `uv`/`paintSettings` first.
    - **Bones / rig**: in rest space edit `armature.bones[i].head`/`.tail`; in pose space edit `pose_bones[i].location/.rotation_quaternion` or `pose_bones[i].matrix`. Respect `useDeform` — only deform bones should receive weights.
+Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
+
 6. The worker is responsible for setting the live viewport into the paint context with `blender_set_mode`:
    - texture paint → `TEXTURE_PAINT`, vertex paint → `VERTEX_PAINT`, weight paint → `WEIGHT_PAINT`, face paint → `FACE_PAINT`, sculpt → `SCULPT`, UV work → `UV` (enters edit mode with the viewport UV editor overlay on), pose → `POSE`, rig editing → `EDIT_ARMATURE`.
    - Pass `objectName` when the target is not the active object. Paint modes require a MESH; `POSE`/`EDIT_ARMATURE` require an ARMATURE — the tool returns an error otherwise.
