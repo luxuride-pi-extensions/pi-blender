@@ -508,8 +508,8 @@ Start pi in any project dir. The extension:
   all; pass `objects` to keep the studio rig out of a dataset.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
-  `modules/<name>/render.png` (with `viewportShading`/`resolution`/`samples`
-  parity with `blender_render`), and a manifest `moduleRuns` history so revert
+  `modules/<name>/render.png` (with `resolution`/`samples` parity with
+  `blender_render`), and a manifest `moduleRuns` history so revert
   restores an exact recorded run. A module render with no explicit
   `resolution` defaults to **1200x900** (not the blend's own setting, which is
   1920x1080) — these renders are the critic's image budget, and base64

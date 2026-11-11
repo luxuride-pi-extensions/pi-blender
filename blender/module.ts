@@ -316,8 +316,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 			cameraName,
 			outputPath: renderPath,
 			viewSource: "camera",
-			// A live module render is the material-preview the tool promises;
-			// the headless path cannot honour viewport shading and does not accept it.
+			// A live module render is the material-preview the tool promises.
 			viewportShading: "material-preview",
 			resolution: options.resolution ?? DEFAULT_MODULE_RENDER_RESOLUTION,
 			samples: options.samples,

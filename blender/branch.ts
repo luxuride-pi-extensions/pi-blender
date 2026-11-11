@@ -30,6 +30,7 @@ import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { collectModuleOwnership } from "./generations.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
+import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "./types.js";
 import type {
 	BlenderBranchRunRecord,
 	BlenderModuleRunRecord,
@@ -507,7 +508,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				ownedMaterials: priorOwnership.materials,
 			},
 			signal: options.signal,
-			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+			timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 		});
 	} catch (error) {
 		// A headless launch that never produced JSON leaves the branch in an
@@ -1074,7 +1075,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 					removeObjects: record.removedObjects,
 				},
 				signal: options.signal,
-				timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+				timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 			});
 		} finally {
 			await release();

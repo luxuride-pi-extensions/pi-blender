@@ -131,9 +131,11 @@ test("module_run offers only options both paths can honour", () => {
 
 	const types = readFileSync(new URL("../blender/types.ts", import.meta.url), "utf8");
 	const options = types.slice(types.indexOf("export interface ModuleRunOptions"), types.indexOf("export interface ModuleRunResult"));
+	assert.ok(options.includes("export interface ModuleRunOptions"), "the options slice is not empty");
 	assert.doesNotMatch(options, /viewportShading|renderEngine/);
+	assert.match(types, /DEFAULT_MODULE_TIMEOUT_SECONDS = 300;/);
 
 	const module = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
 	assert.match(module, /viewportShading: "material-preview"/, "the live module render states the one shading it uses");
-	assert.match(module, /DEFAULT_MODULE_TIMEOUT_SECONDS/, "the live path shares the schema timeout default");
+	assert.match(module, /options\.timeoutSeconds \?\? DEFAULT_MODULE_TIMEOUT_SECONDS/, "the live path shares the schema timeout default");
 });
