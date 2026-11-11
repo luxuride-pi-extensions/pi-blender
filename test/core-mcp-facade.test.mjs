@@ -33,6 +33,7 @@ const {
 
 const EXPECTED_TOOL_NAMES = [
 	"blender_workspace_init",
+	"blender_workspace_prune",
 	"blender_execute_python",
 	"blender_session_context",
 	"blender_scene_info",
@@ -102,7 +103,7 @@ test("core files import NO pi symbols or pi-manager-core", () => {
 // pi extension registers, and a silent drop here would make a tool vanish from
 // the MCP façade while still working in pi.
 test("core capability layer exports every Blender tool with valid shapes", () => {
-	assert.equal(BLENDER_TOOLS.length, 33);
+	assert.equal(BLENDER_TOOLS.length, 34);
 	assert.deepEqual(BLENDER_TOOL_NAMES, EXPECTED_TOOL_NAMES);
 
 	for (const tool of BLENDER_TOOLS) {

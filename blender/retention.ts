@@ -10,8 +10,8 @@
  * a critic may still be reading. Pruning is an explicit, dry-run-first call.
  */
 
-import { readdir, rm, rmdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readdir, rm, rmdir, stat } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
 import { parseCritiqueLog } from "./ranking.js";
 import type { BlenderWorkspaceManifest, WorkspacePruneResult } from "./types.js";
 import { getWorkspaceCritiqueLogPath, loadWorkspaceManifest } from "./workspace.js";
@@ -26,6 +26,12 @@ interface FileEntry {
 	iteration: number;
 }
 
+/** True when `path` resolves inside `root`; a symlink out of the tree is not. */
+function isInside(root: string, path: string): boolean {
+	const rel = relative(root, path);
+	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
 async function walkFiles(dir: string): Promise<string[]> {
 	let entries: string[];
 	try {
@@ -36,9 +42,12 @@ async function walkFiles(dir: string): Promise<string[]> {
 	const files: string[] = [];
 	for (const entry of entries) {
 		const path = join(dir, entry);
-		const info = await stat(path).catch(() => undefined);
+		// lstat, not stat: a link to a copied reference or to the user's home
+		// must be reported as a link, never followed and then deleted.
+		const info = await lstat(path).catch(() => undefined);
 		if (!info) continue;
-		if (info.isDirectory()) files.push(...(await walkFiles(path)));
+		if (info.isSymbolicLink()) files.push(path);
+		else if (info.isDirectory()) files.push(...(await walkFiles(path)));
 		else files.push(path);
 	}
 	return files;
@@ -71,7 +80,14 @@ function protectedRenders(manifest: BlenderWorkspaceManifest, latestCritiqueIter
 		const matching = manifest.renderOutputs
 			.filter((output) => output.module === moduleName && output.iteration === iteration)
 			.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-		const output = matching[0];
+		const output =
+			matching[0] ??
+			// blender_render writes renders with no module attached; if that was
+			// the picture a critique judged, fall back to the newest render of
+			// that iteration rather than leave it unprotected.
+			manifest.renderOutputs
+				.filter((candidate) => candidate.iteration === iteration)
+				.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 		if (output) kept.set(output.path, `render judged by ${moduleName}'s latest critique`);
 	}
 	return kept;
@@ -92,7 +108,8 @@ export async function blenderWorkspacePrune(options: {
 		throw new Error(`keepIterations must be a whole number of at least 1; got ${keepIterations}. Keeping zero would delete the render the current critique was judged from.`);
 	}
 	const dryRun = options.dryRun ?? true;
-	const cutoff = manifest.latestIteration - keepIterations;
+	const latestIteration = Number.isFinite(manifest.latestIteration) ? manifest.latestIteration : 0;
+	const cutoff = latestIteration - keepIterations;
 
 	let latestCritiqueIteration = new Map<string, number>();
 	try {
@@ -110,6 +127,7 @@ export async function blenderWorkspacePrune(options: {
 	for (const output of manifest.renderOutputs) {
 		if (output.iteration > cutoff) continue;
 		if (kept.has(output.path)) continue;
+		if (!isInside(manifest.workspacePath, output.path)) continue;
 		const info = await stat(output.path).catch(() => undefined);
 		if (!info?.isFile()) continue;
 		seen.add(output.path);
@@ -120,7 +138,7 @@ export async function blenderWorkspacePrune(options: {
 	for (let iteration = 0; iteration <= cutoff; iteration += 1) {
 		const rendersDir = join(manifest.workspacePath, `iteration_${String(iteration).padStart(2, "0")}`, "renders");
 		for (const path of await walkFiles(rendersDir)) {
-			if (seen.has(path) || kept.has(path)) continue;
+			if (seen.has(path) || kept.has(path) || !isInside(manifest.workspacePath, path)) continue;
 			const info = await stat(path).catch(() => undefined);
 			if (!info?.isFile()) continue;
 			seen.add(path);
@@ -144,6 +162,7 @@ export async function blenderWorkspacePrune(options: {
 	for (const entry of unlisted) count("unlisted", entry.bytes);
 
 	const totalBytes = [...candidates, ...unlisted].reduce((total, entry) => total + entry.bytes, 0);
+	if (options.signal?.aborted) throw new Error("Pruning was cancelled before anything was removed.");
 	if (!dryRun) {
 		for (const entry of [...candidates, ...unlisted]) {
 			await rm(entry.path, { force: true });

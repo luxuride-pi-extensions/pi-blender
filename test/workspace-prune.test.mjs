@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -103,4 +103,49 @@ test("refuses a keep count that would delete the current critique's render", asy
     () => blenderWorkspacePrune({ cwd: root, workspace: workspacePath, keepIterations: 0 }),
     /at least 1/,
   );
+});
+
+test("never follows a link out of the workspace, and never deletes one", async () => {
+  const { workspacePath, manifestPath } = makeWorkspace("links");
+  const reference = addFile(workspacePath, "references/ref.png", "reference");
+  const old = addFile(workspacePath, "iteration_01/renders/old.png");
+  symlinkSync(reference, join(workspacePath, "iteration_01/renders/link.png"));
+  const outside = join(root, "outside.png");
+  writeFileSync(outside, "outside");
+  writeManifest(workspacePath, manifestPath, 4, [
+    { path: old, view: "front", iteration: 1, createdAt: "2026-01-01T00:00:00.000Z", module: "a" },
+    { path: outside, view: "front", iteration: 2, createdAt: "2026-01-02T00:00:00.000Z", module: "a" },
+  ]);
+
+  await blenderWorkspacePrune({ cwd: root, workspace: workspacePath, dryRun: false });
+
+  assert.equal(readFileSync(reference, "utf8"), "reference");
+  assert.equal(readFileSync(outside, "utf8"), "outside");
+  assert.throws(() => readFileSync(old, "utf8"));
+});
+
+test("protects the render a critique judged even when it has no module", async () => {
+  const { workspacePath, manifestPath } = makeWorkspace("moduleless");
+  const judged = addFile(workspacePath, "iteration_02/renders/view.png");
+  const older = addFile(workspacePath, "iteration_01/renders/view.png");
+  writeManifest(workspacePath, manifestPath, 4, [
+    { path: judged, view: "front", iteration: 2, createdAt: "2026-01-02T00:00:00.000Z" },
+    { path: older, view: "front", iteration: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+  ]);
+  writeFileSync(
+    join(workspacePath, "critique.log"),
+    [
+      "[2026-01-02T00:00:00.000Z] iteration_02 module=a budget 1/5",
+      "Score: 8/12",
+      "View adequacy: 2/2",
+      "Issues:",
+      "- none",
+      "Next action: present",
+      "Decision: continue iterating",
+      "",
+    ].join("\n"),
+  );
+
+  const dry = await blenderWorkspacePrune({ cwd: root, workspace: workspacePath });
+  assert.ok(dry.kept.some((entry) => entry.path === judged), "a module-less judged render is still evidence");
 });
