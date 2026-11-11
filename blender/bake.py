@@ -97,7 +97,7 @@ def bake_normal(
     if samples < 1 or samples > 4096:
         raise ValueError(f"samples {samples} is outside 1..4096")
 
-    previously_selected = [obj for obj in bpy.context.selected_objects]
+    previously_selected = list(bpy.context.selected_objects)
     previous_active = bpy.context.view_layer.objects.active
     output_path = os.path.abspath(output_path)
     try:
@@ -379,6 +379,11 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
     }
     selected = list(bpy.context.selected_objects)
     active = bpy.context.view_layer.objects.active
+    previous_ao_distance = None
+    ao_distance = None
+    if scene.world is not None:
+        previous_ao_distance = float(scene.world.light_settings.distance)
+        ao_distance = 0.1 * max(target.dimensions)
     results = []
     nodes = {}
     switched = previous_engine != "CYCLES"
@@ -421,6 +426,8 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
                 elif channel == "normal":
                     bpy.ops.object.bake(type="NORMAL")
                 elif channel == "ao":
+                    if scene.world is not None and ao_distance:
+                        scene.world.light_settings.distance = ao_distance
                     bpy.ops.object.bake(type="AO")
                 else:
                     bsdf = _principled(material)
@@ -449,7 +456,7 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
                 "imageName": image.name,
                 "resolution": resolution,
                 "colorSpace": image.colorspace_settings.name,
-                "linked": True,
+                "linked": image.users > 0,
                 "elapsedSeconds": elapsed,
             })
         _attach_baked(material, nodes)
@@ -467,6 +474,8 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         for obj in selected:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = active
+        if previous_ao_distance is not None and scene.world is not None:
+            scene.world.light_settings.distance = previous_ao_distance
         restored = scene.render.engine == previous_engine
 
     return {
@@ -478,5 +487,6 @@ def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, o
         "engineSwitched": switched,
         "engineRestored": restored,
         "estimatedSeconds": round(estimate, 1),
+        "aoDistance": round(ao_distance, 6) if ao_distance else None,
         "channels": results,
     }

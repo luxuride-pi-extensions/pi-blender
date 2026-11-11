@@ -24,7 +24,7 @@ import re
 # Provided by Blender's own runtime, not by anything installed here.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
-from shading import material_summary
+from shading import SAFE_GLTF_NODES, material_summary, reachable_nodes
 
 # Blender's operator name for each supported format, and its extension.
 EXPORT_FORMATS = {
@@ -80,33 +80,54 @@ def _read_gltf_json(path):
     import struct
 
     if path.lower().endswith(".glb"):
-        with open(path, "rb") as handle:
-            magic, version, _length = struct.unpack("<III", handle.read(12))
+        try:
+            handle = open(path, "rb")
+        except OSError as error:
+            raise RuntimeError(f"the exported glb could not be read: {error}") from error
+        with handle:
+            header = handle.read(12)
+            try:
+                magic, version, _length = struct.unpack("<III", header)
+            except struct.error as error:
+                raise RuntimeError(f"the exporter wrote a truncated glb header: {error}") from error
             if magic != 0x46546C67 or version != 2:
                 raise RuntimeError("the exporter wrote a file that is not a glTF 2.0 binary")
             while True:
                 header = handle.read(8)
                 if len(header) < 8:
                     break
-                chunk_length, chunk_type = struct.unpack("<II", header)
+                try:
+                    chunk_length, chunk_type = struct.unpack("<II", header)
+                except struct.error as error:
+                    raise RuntimeError(f"the glb chunk header is truncated: {error}") from error
                 payload = handle.read(chunk_length)
                 if chunk_type == 0x4E4F534A:
-                    return json.loads(payload.decode("utf-8"))
+                    try:
+                        return json.loads(payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        raise RuntimeError(f"the glb JSON chunk is unreadable: {error}") from error
         raise RuntimeError("the glb has no JSON chunk")
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except OSError as error:
+        raise RuntimeError(f"the exported glTF could not be read: {error}") from error
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"the exported glTF is not valid JSON: {error}") from error
 
 
 def _verify_textures(fmt, export_path, materials):
     """A GLB that silently drops its images must fail the tool, not the user."""
+    # Only textures the glTF exporter actually carries count here. A texture
+    # behind Bump or a colour ramp is reported as procedural instead of being
+    # demanded in the file, because the exporter cannot produce it.
     image_nodes = [
         node
         for material in materials
-        if material.use_nodes and material.node_tree is not None
-        for node in material.node_tree.nodes
+        for node in reachable_nodes(material, allowed=SAFE_GLTF_NODES)
         if node.type == "TEX_IMAGE" and node.image is not None
     ]
-    uses_images = any(any(output.is_linked for output in node.outputs) for node in image_nodes)
+    uses_images = bool(image_nodes)
     if fmt not in {"glb", "gltf"}:
         return {"images": 0, "textures": 0, "verified": None}
     if os.path.getsize(export_path) < 12:
@@ -116,9 +137,10 @@ def _verify_textures(fmt, export_path, materials):
     textures = document.get("textures") or []
     materials_out = document.get("materials") or []
     if uses_images and not images:
+        names = sorted({material.name for material in materials})
         raise RuntimeError(
-            "the exported glTF contains no images although the material samples an "
-            "image; the texture was dropped in export and the asset would arrive flat"
+            f"the exported glTF contains no images although {', '.join(names)} sample "
+            "an image; the texture was dropped in export and the asset would arrive flat"
         )
     if uses_images and not textures:
         raise RuntimeError("the exported glTF has images but no textures referencing them")
@@ -187,18 +209,18 @@ def handle_export(request, open_blend):
         # Sanitised because the name usually comes from a prompt, and a prompt
         # is not obliged to avoid slashes.
         base = re.sub(r"[^A-Za-z0-9._-]", "_", str(request["name"]))
-    export_path = os.path.join(output_dir, "{}.{}".format(base, EXPORT_FORMATS[fmt][1]))
+    export_path = os.path.join(output_dir, f"{base}.{EXPORT_FORMATS[fmt][1]}")
 
     # Selection is an explicit list or "everything", never inferred: exporting
     # the studio rig alongside the asset is the commonest way a dataset ends up
     # full of default cameras, and it has to be asked for to happen.
     selection = request.get("objects")
     selection_given = selection is not None
-    previously_selected = set(obj.name for obj in bpy.context.selected_objects)
+    previously_selected = {obj.name for obj in bpy.context.selected_objects}
     try:
         if selection_given:
             wanted = {str(name) for name in selection}
-            missing = wanted - set(obj.name for obj in bpy.data.objects)
+            missing = wanted - {obj.name for obj in bpy.data.objects}
             if missing:
                 raise RuntimeError(
                     "Export asked for objects that are not in this blend: {}.".format(
@@ -212,10 +234,10 @@ def handle_export(request, open_blend):
             _run_export(fmt, export_path, selection_given, bool(request.get("animations", False)))
         except Exception as error:
             raise RuntimeError(
-                "Blender's {} exporter failed: {}. This build may not ship that "
-                "exporter; check whether the operator exists before relying on "
-                "this format.".format(fmt, error)
-            )
+                f"Blender's {fmt} exporter failed: {error}. This build may not ship "
+                "that exporter; check whether the operator exists before relying on "
+                "this format."
+            ) from error
     finally:
         # Restored on both paths. An export that leaves every object selected
         # changes what the NEXT call in the same session selects, which is the
@@ -225,8 +247,8 @@ def handle_export(request, open_blend):
 
     if not os.path.exists(export_path):
         raise RuntimeError(
-            "Blender reported {} exported but no file is at {}. The exporter "
-            "returned successfully and wrote nothing.".format(fmt, export_path)
+            f"Blender reported {fmt} exported but no file is at {export_path}. The "
+            "exporter returned successfully and wrote nothing."
         )
 
     exported_names = None if not selection_given else {str(name) for name in selection}

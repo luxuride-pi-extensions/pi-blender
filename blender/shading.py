@@ -293,9 +293,30 @@ def _digest(nodes, links):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def reachable_nodes(material, allowed=None):
+    """Nodes feeding the surface output, optionally through allowed types only."""
+    if not material.use_nodes or material.node_tree is None:
+        return []
+    tree = material.node_tree
+    outputs = [node for node in tree.nodes if node.type == "OUTPUT_MATERIAL"]
+    seen = set()
+    queue = list(outputs)
+    while queue:
+        node = queue.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        if allowed is not None and node.type not in allowed:
+            continue
+        for socket in node.inputs:
+            for link in socket.links:
+                queue.append(link.from_node)
+    return [node for node in tree.nodes if node in seen]
+
+
 def material_summary(material):
     """Describe what a material's graph is made of."""
-    nodes = material.node_tree.nodes if material.use_nodes and material.node_tree else []
+    nodes = reachable_nodes(material)
     types = [node.type for node in nodes]
     procedural = any(node_type not in SAFE_GLTF_NODES for node_type in types)
     images = sorted(node.image.name for node in nodes if node.type == "TEX_IMAGE" and node.image is not None)

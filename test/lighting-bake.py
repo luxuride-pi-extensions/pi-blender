@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "blender"))
 from bake import bake_textures  # noqa: E402
 from export_asset import handle_export  # noqa: E402
 from lighting import STUDIO_COLLECTION, apply_studio_rig  # noqa: E402
+from shading import material_summary  # noqa: E402
 
 checks = {}
 
@@ -52,6 +53,11 @@ user_light = bpy.data.objects.new("UserLamp", user_light_data)
 bpy.context.scene.collection.objects.link(user_light)
 
 first = apply_studio_rig("studio")
+studio = bpy.data.collections[STUDIO_COLLECTION]
+for name in ("StudioKey", "StudioFill", "StudioRim"):
+    data = bpy.data.lights.new(name, "SUN")
+    lamp = bpy.data.objects.new(name, data)
+    studio.objects.link(lamp)
 second = apply_studio_rig("studio")
 scene = bpy.context.scene
 rig_objects = [obj for obj in bpy.data.collections[STUDIO_COLLECTION].objects if obj.get("pi_studio_rig")]
@@ -111,6 +117,8 @@ samples = list(base_image.pixels)[::4]
 mean = sum(samples) / len(samples)
 stddev = math.sqrt(sum((value - mean) ** 2 for value in samples) / len(samples))
 checks["base colour bake is non-uniform"] = stddev > 0.02
+checks["baked material is no longer procedural"] = material_summary(material)["procedural"] is False
+checks["ao ray distance follows the subject"] = (baked.get("aoDistance") or 0) > 0
 checks["material receives the baked image node"] = material.node_tree.nodes.get("Baked_base_color") is not None
 checks["bake switched to Cycles and restored the engine"] = baked["engineSwitched"] and baked["engineRestored"]
 

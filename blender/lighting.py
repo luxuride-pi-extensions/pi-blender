@@ -47,6 +47,10 @@ RIGS = {
 
 
 def _neutral_world(scene, strength):
+    previous = {
+        "replacedEnvironment": False,
+        "previousStrength": None,
+    }
     world = scene.world
     if world is None:
         world = bpy.data.worlds.new("PI_StudioWorld")
@@ -61,11 +65,16 @@ def _neutral_world(scene, strength):
             output = world.node_tree.nodes.new("ShaderNodeOutputWorld")
             output.name = "World Output"
         world.node_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+    previous["replacedEnvironment"] = bool(background.inputs["Color"].links)
+    try:
+        previous["previousStrength"] = float(background.inputs["Strength"].default_value)
+    except (TypeError, ValueError):
+        previous["previousStrength"] = None
     for link in list(background.inputs["Color"].links):
         world.node_tree.links.remove(link)
     background.inputs["Color"].default_value = (0.05, 0.05, 0.05, 1.0)
     background.inputs["Strength"].default_value = float(strength)
-    return world
+    return world, previous
 
 
 def _aim(obj, target=(0.0, 0.0, 0.0)):
@@ -85,7 +94,7 @@ def _clear_rig(collection):
         if obj.get(RIG_PROPERTY) or obj.name in LEGACY_RIG_NAMES:
             data = obj.data
             bpy.data.objects.remove(obj, do_unlink=True)
-            if data is not None and data.users == 0:
+            if data is not None and data.users == 0 and isinstance(data, bpy.types.Light):
                 bpy.data.lights.remove(data)
 
 
@@ -112,7 +121,7 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
     _clear_rig(collection)
 
     strength = preset["world"] if world_strength is None else float(world_strength)
-    _neutral_world(scene, strength)
+    _, worldChange = _neutral_world(scene, strength)
     scale = _subject_scale(scene)
     for spec in preset["lights"]:
         name = f"PI_{kind}_{spec['role']}"
@@ -144,4 +153,5 @@ def apply_studio_rig(kind="studio", film_transparent=False, world_strength=None)
         "viewTransform": scene.view_settings.view_transform,
         "exposure": float(scene.view_settings.exposure),
         "subjectScale": round(scale, 4),
+        "world": worldChange,
     }
