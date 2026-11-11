@@ -29,7 +29,7 @@ export async function blenderMontage(options: MontageOptions): Promise<MontageRe
 	if (options.async) {
 		return await dispatchDeferredJob(
 			"montage",
-			() => executeMontage({ ...options, async: false }),
+			(signal) => executeMontage({ ...options, async: false, signal }),
 			{
 				workspace: options.workspace,
 				moduleName: options.moduleName,

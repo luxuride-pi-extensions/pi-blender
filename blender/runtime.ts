@@ -48,7 +48,7 @@ export {
 	blenderSearchManualDocs,
 } from "./doc-grounding.js";
 export { blenderSwitchWorkspace, blenderFocusView } from "./viewport.js";
-export { blenderJobStatus, getJob, listJobs, listInFlightJobs } from "./jobs.js";
+export { blenderJobStatus, cancelJob, getJob, listJobs, listInFlightJobs } from "./jobs.js";
 export type {
 	BlenderApiDocResult,
 	BlenderDocParam,
