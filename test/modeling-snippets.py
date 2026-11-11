@@ -75,6 +75,8 @@ bm.to_mesh(cube.data)
 bm.free()
 checks["recalc_normals_point_outward"] = outward
 
-print(json.dumps({"ok": all(checks.values()), "checks": checks}))
-if not all(checks.values()):
+all_ok = all(checks.values())
+print(json.dumps({"ok": all_ok, "checks": checks}))
+if not all_ok:
     raise SystemExit(1)
+print("PASS: the documented modeling snippets run and change the mesh")

@@ -35,6 +35,7 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
                             provider check, Blender resolution report
                             (`--check` is read-only and exits 1 on any problem)
 docs/SAFETY.md              read-only guarantees, guard boundaries, recoverability model, and measurement traps
+docs/SCULPT.md              the normal-map bake
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server)
 ```
