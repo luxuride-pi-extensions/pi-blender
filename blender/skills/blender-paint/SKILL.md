@@ -33,7 +33,7 @@ Loop rules (shared — keep byte-identical in every skill that runs the loop): r
 7. Spawn a fresh `blender-critic`. It renders with `blender_render` (live, material-preview) to verify: painted textures/vertex colors should be visible on the model; for UV layout, render is optional but for weight paint a quick render or `blender_scene_info` re-check of vertex groups is enough. It then reports and logs its verdict, and you decide whether to stop or issue a follow-up brief (max 5 iterations, exactly like the blender-edit skill): score accuracy/geometry/materials/completeness/quality 0-2 each plus view adequacy. Remember the critic's one-image budget: it gets ONE render and at most ONE reference, so a paint pass that needs several angles costs several fresh critics, and each of their critiques spends one of the same five per-module slots.
 
 Rules:
-- Do not attempt to simulate interactive brush strokes in bpy; only write data.
+- Do not simulate interactive brush strokes with `bpy.ops.sculpt.brush_stroke`. Sculpt strokes are **data**: use the deterministic helpers in `blender/sculpt.py` (`docs/SCULPT.md`), and add vertices with `blender/sculpt_topology.py` before deforming a primitive.
 - Always create or verify the paint target data (image, UV layer, color attribute, vertex group, bone) in the same script run before writing into it.
 - Image pixel writes use straight RGBA floats in [0,1]; remember `image.update()` after bulk pixel assignment before saving.
 - After UV or texture edits that changed material images, save the image out to the workspace (`image.filepath_raw` under `$workspace` + `image.save()` or `image.save_as()`) when the user needs the file, and note the path in the result.
