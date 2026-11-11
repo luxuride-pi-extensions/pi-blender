@@ -12,6 +12,7 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | Tool | What it does |
 |---|---|
 | `blender_workspace_init` | create a workspace blend (`template: "studio"` rig by default) |
+| `blender_workspace_prune` | report/remove old iteration renders; dry run by default, references never deleted |
 | `blender_execute_python` | run bpy Python in live Blender, optionally saving |
 | `blender_read_only_python` | inline read-only Python that cannot touch the file |
 | `blender_session_context` | current workspace, mode, selection, last render |

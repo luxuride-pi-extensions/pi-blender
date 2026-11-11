@@ -149,7 +149,7 @@ For full details on boundaries, recoverability, and measurement pitfalls, see [d
 
 Start pi in any project dir. The extension:
 
-- registers `blender_workspace_init`, `blender_execute_python`, `blender_session_context`, `blender_window_layout`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset` (24 tools)
+- registers `blender_workspace_init`, `blender_workspace_prune`, `blender_execute_python`, `blender_session_context`, `blender_window_layout`, `blender_scene_info`, `blender_geometry_probe`, `blender_image_probe`, `blender_read_only_python`, `blender_montage`, `blender_compare`, `blender_add_reference`, `blender_save_view`, `blender_render`, `blender_set_mode`, `blender_log_critique`, `blender_iteration_state`, `blender_record_iteration_fact`, `blender_module_run`, `blender_module_revert`, `blender_bridge_status`, `blender_branch_run`, `blender_branch_apply`, `blender_rank_assets`, `blender_export_asset`, `blender_workspace_prune` (34 tools)
 - `blender_workspace_init` defaults to `template: "studio"`, which starts from
   an empty file (`wm.read_homefile(use_empty=True)`) and adds a `StudioCamera`,
   a three-point sun rig (key/fill/rim, all aimed at the origin), a
@@ -506,6 +506,13 @@ Start pi in any project dir. The extension:
   ranking over a batch can say "best of these fifty". `blender_export_asset`
   writes `glb`/`gltf`/`obj`/`stl`, which is what makes an asset leave Blender at
   all; pass `objects` to keep the studio rig out of a dataset.
+  Renders and references are never pruned by a run. `blender_workspace_prune`
+  reports or removes only renders in iterations at or below
+  `latestIteration - keepIterations` (default 2), always keeps each module's
+  newest render and the render its latest critique was judged from, reports
+  per-module byte counts, and never deletes copied references. It is a dry run
+  unless `dryRun: false` is passed; run checkpoints keep their own
+  `DEFAULT_CHECKPOINT_RETENTION = 5` history.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
   `modules/<name>/render.png` (with `resolution`/`samples` parity with
