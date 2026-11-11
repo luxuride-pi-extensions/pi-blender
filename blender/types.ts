@@ -1185,6 +1185,9 @@ export interface AssetExportResult {
 	meshCount: number;
 	objects?: string[];
 	proceduralMaterials?: string[];
+	images?: number;
+	textures?: number;
+	texturesVerified?: boolean | null;
 	warnings?: string[];
 }
 

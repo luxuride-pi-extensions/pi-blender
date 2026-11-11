@@ -56,6 +56,7 @@ def _run_export(fmt, export_path, selection_given, animations):
             # model whose training geometry differs from its rendered geometry.
             export_apply=True,
             export_animations=animations,
+            export_image_format="AUTO",
         )
 
     if fmt == "obj":
@@ -72,6 +73,57 @@ def _run_export(fmt, export_path, selection_given, animations):
         export_selected_objects=selection_given,
         apply_modifiers=True,
     )
+
+
+def _read_gltf_json(path):
+    import json
+    import struct
+
+    if path.lower().endswith(".glb"):
+        with open(path, "rb") as handle:
+            magic, version, _length = struct.unpack("<III", handle.read(12))
+            if magic != 0x46546C67 or version != 2:
+                raise RuntimeError("the exporter wrote a file that is not a glTF 2.0 binary")
+            while True:
+                header = handle.read(8)
+                if len(header) < 8:
+                    break
+                chunk_length, chunk_type = struct.unpack("<II", header)
+                payload = handle.read(chunk_length)
+                if chunk_type == 0x4E4F534A:
+                    return json.loads(payload.decode("utf-8"))
+        raise RuntimeError("the glb has no JSON chunk")
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _verify_textures(fmt, export_path, materials):
+    """A GLB that silently drops its images must fail the tool, not the user."""
+    uses_images = any(
+        node.type == "TEX_IMAGE" and node.image is not None
+        for material in materials
+        if material.use_nodes and material.node_tree is not None
+        for node in material.node_tree.nodes
+    )
+    if fmt not in {"glb", "gltf"}:
+        return {"images": 0, "textures": 0, "verified": None}
+    document = _read_gltf_json(export_path)
+    images = document.get("images") or []
+    textures = document.get("textures") or []
+    if uses_images and not images:
+        raise RuntimeError(
+            "the exported glTF contains no images although the material samples an "
+            "image; the texture was dropped in export and the asset would arrive flat"
+        )
+    if uses_images and not textures:
+        raise RuntimeError("the exported glTF has images but no textures referencing them")
+    if fmt == "gltf":
+        base = os.path.dirname(export_path)
+        for image in images:
+            uri = image.get("uri")
+            if uri and not os.path.exists(os.path.join(base, uri)):
+                raise RuntimeError(f"the exported glTF points at a missing image file: {uri}")
+    return {"images": len(images), "textures": len(textures), "verified": True}
 
 
 def handle_export(request, open_blend):
@@ -160,6 +212,7 @@ def handle_export(request, open_blend):
     procedural_materials = sorted(
         {material.name for material in exported_materials if material_summary(material)["procedural"]}
     )
+    texture_report = _verify_textures(fmt, export_path, exported_materials)
     warnings = []
     if procedural_materials and fmt in {"glb", "gltf"}:
         warnings.append(
@@ -179,5 +232,8 @@ def handle_export(request, open_blend):
         ),
         "blendPath": bpy.data.filepath if bpy.data.filepath else None,
         "proceduralMaterials": procedural_materials,
+        "images": texture_report["images"],
+        "textures": texture_report["textures"],
+        "texturesVerified": texture_report["verified"],
         "warnings": warnings,
     }

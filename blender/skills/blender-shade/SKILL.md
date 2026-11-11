@@ -84,3 +84,27 @@ report = build_material("BrushedSteel", {
   node count, when asking "is this the same material?";
 - `baseColor`, `roughness`, `metallic`, `emissionStrength` — the Principled
   values, including the preset defaults.
+
+## Order: build → light → render → bake → export → verify
+
+1. Build the material with `build_material` (or hand-author nodes).
+2. Blueprint the scene with `apply_studio_rig(kind)` before rendering; the rig is
+   deterministic and rebuilds only its own `PI_STUDIO` lights. Pass
+   `film_transparent` and `world_strength` deliberately: a montage and an export
+   preview want different answers, and `scene_info` reports both.
+3. Render. The same blend order is what makes two modules comparable.
+4. Bake procedural detail with `bake_textures(target, channels, resolution,
+   samples, margin, output_dir)`. It refuses without UVs, sets `sRGB` for base
+   colour/emission and `Non-Color` for roughness/metallic/AO/normal, packs every
+   image and links it back into the material. A normal bake uses the
+   `bake_normal` cage path instead.
+5. Export `glb`. The exporter verifies the JSON chunk contains `images` and
+   `textures`; a material that samples an image but exports without one fails
+   the tool rather than arriving flat.
+6. Read `scene_info` (`lights`, `renderSettings`, `textures`) to confirm colour
+   space, packed state, film transparency, view transform and exposure.
+
+glTF carries images and factors, never node graphs. A procedural material that
+is not baked will arrive with Principled defaults; `blender_export_asset`
+reports it as `proceduralMaterials` with a warning, and `blender_scene_info`
+reports every image's colour space and packed state.

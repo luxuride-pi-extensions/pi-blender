@@ -164,6 +164,13 @@ if payload.get("includeTextures", False):
                 "filePath": img.filepath or None,
                 "width": int(img.size[0]) if img.size[0] > 0 else None,
                 "height": int(img.size[1]) if img.size[1] > 0 else None,
+                "resolution": (
+                    [int(img.size[0]), int(img.size[1])]
+                    if img.size[0] > 0 and img.size[1] > 0
+                    else None
+                ),
+                "colorSpace": img.colorspace_settings.name,
+                "packed": img.packed_file is not None,
                 "hasData": bool(img.pixels) and int(img.size[0]) > 0 and int(img.size[1]) > 0,
             })
 
@@ -241,10 +248,16 @@ if payload.get("includeCameraSettings", True):
 
 if payload.get("includeLights", True):
     for light in bpy.data.lights:
+        obj = next((candidate for candidate in bpy.data.objects if candidate.data == light), None)
         result["lights"].append({
             "name": light.name,
             "type": light.type,
             "energy": float(light.energy),
+            "color": [float(channel) for channel in light.color],
+            "location": maybe_vector(obj.location) if obj is not None else None,
+            "size": float(getattr(light, "size", 0.0)),
+            "shape": str(getattr(light, "shape", "")),
+            "angle": float(getattr(light, "angle", 0.0)),
         })
 
 if payload.get("includeUnits", True):
@@ -269,6 +282,9 @@ if payload.get("includeRenderSettings", True):
         "resolutionPercentage": int(scene.render.resolution_percentage),
         "samples": int(getattr(scene.cycles, "samples", 0)),
         "camera": scene.camera.name if scene.camera else None,
+        "filmTransparent": bool(scene.render.film_transparent),
+        "viewTransform": scene.view_settings.view_transform,
+        "exposure": float(scene.view_settings.exposure),
     }
 
 if payload.get("includeMissingFiles", False):
@@ -330,6 +346,9 @@ if payload.get("includeSceneStats", False):
             "resolutionPercentage": int(s.render.resolution_percentage),
             "samples": int(getattr(s.cycles, "samples", 0)) if hasattr(s, "cycles") else 0,
             "camera": s.camera.name if s.camera else None,
+            "filmTransparent": bool(s.render.film_transparent),
+            "viewTransform": s.view_settings.view_transform,
+            "exposure": float(s.view_settings.exposure),
             "fps": int(s.render.fps) if hasattr(s.render, "fps") else None,
         }
         s_stats["name"] = s.name
