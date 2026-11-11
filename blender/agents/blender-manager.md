@@ -201,7 +201,11 @@ watch window is open:
   `modules/<name>/branch.blend`, executes headlessly in its own process, and
   merges the result back. No shared session, no lock, and the copies are
   independent. Several modules can be authored AND run at once, bounded by the
-  headless run budget below.
+  headless run budget below. Tell the workers to *stage* with
+  `blender_branch_run` rather than `blender_module_run`, then merge each
+  finished branch yourself with `blender_branch_apply`: staging only records a
+  branch, while module_run would merge immediately and put two workers back in
+  last-one-wins contention.
 - **A window open (`/blender-watch`).** Every run executes inside that ONE live
   Blender session behind a cross-process lock, so a second `blender_module_run`
   blocks on the first and then usually fails anyway, against a checkpoint

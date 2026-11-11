@@ -80,7 +80,8 @@ test("the branch pair is granted to the manager that is told to apply branches",
 		assert.ok(blenderTools.includes(name), `${name} must be registered`);
 		assert.ok(managerAllowed.has(name), `${name} must be granted to the manager`);
 	}
-	assert.match(prompt, /blender_branch_apply/, "the prompt tells the manager to apply staged branches");
+	const body = prompt.replace(/^---[\s\S]*?---\n/, "");
+	assert.match(body, /blender_branch_apply/, "the injected prompt tells the manager to apply staged branches");
 
 	const worker = read("blender/agents/blender-worker.md");
 	assert.match(worker, /^tools: .*blender_branch_run/m, "a fanned-out worker must be able to stage");
