@@ -143,8 +143,14 @@ exported = handle_export({"format": "glb", "outputDir": export_dir, "name": "rev
 checks["export verifies embedded images"] = exported["images"] > 0 and exported["textures"] > 0 and exported["texturesVerified"] is True
 
 subject.name = "Soup Bowl"
-separate = handle_export({"format": "gltf", "objects": [subject.name], "outputDir": tempfile.mkdtemp(prefix="gltf-review-")}, lambda request: None)
-checks["gltf percent-encoded image names resolve"] = separate.get("texturesVerified") is True
+spaced = bpy.data.images[channels["base_color"]["imageName"]]
+spaced.name = "Soup Bowl base"
+spaced.filepath = "//Soup Bowl base.png"
+separate_dir = os.path.join(os.path.dirname(__file__), "..", ".tmp-gltf")
+separate = handle_export({"format": "gltf", "objects": [subject.name], "outputDir": separate_dir}, lambda request: None)
+with open(separate["exportPath"], encoding="utf-8") as handle:
+    uris = [image.get("uri", "") for image in json.load(handle).get("images", [])]
+checks["gltf percent-encoded image names resolve"] = separate.get("texturesVerified") is True and any("%20" in uri for uri in uris)
 
 broken = bpy.data.materials.new("BrokenSurface")
 broken.use_nodes = True

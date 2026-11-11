@@ -25,7 +25,7 @@ from urllib.parse import unquote
 # Provided by Blender's own runtime, not by anything installed here.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
-from shading import SAFE_GLTF_NODES, material_summary, reachable_nodes
+from shading import SAFE_GLTF_NODES, material_summary
 
 # Blender's operator name for each supported format, and its extension.
 EXPORT_FORMATS = {
@@ -76,16 +76,19 @@ def _run_export(fmt, export_path, selection_given, animations):
     )
 
 
+def _open_binary(path):
+    try:
+        return open(path, "rb")
+    except OSError as error:
+        raise RuntimeError(f"the exported glb could not be read: {error}") from error
+
+
 def _read_gltf_json(path):
     import json
     import struct
 
     if path.lower().endswith(".glb"):
-        try:
-            handle = open(path, "rb")
-        except OSError as error:
-            raise RuntimeError(f"the exported glb could not be read: {error}") from error
-        with handle:
+        with _open_binary(path) as handle:
             header = handle.read(12)
             try:
                 magic, version, _length = struct.unpack("<III", header)

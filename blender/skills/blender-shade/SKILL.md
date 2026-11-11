@@ -100,7 +100,8 @@ report = build_material("BrushedSteel", {
    samples, margin, output_dir)`. It refuses without UVs, sets `sRGB` for base
    colour/emission and `Non-Color` for roughness/metallic/AO/normal, packs every
    image and links it back into the material. A normal bake uses the
-   `bake_normal` cage path instead. AO distance is 0.1× the target's largest
+   `bake_normal` cage path instead. An `ao` bake needs a world and refuses
+   without one. AO distance is 0.1× the target's largest
    dimension and is reported as `aoDistance`. A rig replaces a linked HDRI;
    read the returned `world.replacedEnvironment`/`world.previousStrength`
    before accepting that change on a `sourceBlend` workspace.
