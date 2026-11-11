@@ -750,6 +750,7 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
 	expectedAxis?: string;
+	symmetryAxis?: "x" | "y" | "z";
 	/** Metres; `clearance` and `path` sampling granularity. */
 	cell?: number;
 	/** Metres; `clearance` and `path` person reach. */
@@ -758,6 +759,8 @@ export async function requestLiveBlenderGeometryProbe(options: {
 	points?: [number, number][];
 	/** `path` zig-zag threshold, default 1.45. */
 	detour?: number;
+	/** Face/vertex ceiling for the `sculpt` density metric. */
+	densityCap?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }): Promise<GeometryProbeResult> {
@@ -776,10 +779,12 @@ export async function requestLiveBlenderGeometryProbe(options: {
 			specifications: options.specifications,
 			tolerance: options.tolerance,
 			expectedAxis: options.expectedAxis,
+			symmetryAxis: options.symmetryAxis,
 			cell: options.cell,
 			body: options.body,
 			points: options.points,
 			detour: options.detour,
+			densityCap: options.densityCap,
 		},
 		signal: options.signal,
 		timeoutMs: options.timeoutMs,

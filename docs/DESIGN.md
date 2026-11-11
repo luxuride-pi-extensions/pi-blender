@@ -206,7 +206,9 @@ Start pi in any project dir. The extension:
   `targetObject`), and `missingFiles` plus `linkedLibraries` for off-line
   file-health diagnostics of the saved blend
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
-  `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, and `topology`. `shape` measures the mesh rather
+  `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, `topology`, `scale`,
+  and `sculpt` (opt-in; never part of the default set because its BVH
+  overlap scan is unbounded). `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
   (mean, spread, monotonic, taper), self-symmetry about the mesh's own
   bounding-box centre (not the world origin), convexity as the fraction of
@@ -214,6 +216,12 @@ Start pi in any project dir. The extension:
   loose-vertex counts. A render is a projection, so it cannot show a saddle
   facing away, distinguish an asymmetric form from a symmetric one, or see the
   inside of a hollow shell
+- The `sculpt` check reports the numbers a render cannot: BVH self-intersection
+  pairs, a face-centre inward ray for minimum wall thickness, mirror symmetry
+  over a KD-tree on a chosen `symmetryAxis`, an edge-dihedral distribution, and
+  vertex/face density against `densityCap`. Naming a `densityCap` runs the
+  check. Sampling caps are surfaced as `sampled`, and open faces are counted
+  rather than reported as zero thickness.
 - `blender_geometry_probe`'s `clearance` check asks whether the room is a room
   somebody can USE, which is a different question from whether its parts meet,
   and the two faults it reports are not the same fault. `islandCount` above 1

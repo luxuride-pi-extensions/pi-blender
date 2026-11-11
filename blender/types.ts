@@ -1571,6 +1571,7 @@ export type GeometryProbeCheck =
 	| "path"
 	| "shape"
 	| "topology"
+	| "sculpt"
 	| "scale";
 
 export interface GeometryProbeBounds {
@@ -1650,6 +1651,81 @@ export interface GeometryProbeAxis {
 	isRingLike: boolean;
 	ringRoundness: GeometryProbeRingRoundness;
 	center: number[];
+}
+
+/**
+ * The numbers that decide whether a sculpt reads as natural, which a render
+ * cannot show from one camera. Every field states its method and limitation
+ * because each is an approximation: a confident number from an unexplained
+ * sampling method is worse than no number.
+ */
+export interface GeometryProbeSculpt {
+	/** False when this Blender build lacks bmesh/bvhtree; `reason` says why. */
+	available: boolean;
+	reason?: string;
+	/**
+	 * Face pairs whose BVH triangles overlap without sharing a vertex. This is
+	 * the failure mode of every displacement stroke: push far enough and a thin
+	 * part folds through itself while the render still looks fine.
+	 *
+	 * Method: one BVHTree over the mesh, self-overlap, adjacent faces excluded
+	 * by shared vertex index. Limitation: overlap is triangle-based, so two
+	 * faces that merely touch at a shared edge are not counted, and the pair
+	 * count is capped; `sampled` says the cap was reached.
+	 */
+	selfIntersections: {
+		pairs: number;
+		/** True when the returned list hit `cap`; the underlying BVH pass may have seen more. */
+		sampled: boolean;
+		cap: number;
+	};
+	/**
+	 * Shortest inward ray hit per sampled face, in object space. A wall thinner
+	 * than the printer's minimum is a model that prints as a hole.
+	 *
+	 * Method: face centre, cast along the inverted normal, nearest hit.
+	 * Limitation: an OPEN surface has no inside to cast into; those faces are
+	 * counted in `openFaces` and excluded from the minimum rather than reported
+	 * as zero.
+	 */
+	minWallThickness: {
+		distance: number | null;
+		sampledFaces: number;
+		/** Faces skipped because a boundary edge left them no inside to hit. */
+		openFaces: number;
+		sampled: boolean;
+		method: string;
+		limit: string;
+	};
+	/**
+	 * RMS distance between each vertex and its nearest mirror partner across
+	 * the requested axis, measured about the mesh's own bounds centre. A model
+	 * placed off to one side is still symmetric.
+	 *
+	 * Method: KD-tree of all vertices in the mirrored coordinate, in OBJECT
+	 * space (unapplied object scale is not baked in). Limitation: nearest-vertex
+	 * matching, not surface matching, so uneven density on the two halves reads
+	 * as a small error.
+	 */
+	symmetry: {
+		axis: "x" | "y" | "z";
+		rms: number;
+		max: number;
+		sampled: boolean;
+		method: string;
+		limit: string;
+	};
+	/**
+	 * Distribution of edge dihedral angles in degrees. A lumpy surface has a
+	 * fat tail that a smooth one does not; a sculpt's shoulder should not have
+	 * a p95 in the forties.
+	 *
+	 * Method: `edge.calc_face_angle` over manifold edges.
+	 * Limitation: only edges with exactly two faces contribute.
+	 */
+	dihedral: { mean: number; p95: number; max: number; edges: number };
+	/** Vertices and faces against the requested cap; null cap means unjudged. */
+	density: { vertices: number; faces: number; cap: number | null; withinBudget: boolean | null };
 }
 
 export interface GeometryProbeTopology {
@@ -1842,6 +1918,7 @@ export interface GeometryProbeObject {
 	transform?: GeometryProbeTransform;
 	axis?: GeometryProbeAxis;
 	topology?: GeometryProbeTopology;
+	sculpt?: GeometryProbeSculpt;
 }
 
 /**
@@ -2126,6 +2203,8 @@ export interface GeometryProbeOptions {
 	objects?: string[];
 	pairs?: string[][];
 	checks?: GeometryProbeCheck[];
+	/** Face ceiling for the `sculpt` density metric; omit to leave it unjudged. */
+	densityCap?: number;
 	/** Reference dimensions; asking for them implies the `scale` check. */
 	specifications?: Record<string, GeometryProbeSpecification>;
 	tolerance?: number;
@@ -2159,6 +2238,7 @@ export interface GeometryProbeOptions {
 	 */
 	detour?: number;
 	expectedAxis?: "X" | "Y" | "Z";
+	symmetryAxis?: "x" | "y" | "z";
 	timeoutMs?: number;
 	signal?: AbortSignal;
 }

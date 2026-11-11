@@ -1215,6 +1215,7 @@ GEOMETRY_PROBE_CHECKS = (
     "shape",
     "topology",
     "scale",
+    "sculpt",
 )
 GEOMETRY_PROBE_VERTEX_SAMPLE_LIMIT = 4000
 # The shape family is a summary, not a dump: it reports counts, a few scalars
@@ -2913,6 +2914,8 @@ def _probe_topology(obj):
         return {"available": False, "reason": "bmesh unavailable in this Blender build"}
 
     mesh = obj.data
+    if len(mesh.polygons) == 0:
+        return {"available": False, "reason": "the mesh has no faces to measure"}
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bm.verts.ensure_lookup_table()
@@ -3160,6 +3163,155 @@ def _probe_topology(obj):
         "islandFloatingShare": island_floating,
         "islandContact": island_contact,
     }
+
+
+def _probe_sculpt(obj, density_cap=None, request_axis=None):
+    """Sculpt-quality numbers: folds, walls, symmetry, dihedral, density.
+
+    Read-only. Every metric states its method and its limit in the result,
+    because a critic acts on these strings: a confident number from an
+    unexplained sample is worse than no number.
+    """
+    try:
+        # pi-lens-ignore: ast-grep:unresolved-import-python
+        import bmesh  # pyright: ignore[reportMissingImports]
+        from mathutils.kdtree import KDTree  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return {"available": False, "reason": "bmesh/bvhtree unavailable in this Blender build"}
+
+    mesh = obj.data
+    if len(mesh.polygons) == 0:
+        return {"available": False, "reason": "the mesh has no faces to measure"}
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bm.verts.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+    try:
+        verts = [vert.co.copy() for vert in bm.verts]
+        bvh = BVHTree.FromBMesh(bm)
+        max_dim = max((max(v[i] for v in verts) - min(v[i] for v in verts)) for i in range(3)) if verts else 1.0
+
+        # Self-intersection: BVH overlap reports every pair, including faces
+        # that share an edge or a vertex by construction. Those are excluded by
+        # index, then the returned pairs are capped. The cap bounds the list and
+        # the loop, NOT the cost of bvh.overlap itself, which materialises every
+        # pair before this code runs; on a very heavy mesh that call is the
+        # expensive part and cannot be preempted.
+        pair_cap = 20000
+        overlaps = bvh.overlap(bvh)
+        fold_pairs = 0
+        for first, second in overlaps:
+            if first >= second:
+                continue
+            first_verts = {vert.index for vert in bm.faces[first].verts}
+            second_verts = {vert.index for vert in bm.faces[second].verts}
+            if first_verts & second_verts:
+                continue
+            fold_pairs += 1
+            if fold_pairs >= pair_cap:
+                break
+
+        # Minimum wall: a ray from each sampled face centre along the inverted
+        # normal hits the far side. Face centres keep it independent of vertex
+        # density; the cap keeps a heavy mesh bounded.
+        face_step = max(1, len(bm.faces) // 500)
+        sampled_faces = 0
+        open_faces = 0
+        thickness = None
+        # A face with a boundary edge has no inside to cast into. Skip that
+        # face and keep measuring the closed part: an unclosed eye socket on an
+        # otherwise solid body must not make the whole model unmeasured.
+        for index, face in enumerate(bm.faces):
+            if index % face_step:
+                continue
+            if any(len(edge.link_faces) == 1 for edge in face.edges):
+                open_faces += 1
+                continue
+            sampled_faces += 1
+            origin = face.calc_center_median() - face.normal * 1e-5
+            hit = bvh.ray_cast(origin, -face.normal, max_dim * 2.0)
+            if hit[0] is None or hit[3] is None:
+                open_faces += 1
+                continue
+            distance = hit[3]
+            if distance > 1e-7:
+                thickness = distance if thickness is None else min(thickness, distance)
+
+        # Symmetry about the mesh's own bounds centre, matched to the nearest
+        # mirrored vertex. A model that sits off to one side is still symmetric.
+        axis_name = str(request_axis or "x").lower()  # object space
+        axis = {"x": 0, "y": 1, "z": 2}.get(axis_name, 0)
+        if verts:
+            low = min(v[axis] for v in verts)
+            high = max(v[axis] for v in verts)
+            plane = (low + high) * 0.5
+            tree = KDTree(len(verts))
+            for index, co in enumerate(verts):
+                tree.insert(co, index)
+            tree.balance()
+            step = max(1, len(verts) // 5000)
+            total = 0.0
+            worst = 0.0
+            measured = 0
+            for index in range(0, len(verts), step):
+                co = verts[index].copy()
+                co[axis] = 2.0 * plane - co[axis]
+                _, _, distance = tree.find(co)
+                if distance is None:
+                    continue
+                total += distance * distance
+                worst = max(worst, distance)
+                measured += 1
+            rms = math.sqrt(total / measured) if measured else 0.0
+        else:
+            step = 1
+            rms = worst = 0.0
+            measured = 0
+
+        angles = []
+        for edge in bm.edges:
+            if len(edge.link_faces) != 2:
+                continue
+            angles.append(math.degrees(edge.calc_face_angle(0.0)))
+        angles.sort()
+        mean_angle = sum(angles) / len(angles) if angles else 0.0
+        p95 = angles[int((len(angles) - 1) * 0.95)] if angles else 0.0
+        max_angle = angles[-1] if angles else 0.0
+
+        return {
+            "available": True,
+            "selfIntersections": {"pairs": fold_pairs, "sampled": fold_pairs >= pair_cap, "cap": pair_cap},
+            "minWallThickness": {
+                "distance": _round(thickness, 5) if thickness is not None else None,
+                "sampledFaces": sampled_faces,
+                "openFaces": open_faces,
+                "sampled": face_step > 1,
+                "method": "face centre ray along the inverted normal, object space",
+                "limit": "a face with a boundary edge has no inside; those faces are counted in openFaces and excluded",
+            },
+            "symmetry": {
+                "axis": axis_name if axis_name in ("x", "y", "z") else "x",
+                "rms": _round(rms, 5),
+                "max": _round(worst, 5),
+                "sampled": step > 1,
+                "method": "nearest mirrored vertex over a KD-tree, about the bounds centre",
+                "limit": "vertex matching, not surface matching; uneven density reads as a small error",
+            },
+            "dihedral": {
+                "mean": _round(mean_angle, 2),
+                "p95": _round(p95, 2),
+                "max": _round(max_angle, 2),
+                "edges": len(angles),
+            },
+            "density": {
+                "vertices": len(mesh.vertices),
+                "faces": len(mesh.polygons),
+                "cap": density_cap,
+                "withinBudget": None if density_cap is None else len(mesh.polygons) <= int(density_cap),
+            },
+        }
+    finally:
+        bm.free()
 
 
 def _sample_world_points(obj, limit):
@@ -3565,7 +3717,11 @@ def handle_geometry_probe(request):
     session and an unopened file measures nothing at all.
     """
     ensure_requested_blend_open(request)
-    requested = request.get("checks") or list(GEOMETRY_PROBE_CHECKS)
+    # Sculpt's self-overlap is the one check that cannot be bounded before it
+    # runs, so it stays opt-in even when the caller omits `checks`.
+    requested = request.get("checks") or [
+        check for check in GEOMETRY_PROBE_CHECKS if check != "sculpt"
+    ]
     unknown = [check for check in requested if check not in GEOMETRY_PROBE_CHECKS]
     if unknown:
         raise RuntimeError(
@@ -3588,6 +3744,12 @@ def handle_geometry_probe(request):
         # and no complaint, which reads as a route that was never worth
         # measuring.
         requested = list(requested) + ["path"]
+    if request.get("densityCap") is not None and "sculpt" not in requested:
+        # A cap with no check is a measurement the caller believes happened.
+        requested = list(requested) + ["sculpt"]
+    if request.get("symmetryAxis") is not None and "sculpt" not in requested:
+        # An axis that is silently ignored reads as a symmetry result.
+        requested = list(requested) + ["sculpt"]
     expected_axis = request.get("expectedAxis") or "Z"
     axis_vector = Vector(
         {
@@ -3677,6 +3839,13 @@ def handle_geometry_probe(request):
 
         if "topology" in requested:
             entry["topology"] = _probe_topology(obj)
+
+        if "sculpt" in requested:
+            entry["sculpt"] = _probe_sculpt(
+                obj,
+                request.get("densityCap"),
+                request.get("symmetryAxis") or "x",
+            )
 
         measurements[obj.name] = entry
 
