@@ -37,7 +37,7 @@ scripts/dev-setup.mjs       one-command setup for a fresh clone: extension
 docs/SAFETY.md              read-only guarantees, guard boundaries, recoverability model, and measurement traps
 docs/SCULPT.md              the normal-map bake
 node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
-docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server)
+docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server; 0002: brush stroke is not an authoring path)
 ```
 
 ## Flatpak fixes (vs. upstream)

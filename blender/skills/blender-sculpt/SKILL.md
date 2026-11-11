@@ -68,8 +68,9 @@ the shaping strokes.
 - The object must be in `OBJECT` mode when the stroke table runs; `apply_strokes`
   refuses edit or sculpt mode. A live paint session can leave the viewport in
   `SCULPT`, so switch back before the next module.
-- Never use `bpy.ops.sculpt.brush_stroke`: it needs a viewport, a cursor and a
-  depsgraph, and identical input was measured to produce different vertices. See
+- Do not simulate `bpy.ops.sculpt.brush_stroke`: it needs a viewport and a
+  depsgraph, and was measured to produce different vertices from the same
+  restored coordinates, so it is not an authoring path. See
   [ADR 0002](../../../docs/adr/0002-brush-stroke-is-not-an-authoring-path.md).
 - Do not apply the subdivision as a live modifier; the exported mesh would
   differ from the rendered one.

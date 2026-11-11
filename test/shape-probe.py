@@ -170,8 +170,8 @@ def main():
     dense.name = "DenseGrid"
     dense_result = probe(live_bridge, scratch_blend, [dense.name], ["shape"])
     dense_shape = dense_result["objects"][dense.name]["shape"]
-    check("convexityRatio" in dense_shape, "a dense mesh should still report a convexity ratio")
-    check("selfSymmetry" in dense_shape, "a dense mesh should still report self symmetry")
+    check(isinstance(dense_shape.get("convexityRatio"), (int, float)), "a dense mesh should still report a convexity ratio")
+    check(isinstance(dense_shape.get("selfSymmetry"), dict), "a dense mesh should still report self symmetry")
 
     if failures:
         print("FAIL")
