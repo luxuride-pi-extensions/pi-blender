@@ -215,9 +215,17 @@ test("a second round of a 40-module build still sees round one's ownership", () 
 test("an apply takes the newest staged record by sequence, not by append order", () => {
 	const newer = { ...record("body", { apply: ["New"] }), sequence: 9, iteration: 9 };
 	const older = { ...record("body", { apply: ["Old"] }), sequence: 4, iteration: 4 };
-	assert.equal(latestStagedBranch([newer, older], "body")?.sequence, 9);
-	assert.equal(latestStagedBranch([older, newer], "body")?.sequence, 9);
-	assert.equal(latestStagedBranch([{ ...older, status: "applied" }], "body"), undefined);
+	assert.equal(latestStagedBranch({ branchRuns: [newer, older] }, "body")?.sequence, 9);
+	assert.equal(latestStagedBranch({ branchRuns: [older, newer] }, "body")?.sequence, 9);
+	assert.equal(latestStagedBranch({ branchRuns: [{ ...older, status: "applied" }] }, "body"), undefined);
+});
+
+test("an applied re-run retires the staged record it superseded", () => {
+	// The apply's newest-by-sequence lookup must not resurrect a branch that the
+	// contract calls dead just because it is the only record still marked staged.
+	const old = { ...record("body", { apply: ["Old"] }), sequence: 1, iteration: 1 };
+	const superseding = { ...record("body"), sequence: 2, iteration: 2, status: "applied" };
+	assert.equal(latestStagedBranch({ branchRuns: [old, superseding] }, "body"), undefined);
 });
 
 test("a long multi-module build does not grow the manifest without bound", () => {
@@ -243,6 +251,7 @@ test("the branch run path appends through the retention window", () => {
 	// green after the wiring is deleted.
 	const source = readFileSync(new URL("../blender/branch.ts", import.meta.url), "utf8");
 	assert.match(source, /current\.branchRuns = appendBranchRun\(current, record\)/);
+	assert.match(source, /latestStagedBranch\(manifest, name\)/);
 	const current = { branchRuns: Array.from({ length: 5 }, (_, index) => ({ ...record("body"), sequence: index + 1, iteration: index + 1 })) };
 	const appended = appendBranchRun(current, { ...record("body"), sequence: 6, iteration: 6 });
 	assert.deepEqual(appended.map((run) => run.sequence).sort((a, b) => a - b), [2, 3, 4, 5, 6]);

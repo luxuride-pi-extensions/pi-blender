@@ -1019,7 +1019,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const staged = options.modules
 		.map((raw) => {
 			const name = normalizeModuleName(raw);
-			const record = latestStagedBranch(branchRuns, name);
+			const record = latestStagedBranch(manifest, name);
 			if (!record) {
 				throw new Error(
 					`No staged branch run for module "${name}". A module is applyable only after a branch run has staged it. Re-run the module to stage a fresh branch.`,
@@ -1165,9 +1165,14 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
  * stay in the manifest -- the deliberate checkpoint history -- but they are dead
  * as live claims, which is the distinction the retention rule did not make.
  */
-export function contestableStagedRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
+export function contestableStagedRuns(
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
+): BlenderBranchRunRecord[] {
 	const newest = new Map<string, number>();
 	for (const run of manifest.branchRuns ?? []) {
+		// A failed or conflicted attempt proved nothing about the module's state,
+		// so it does not supersede a branch that is still waiting to be applied.
+		if (run.status !== "staged" && run.status !== "applied") continue;
 		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
 	}
 	for (const run of manifest.moduleRuns ?? []) {
@@ -1194,11 +1199,11 @@ export function appendBranchRun(
  * lower sequence, and a superseded record must never be the one applied.
  */
 export function latestStagedBranch(
-	runs: BlenderBranchRunRecord[],
+	manifest: Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">,
 	moduleName: string,
 ): BlenderBranchRunRecord | undefined {
-	return runs
-		.filter((run) => run.module === moduleName && run.status === "staged")
+	return contestableStagedRuns(manifest)
+		.filter((run) => run.module === moduleName)
 		.sort((a, b) => b.sequence - a.sequence)[0];
 }
 
