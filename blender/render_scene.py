@@ -95,7 +95,10 @@ def render_scene(payload):
         scene.cycles.samples = int(samples)
 
     output_path = payload["outputPath"]
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not create the render directory: {exc}") from exc
     scene.render.image_settings.file_format = "PNG"
     scene.render.filepath = output_path
     bpy.ops.render.render(write_still=True)
@@ -143,14 +146,21 @@ def compose_review_sheet(panels, output_path, columns=2, gutter=8):
     panel_width, panel_height = 640, 480
     resized = []
     for panel, pixels in loaded:
-        if pixels.shape[0] != panel_height or pixels.shape[1] != panel_width:
-            # The hero keeps the caller's resolution; the sheet has one panel
-            # size. Nearest-neighbour is enough for a review tile and avoids an
-            # image library just to resample one picture.
-            row_index = np.linspace(0, pixels.shape[0] - 1, panel_height).astype(np.int32)
-            column_index = np.linspace(0, pixels.shape[1] - 1, panel_width).astype(np.int32)
+        # Aspect is preserved by fitting inside the tile, never by stretching:
+        # a square or portrait hero squeezed into 4:3 would read as geometry.
+        scale = min(panel_width / pixels.shape[1], panel_height / pixels.shape[0])
+        target_width = max(1, int(pixels.shape[1] * scale))
+        target_height = max(1, int(pixels.shape[0] * scale))
+        if target_width != pixels.shape[1] or target_height != pixels.shape[0]:
+            row_index = np.linspace(0, pixels.shape[0] - 1, target_height).astype(np.int32)
+            column_index = np.linspace(0, pixels.shape[1] - 1, target_width).astype(np.int32)
             pixels = pixels[np.ix_(row_index, column_index)]
-        resized.append((panel, pixels))
+        tile = np.full((panel_height, panel_width, 4), 0.06, dtype=np.float32)
+        tile[:, :, 3] = 1.0
+        top = (panel_height - target_height) // 2
+        left = (panel_width - target_width) // 2
+        tile[top : top + target_height, left : left + target_width] = pixels
+        resized.append((panel, tile))
     loaded = resized
     rows = (len(loaded) + columns - 1) // columns
     sheet_width = columns * panel_width + (columns + 1) * gutter
@@ -170,7 +180,10 @@ def compose_review_sheet(panels, output_path, columns=2, gutter=8):
     )
     image.colorspace_settings.name = "sRGB"
     image.pixels.foreach_set(sheet.ravel())
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not create the review-sheet directory: {exc}") from exc
     image.filepath_raw = output_path
     image.file_format = "PNG"
     image.save()

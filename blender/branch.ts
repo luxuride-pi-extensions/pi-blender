@@ -433,7 +433,7 @@ def _frame_module_camera(module, plan):
         "distance": distance,
         "lensMm": lens,
         "orthographic": orthographic,
-        "orthoScale": ortho_scale if orthographic else None,
+        "orthoScale": ortho_scale,
         "fitDistance": fit_distance,
         "coverage": coverage,
         "coverageOk": coverage_ok,
@@ -460,16 +460,20 @@ def _render_review_sheet(plan, framing, render_request):
         return {"error": "a review sheet needs at least two shots"}
     output_path = os.path.join(os.path.dirname(render_request["outputPath"]), "review.png")
     panel_width, panel_height = 640, 480
-    panels_dir = os.path.join(payload["runDir"], "panels")
+    panels_dir = os.path.join(os.path.dirname(render_request["outputPath"]), "review-panels")
     os.makedirs(panels_dir, exist_ok=True)
     center = Vector(framing["center"])
     distance = float(framing["distance"] or 1.0)
-    ortho_scale = framing.get("orthoScale") or 1.0
+    ortho_scale = framing.get("orthoScale") or 2.0 * max(framing["extent"]) * 1.35
+    lens = float(framing.get("lensMm") or 50.0)
     panels = [{
         "name": "hero",
         "file": render_request["outputPath"],
         "cameraName": framing["cameraName"],
         "shot": shots[0].get("kind", "hero"),
+        "distance": distance,
+        "lensMm": lens,
+        "orthoScale": ortho_scale,
     }]
     errors = []
     for shot in shots[1:4]:
@@ -482,8 +486,9 @@ def _render_review_sheet(plan, framing, render_request):
             direction = Vector(shot["direction"]).normalized()
             camera_object.location = center + direction * distance
             camera_object.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
-            camera_data.lens = float(shot.get("lensMm", 50.0))
+            camera_data.lens = lens
             camera_data.sensor_width = 36.0
+            camera_data.clip_end = max(camera_data.clip_end, distance * 2.0)
             if shot.get("orthographic"):
                 camera_data.type = "ORTHO"
                 camera_data.ortho_scale = ortho_scale
@@ -499,6 +504,9 @@ def _render_review_sheet(plan, framing, render_request):
                 "file": panel_path,
                 "cameraName": camera_name,
                 "shot": shot.get("kind", name),
+                "distance": distance,
+                "lensMm": lens,
+                "orthoScale": ortho_scale,
             })
         except Exception as exc:
             errors.append(f"{name}: {exc}")
@@ -506,10 +514,14 @@ def _render_review_sheet(plan, framing, render_request):
             bpy.data.objects.remove(camera_object, do_unlink=True)
             bpy.data.cameras.remove(camera_data)
     if len(panels) < 2:
-        return {"error": "; ".join(errors) or "no panel rendered"}
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return {"error": "; ".join(errors) or "no panel rendered", "panels": panels}
     try:
         composed = compose_review_sheet(panels, output_path)
     except Exception as exc:
+        if os.path.exists(output_path):
+            os.remove(output_path)
         return {"error": f"sheet composition failed: {exc}", "panels": panels}
     result = dict(composed)
     result["panels"] = panels
@@ -600,7 +612,19 @@ if exit_code == 0 and render_request:
 
 review_sheet = None
 if exit_code == 0 and render_result and payload.get("reviewSheet"):
-    review_sheet = _render_review_sheet(camera_plan, camera_framing, render_request)
+    if camera_framing is None:
+        stale = os.path.join(os.path.dirname(render_request["outputPath"]), "review.png")
+        if os.path.exists(stale):
+            os.remove(stale)
+        review_sheet = {"error": "no mesh bounds to frame a review sheet", "panels": []}
+    else:
+        try:
+            review_sheet = _render_review_sheet(camera_plan, camera_framing, render_request)
+        except Exception as exc:
+            stale = os.path.join(os.path.dirname(render_request["outputPath"]), "review.png")
+            if os.path.exists(stale):
+                os.remove(stale)
+            review_sheet = {"error": f"sheet failed: {exc}", "panels": []}
     if cameras:
         bpy.context.scene.camera = bpy.data.objects.get(cameras[0]["cameraName"])
 

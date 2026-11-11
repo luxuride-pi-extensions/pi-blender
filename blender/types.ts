@@ -263,12 +263,17 @@ export interface ReviewSheetPanel {
 	file: string;
 	cameraName: string;
 	shot: string;
+	/** Framing the panel was rendered with, so "same scale" is checkable. */
+	distance: number;
+	lensMm: number;
+	orthoScale: number;
 }
 
 export interface ReviewSheetResult {
-	path: string;
-	width: number;
-	height: number;
+	/** Absent when the sheet could not be written; `error` says why. */
+	path?: string;
+	width?: number;
+	height?: number;
 	panels: ReviewSheetPanel[];
 	/** Panels that failed, or why the sheet could not be composed. */
 	error?: string;
