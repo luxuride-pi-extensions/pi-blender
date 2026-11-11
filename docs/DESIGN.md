@@ -207,7 +207,8 @@ Start pi in any project dir. The extension:
   file-health diagnostics of the saved blend
 - `blender_geometry_probe` accepts a `shape` check alongside `transform`,
   `bounds`, `axis`, `pair`, `joint`, `clearance`, `path`, `topology`, `scale`,
-  and `sculpt`. `shape` measures the mesh rather
+  and `sculpt` (opt-in; never part of the default set because its BVH
+  overlap scan is unbounded). `shape` measures the mesh rather
   than its placement: a radius profile along the mesh's own longest axis
   (mean, spread, monotonic, taper), self-symmetry about the mesh's own
   bounding-box centre (not the world origin), convexity as the fraction of
