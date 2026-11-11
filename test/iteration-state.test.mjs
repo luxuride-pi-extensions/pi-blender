@@ -76,14 +76,23 @@ function critiqueBlock({
   axes: overrides = {},
   issues = [],
   nextAction = "tighten the silhouette",
+  includeAxes = true,
+  includeIssues = true,
 } = {}) {
-  const axes = ["Accuracy", "Geometry", "Materials", "Completeness", "Quality", "Category validity"];
+  const axes = [
+    "Accuracy",
+    "Geometry & Proportions",
+    "Materials & Appearance",
+    "Completeness",
+    "Quality",
+    "Category validity",
+  ];
   const lines = [
     `[2026-01-01T00:00:00.000Z] iteration_${String(iteration).padStart(2, "0")} module=${module} budget ${iteration}/5`,
     `Score: ${score}/12`,
   ];
-  for (const axis of axes) lines.push(`${axis}: ${overrides[axis] ?? 1}/2`);
-  lines.push("Issues:", ...(issues.length > 0 ? issues.map((issue) => `- ${issue}`) : ["- none"]));
+  if (includeAxes) for (const axis of axes) lines.push(`${axis}: ${overrides[axis] ?? 1}/2`);
+  if (includeIssues) lines.push("Issues:", ...(issues.length > 0 ? issues.map((issue) => `- ${issue}`) : ["- none"]));
   lines.push(`Next action: ${nextAction}`, `View adequacy: ${view}/2`, "Decision: " + (reason ? `REJECT — ${reason}` : decision));
   return lines.join("\n") + "\n\n";
 }
@@ -105,6 +114,52 @@ test("an exhausted budget is reported as exhausted, not as a suggestion", async 
   assert.equal(state.budget.exhausted, true);
   assert.equal(state.budget.remaining, 0);
   assert.equal(state.wasteGuard.kind, "budget-exhausted");
+});
+
+test("a logged critique surfaces its blocking axes and follow-up", async () => {
+  const workspacePath = makeWorkspace("verdict-detail", {
+    critique: critiqueBlock({
+      axes: {
+        Accuracy: 2,
+        "Geometry & Proportions": 0,
+        "Materials & Appearance": 1,
+        Completeness: 2,
+        Quality: 2,
+        "Category validity": 2,
+      },
+    }),
+  });
+  const state = await blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "mug" });
+  assert.deepEqual(state.lastVerdict.blockingAxes, ["Geometry & Proportions", "Materials & Appearance"]);
+  assert.deepEqual(state.lastVerdict.issues, []);
+  assert.equal(state.lastVerdict.nextAction, "tighten the silhouette");
+});
+
+test("an absent axes map is not reported as nothing blocking", async () => {
+  const workspacePath = makeWorkspace("verdict-legacy", {
+    critique: critiqueBlock({ includeAxes: false, includeIssues: false }),
+  });
+  const state = await blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "mug" });
+  assert.equal(state.lastVerdict.blockingAxes, undefined);
+  assert.equal(state.lastVerdict.issues, undefined);
+});
+
+test("an all-pass critique reports no blocking axes rather than unknown", async () => {
+  const workspacePath = makeWorkspace("verdict-pass", {
+    critique: critiqueBlock({
+      score: 12,
+      axes: {
+        Accuracy: 2,
+        "Geometry & Proportions": 2,
+        "Materials & Appearance": 2,
+        Completeness: 2,
+        Quality: 2,
+        "Category validity": 2,
+      },
+    }),
+  });
+  const state = await blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "mug" });
+  assert.deepEqual(state.lastVerdict.blockingAxes, []);
 });
 
 test("an identical digest for two consecutive runs is a waste guard, not a verdict to re-earn", async () => {

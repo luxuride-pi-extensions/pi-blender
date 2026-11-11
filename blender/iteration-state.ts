@@ -161,7 +161,7 @@ export async function blenderIterationState(options: {
                 .filter(([, score]) => score <= 1)
                 .map(([label]) => label)
             : undefined,
-          issues: verdict.issues ?? [],
+          issues: verdict.issues,
           nextAction: verdict.nextAction,
         }
       : undefined,

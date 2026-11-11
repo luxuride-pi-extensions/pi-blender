@@ -1271,8 +1271,8 @@ export interface IterationState {
 		 * as an empty list.
 		 */
 		blockingAxes?: string[];
-		/** The critic's concrete issues, line by line. */
-		issues: string[];
+		/** Undefined for a log written before issues were logged; `[]` means none. */
+		issues?: string[];
 		/** The smallest fix the critic asked for, verbatim. */
 		nextAction?: string;
 	};
@@ -1297,7 +1297,7 @@ export interface CritiqueVerdictRecord {
 	rejectReason?: string;
 	/** The six 0-2 axis scores as logged, keyed by their printed label. */
 	axes?: Record<string, number>;
-	/** The critic's concrete issues, line by line. */
+	/** The critic's concrete issues, line by line; undefined when not logged. */
 	issues?: string[];
 	/** The smallest fix the critic asked for, verbatim. */
 	nextAction?: string;

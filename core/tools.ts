@@ -1187,7 +1187,7 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 			? [
 					`Axes: ${Object.entries(result.lastVerdict.axes).map(([label, score]) => `${label} ${score}/2`).join(", ") || "not logged"}`,
 					`Blocking axes: ${result.lastVerdict.blockingAxes === undefined ? "not logged" : result.lastVerdict.blockingAxes.join(", ") || "none"}`,
-					...(result.lastVerdict.issues.length > 0 ? [`Issues: ${result.lastVerdict.issues.join("; ")}`] : []),
+					`Issues: ${result.lastVerdict.issues === undefined ? "not logged" : result.lastVerdict.issues.join("; ") || "none"}`,
 					...(result.lastVerdict.nextAction ? [`Next action: ${result.lastVerdict.nextAction}`] : []),
 				]
 			: []),
