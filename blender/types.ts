@@ -2217,6 +2217,19 @@ export interface ImageProbeResult {
 	edgeSharpness: number | null;
 	/** Dominant subject colours, most common first, as #rrggbb with fractions. */
 	palette: { hex: string; fraction: number }[];
+	/**
+	 * Exposure over the subject only. Fractions are of the sampled subject
+	 * pixels; `any` counts a pixel clipped on at least one channel. Percentiles
+	 * are luma in 0..1, on a deterministic stride sample when the subject is
+	 * large enough to sample.
+	 */
+	exposure: {
+		sampled: boolean;
+		sampleCount: number;
+		clippedHigh: { r: number; g: number; b: number; any: number };
+		clippedLow: { r: number; g: number; b: number; any: number };
+		lumaPercentiles: { p1: number; p50: number; p99: number };
+	};
 	warnings: string[];
 }
 
