@@ -28,9 +28,11 @@ def _ensure_uv(obj):
         other.select_set(False)
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02)
-    bpy.ops.object.mode_set(mode="OBJECT")
+    try:
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02)
+    finally:
+        bpy.ops.object.mode_set(mode="OBJECT")
     return True
 
 
@@ -107,8 +109,11 @@ def bake_normal(
 
     scene = bpy.context.scene
     previous_engine = scene.render.engine
-    previous_samples = getattr(scene.cycles, "samples", None)
-    previous_device = getattr(scene.cycles, "device", None)
+    try:
+        previous_samples = getattr(scene.cycles, "samples", None)
+        previous_device = getattr(scene.cycles, "device", None)
+    except AttributeError as error:
+        raise RuntimeError("normal bake needs the Cycles addon enabled") from error
     bake = scene.render.bake
     previous_bake = {
         "use_selected_to_active": bake.use_selected_to_active,
@@ -140,7 +145,6 @@ def bake_normal(
                 f"({low_triangles} -> {high_triangles} triangles): {error}. "
                 "Lower resolution or samples, or widen cage_extrusion."
             ) from error
-        elapsed = time.monotonic() - started
         try:
             image.filepath_raw = output_path
             image.file_format = "PNG"
@@ -150,6 +154,7 @@ def bake_normal(
             raise RuntimeError(f"Normal bake could not write {output_path} at {resolution}x{resolution} with {samples} samples: {error}") from error
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError(f"Normal bake wrote no PNG at {output_path} at {resolution}x{resolution} with {samples} samples")
+        elapsed = time.monotonic() - started
     finally:
         # Engine, bake settings and selection are all process-wide state: a
         # failure halfway through must not change the next render's cost or look.

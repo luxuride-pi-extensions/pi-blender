@@ -44,6 +44,8 @@ active_before = bpy.context.view_layer.objects.active
 selected_before = list(bpy.context.selected_objects)
 output = os.path.join(tempfile.mkdtemp(prefix="pi-bake-"), "low_normal.png")
 report = bake_module.bake_normal(low, high, output, resolution=64, samples=1, cage_extrusion=0.25)
+check(abs(report["cageExtrusion"] - 0.25) < 1e-9, "the report names the cage extrusion")
+check(report["margin"] == 16, "the report names the bake margin")
 
 check(os.path.exists(output) and os.path.getsize(output) > 0, "the normal map is written")
 check(report["resolution"] == 64 and report["samples"] == 1, "the report names the resolution and samples used")
