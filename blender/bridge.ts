@@ -407,6 +407,21 @@ export async function requestLiveBlenderCapture(options: {
 	});
 }
 
+export interface LiveExecutePythonResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+	changed: boolean;
+	touchedObjects: string[];
+	touchedMaterials: string[];
+	addedObjects: string[];
+	removedObjects: string[];
+	applyObjects: string[];
+	ownedObjects: string[];
+	/** Null when the module owns no datablocks yet: there is no subject to hash. */
+	stateDigest: string | null;
+}
+
 export async function requestLiveBlenderExecutePython(options: {
 	blendPath: string;
 	workspacePath: string;
@@ -414,10 +429,12 @@ export async function requestLiveBlenderExecutePython(options: {
 	userScriptPath: string;
 	saveBeforePath?: string;
 	saveAfter: boolean;
+	/** Ownership from this module's latest generation, so the digest keeps its subject. */
+	ownedObjects?: string[];
 	label?: string;
 	signal?: AbortSignal;
 	timeoutMs?: number;
-}): Promise<{ stdout: string; stderr: string; exitCode: number; changed: boolean }> {
+}): Promise<LiveExecutePythonResult> {
 	return await requestLiveBlenderBridge({
 		payload: {
 			type: "execute-python",
@@ -427,6 +444,7 @@ export async function requestLiveBlenderExecutePython(options: {
 			userScriptPath: options.userScriptPath,
 			saveBeforePath: options.saveBeforePath,
 			saveAfter: options.saveAfter,
+			ownedObjects: options.ownedObjects,
 			label: options.label,
 		},
 		signal: options.signal,

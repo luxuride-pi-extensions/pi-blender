@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
+import { collectModuleOwnership } from "./generations.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import type {
@@ -95,7 +96,6 @@ export function getBranchBlendPath(workspacePath: string, moduleName: string): s
 function buildBranchRunScript(): string {
 	return `
 import contextlib
-import hashlib
 import io
 import json
 import math
@@ -120,18 +120,22 @@ from mathutils import Vector  # pyright: ignore[reportMissingImports]
 # of this algorithm are two answers to "did anything change", and the apply side
 # only trusts a run if both paths agree.
 from fingerprint import content_changed, snapshot
+from module_state import (
+    diff_snapshots,
+    owned_after,
+    state_digest as compute_state_digest,
+    widen_apply_objects,
+)
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
 iteration_path = payload["iterationPath"]
 script_path = payload["scriptPath"]
 module_name = payload["moduleName"]
-owned_objects = set(payload.get("ownedObjects") or [])
+owned_objects = list(payload.get("ownedObjects") or [])
 
 
 before = snapshot(bpy)
-before_objects = set(before["objects"])
-before_materials = set(before["materials"])
 
 globals_dict = {
     "__name__": "__main__",
@@ -159,8 +163,7 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
         os.chdir(previous_cwd)
 
 after = snapshot(bpy)
-after_objects = set(after["objects"])
-after_materials = set(after["materials"])
+delta = diff_snapshots(before, after)
 
 # The same content fingerprint the live bridge reports, from the same snapshot
 # pair. Computed BEFORE framing: the auto-framed camera and its target are
@@ -168,43 +171,25 @@ after_materials = set(after["materials"])
 # every successful framing run as a change and make the flag useless.
 changed = content_changed(before, after)
 
-touched_objects = sorted(
-    name for name in (before_objects | after_objects) if before["objects"].get(name) != after["objects"].get(name)
-)
-touched_materials = sorted(
-    name for name in (before_materials | after_materials) if before["materials"].get(name) != after["materials"].get(name)
-)
+touched_objects = delta["touchedObjects"]
+touched_materials = delta["touchedMaterials"]
 
 # The APPLY set is wider than the touched set, because a datablock that travels
 # alone is invalid: a parented object without its parent is not a usable object,
 # and a parent without its children strands them. The widening happens HERE and
 # is reported in the record, rather than being discovered at apply time — a
 # widened apply set is exactly what turns into a conflict against a sibling.
-
-# Objects the module DELETED. These are removals on apply, never appends, and
-# the distinction matters: a deleted object is also "touched" in the sense that
-# its fingerprint disappeared, so classifying it by touch alone would put it in
-# the apply set and the apply would then fail looking for it in a branch that
-# correctly no longer contains it.
-deleted = before_objects - after_objects
-
-apply_objects = (set(touched_objects) - deleted)
-for name in list(apply_objects):
-    obj = bpy.data.objects.get(name)
-    if obj is None:
-        continue
-    ancestor = obj.parent
-    while ancestor is not None:
-        apply_objects.add(ancestor.name)
-        ancestor = ancestor.parent
-    for descendant in obj.children_recursive:
-        apply_objects.add(descendant.name)
-
+#
 # A deleted object that was only a relative of something touched is NOT counted
 # as deleted by this module: it never asked for its removal, and dropping a
 # sibling because a parent moved would be the module's apply destroying another
 # module's work. Only objects the module itself removed are applied as removals.
-removed_objects = sorted(deleted - (apply_objects & set(after_objects)))
+apply_objects, removed_objects = widen_apply_objects(
+    bpy,
+    touched_objects,
+    delta["removedObjects"],
+    after["objects"],
+)
 
 # ---- auto-framing -----------------------------------------------------------
 # The module's camera is framed HERE, from the bounds of the objects this run
@@ -346,20 +331,9 @@ cameras = [camera_framing] if camera_framing is not None else []
 # not exist yet as a dash while every later run hashes its real content -- so
 # the very first run would always read as a change and every rebuild after it as
 # a second one.
-FRAMING_DATABLOCK_SUFFIXES = (CAMERA_SUFFIX, CAMERA_SUFFIX + "Target")
 bpy.context.view_layer.update()
-owned_objects |= apply_objects
-owned_objects -= set(removed_objects)
-digest_objects = [
-    name for name in sorted(owned_objects)
-    if not name.endswith(FRAMING_DATABLOCK_SUFFIXES)
-]
-state_digest_source = [
-    name + "=" + after["objects"].get(name, "-") for name in digest_objects
-]
-for material_name in sorted(touched_materials):
-    state_digest_source.append(material_name + "=" + after["materials"].get(material_name, "-"))
-state_digest = hashlib.md5("\\x01".join(state_digest_source).encode()).hexdigest()
+owned_objects = owned_after(owned_objects, apply_objects, removed_objects)
+state_digest = compute_state_digest(after, owned_objects, touched_materials)
 
 # The save happens HERE, after the framing and after the apply set is settled --
 # not inside the try above. Saving earlier wrote a branch file without the camera,
@@ -381,7 +355,7 @@ print(json.dumps({
     "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
-    "addedObjects": sorted(after_objects - before_objects),
+    "addedObjects": delta["addedObjects"],
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
     "ownedObjects": sorted(owned_objects),
@@ -490,17 +464,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				// in the assets dir, so nothing about sys.path comes for free and
 				// the shared fingerprint module has to be pointed at explicitly.
 				assetsDir: getBlenderAssetsDir(),
-				// Ownership is CARRIED FORWARD from the module's earlier runs, not
-				// re-derived from the script or from the diff. The fingerprints are
-				// content-based, so a script that removes and rebuilds its part
-				// byte-for-byte applies nothing and looks identical to a script that
-				// did nothing; without a prior record the digest would have an empty
+				// Ownership is CARRIED FORWARD from the module's earlier APPLIED
+				// generations, not re-derived from the script or from the diff. The
+				// fingerprints are content-based, so a script that removes and rebuilds
+				// its part byte-for-byte applies nothing and looks identical to a script
+				// that did nothing; without a prior record the digest would have an empty
 				// subject on exactly the rebuild iterations it exists to measure.
-				ownedObjects: [
-					...((manifest.branchRuns ?? [])
-						.filter((run) => run.module === moduleName)
-						.flatMap((run) => run.ownedObjects ?? [])),
-				],
+				ownedObjects: collectModuleOwnership(manifest, moduleName),
 			},
 			signal: options.signal,
 			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
@@ -612,6 +582,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		scriptPath,
 		branchPath,
 		iteration,
+		sequence,
 		runDir,
 		checkpointPath,
 		exitCode: payload.exitCode,

@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
+import { collectModuleOwnership, isComparableStateDigest, previousModuleGeneration } from "./generations.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
 import type {
 	BlenderModuleRunRecord,
@@ -137,7 +138,11 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
-		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, branchResult)),
+		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+			iteration: branchResult.iteration,
+			sequence: branchResult.sequence,
+			stateDigest: branchResult.stateDigest,
+		})),
 	};
 }
 
@@ -154,26 +159,28 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
  *
  * Only a digest is compared, never a run count: two runs of an unchanged script
  * are expected to match, while two runs of a script being edited under a failing
- * iteration are not. Comparison is against the most recent PRIOR run only, and
- * it is skipped when either side lacks a digest (a pre-digest workspace) rather
- * than guessed.
+ * iteration are not. Comparison is against the most recent PRIOR APPLIED
+ * generation only, and it is skipped when either side lacks a comparable digest
+ * (a pre-digest workspace, an empty subject, or a legacy algorithm) rather than
+ * guessed.
  */
 async function compareWithPreviousDigest(
 	cwd: string,
 	workspace: string,
 	moduleName: string,
-	result: { iteration: number; stateDigest?: string },
+	result: { iteration: number; sequence: number; stateDigest?: string },
 ): Promise<{ stateDigest?: string; unchangedSinceLastRun?: boolean; comparedWithIteration?: number }> {
-	if (!result.stateDigest) return {};
+	if (!isComparableStateDigest(result.stateDigest)) {
+		return result.stateDigest ? { stateDigest: result.stateDigest } : {};
+	}
 	const manifest = await loadWorkspaceManifest(cwd, workspace);
-	const previous = (manifest.branchRuns ?? [])
-		.filter((run) => run.module === moduleName && run.iteration < result.iteration && run.stateDigest)
-		.sort((a, b) => a.iteration - b.iteration)
-		.at(-1);
+	const previous = previousModuleGeneration(manifest, moduleName, result.sequence);
 	// No earlier digest means the comparison is simply unavailable, and saying
 	// "unchanged" about a run nothing was compared against would be a false
 	// all-clear on the one number the loop is about to trust.
-	if (!previous) return { stateDigest: result.stateDigest };
+	if (!previous || !isComparableStateDigest(previous.stateDigest)) {
+		return { stateDigest: result.stateDigest };
+	}
 	return {
 		stateDigest: result.stateDigest,
 		comparedWithIteration: previous.iteration,
@@ -185,6 +192,10 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 	const moduleName = normalizeModuleName(options.moduleName);
 
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
+	// A live-built module must keep its digest subject when it later switches to
+	// the headless path, so ownership is read from the manifest and written back
+	// with the run, exactly as the branch runner does.
+	const ownedObjects = collectModuleOwnership(manifest, moduleName);
 	const moduleDir = getModuleDir(manifest.workspacePath, moduleName);
 	const scriptPath = getModuleScriptPath(manifest.workspacePath, moduleName);
 	if (!(await fileExists(scriptPath))) {
@@ -268,6 +279,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		userScriptPath: effectiveScriptPath,
 		saveBeforePath: undefined,
 		saveAfter: true,
+		ownedObjects,
 		label: `module:${moduleName}`,
 		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
 		signal: options.signal,
@@ -317,13 +329,14 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		renderOutputPath = renderPayload.outputPath;
 	}
 
+	const stateDigest = result.stateDigest ?? undefined;
 	// Publish success: iteration counter, run history, and render output all
 	// land in one manifest write, applied to the state on disk (not this
 	// snapshot) so a concurrent render or save-view is merged, not lost.
 	await updateManifest(manifest.manifestPath, (current) => {
 		applySuccessfulRun(
 			current,
-			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode },
+			{ moduleName, iteration, sequence, checkpointPath, exitCode: result.exitCode, ownedObjects: result.ownedObjects, stateDigest },
 			renderOutputPath ? { path: renderOutputPath, view: viewLabel } : null,
 		);
 	});
@@ -342,6 +355,11 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		renderOutputPath,
 		changed: result.changed,
 		executionMode: "live-session",
+		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+			iteration,
+			sequence,
+			stateDigest,
+		})),
 	};
 }
 
@@ -379,6 +397,8 @@ export function applySuccessfulRun(
 		sequence: number;
 		checkpointPath: string;
 		exitCode: number;
+		ownedObjects?: string[];
+		stateDigest?: string;
 	},
 	renderOutput?: { path: string; view: string } | null,
 ): void {
@@ -393,6 +413,8 @@ export function applySuccessfulRun(
 			sequence: record.sequence,
 			exitCode: record.exitCode,
 			status: "ok",
+			ownedObjects: record.ownedObjects,
+			stateDigest: record.stateDigest,
 		},
 	];
 	if (renderOutput) {

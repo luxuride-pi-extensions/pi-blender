@@ -55,7 +55,7 @@ function branchRun(iteration, stateDigest, module = "mug") {
     scriptPath: `/ws/modules/${module}/script.py`,
     checkpointPath: `/ws/modules/${module}/runs/${String(iteration).padStart(2, "0")}/pre-${String(iteration).padStart(2, "0")}.blend`,
     at: "2026-01-01T00:00:00.000Z",
-    status: "staged",
+    status: "applied",
     touchedObjects: [],
     touchedMaterials: [],
     addedObjects: [],

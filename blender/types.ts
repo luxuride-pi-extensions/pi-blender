@@ -126,6 +126,13 @@ export interface BlenderModuleRunRecord {
 	 * reader can tell which of the two paths changed model.blend.
 	 */
 	viaBranchApply?: string;
+	/**
+	 * Everything this module owns after the run, recorded so a later headless run
+	 * keeps a digest subject instead of restarting from empty.
+	 */
+	ownedObjects?: string[];
+	/** Content hash of the state this run left in model.blend, when it produced one. */
+	stateDigest?: string;
 }
 
 /** Where a staged branch run is in its life. */
@@ -216,6 +223,8 @@ export interface BranchRunResult {
 	scriptPath: string;
 	branchPath: string;
 	iteration: number;
+	/** Claimed iteration, shared by every module run; it is also the record's order. */
+	sequence: number;
 	runDir: string;
 	checkpointPath: string;
 	exitCode: number;
@@ -1377,8 +1386,8 @@ export interface ModuleRunResult {
 	 * previous run's is how a caller learns that an iteration changed nothing,
 	 * without rendering the same bytes and paying a critic to look at them.
 	 *
-	 * Absent on a live-session run: `changed` there is a yes/no content
-	 * comparison rather than a comparable hash.
+	 * Absent when the module owns no datablocks yet, and on runs recorded before
+	 * the live path reported ownership.
 	 */
 	stateDigest?: string;
 	/** True when the previous run of this module produced this same digest. */

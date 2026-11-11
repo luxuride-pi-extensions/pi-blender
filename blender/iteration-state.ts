@@ -2,6 +2,7 @@ import { MAX_ITERATIONS_PER_MODULE, PRESENT_SCORE_THRESHOLD } from "./critique.j
 import { parseCritiqueLog } from "./ranking.js";
 import { readFile } from "node:fs/promises";
 import { getWorkspaceCritiqueLogPath, loadWorkspaceManifest } from "./workspace.js";
+import { collectModuleGenerations, isComparableStateDigest } from "./generations.js";
 import type {
   BlenderWorkspaceManifest,
   CritiqueVerdictRecord,
@@ -27,18 +28,19 @@ interface RunStamp {
   executionMode: "branch" | "live";
 }
 
-/** Newest first, and only successful runs: a failed script is not a generation. */
+/**
+ * Newest first, and only APPLIED generations: a failed script, a conflicted
+ * merge and a branch that is still waiting for its apply are not states the next
+ * run can be compared against, because none of them is in model.blend.
+ */
 function collectRuns(manifest: BlenderWorkspaceManifest, moduleName: string): RunStamp[] {
-  const stamps: RunStamp[] = [];
-  for (const run of manifest.branchRuns ?? []) {
-    if (run.module !== moduleName || run.status !== "staged") continue;
-    stamps.push({ iteration: run.iteration, stateDigest: run.stateDigest, executionMode: "branch" });
-  }
-  for (const run of manifest.moduleRuns ?? []) {
-    if (run.name !== moduleName) continue;
-    stamps.push({ iteration: run.iteration, executionMode: "live" });
-  }
-  return stamps.sort((a, b) => b.iteration - a.iteration);
+	return collectModuleGenerations(manifest, moduleName)
+		.map((generation) => ({
+			iteration: generation.iteration,
+			stateDigest: generation.stateDigest,
+			executionMode: generation.executionMode,
+		}))
+		.sort((a, b) => b.iteration - a.iteration);
 }
 
 function latestVerdict(entries: CritiqueVerdictRecord[], moduleName: string): CritiqueVerdictRecord | undefined {
@@ -69,7 +71,7 @@ function resolveWasteGuard(args: {
     };
   }
   const [newest, previous] = runs;
-  if (newest?.stateDigest && newest.stateDigest === previous?.stateDigest) {
+  if (isComparableStateDigest(newest?.stateDigest) && newest.stateDigest === previous?.stateDigest) {
     return {
       kind: "unchanged-digest",
       detail: `Iteration ${newest.iteration} produced the same content as iteration ${previous.iteration}. A render of it would repeat the last verdict; find why the script did not change the build before running or critiquing again.`,
@@ -121,7 +123,7 @@ export async function blenderIterationState(options: {
   const judgedRun = verdict?.iteration === undefined ? undefined : runs.find((run) => run.iteration === verdict.iteration);
   const laterRun = judgedRun ? runs.find((run) => run.iteration > judgedRun.iteration) : undefined;
   const fixLanded =
-    judgedRun?.stateDigest && laterRun?.stateDigest
+    isComparableStateDigest(judgedRun?.stateDigest) && isComparableStateDigest(laterRun?.stateDigest)
       ? judgedRun.stateDigest !== laterRun.stateDigest
       : undefined;
 

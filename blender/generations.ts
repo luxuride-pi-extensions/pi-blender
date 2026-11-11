@@ -1,0 +1,103 @@
+import type { BlenderWorkspaceManifest } from "./types.js";
+
+/**
+ * One module generation whose content is in model.blend.
+ *
+ * This is the single answer to "what counts as a generation", shared by the
+ * digest comparison and the iteration state. They used to disagree: the digest
+ * compared against any branch run with a digest, including one that was staged
+ * and never applied, failed, or was skipped on a conflict, while the iteration
+ * state counted staged-but-unapplied runs as history. A rejected merge is not a
+ * generation the next run can be compared with, and counting it as one made an
+ * unchanged iteration look changed.
+ *
+ * A branch apply writes BOTH a branch record with status "applied" and a
+ * companion moduleRuns record carrying `viaBranchApply`. Only the branch record
+ * is a generation; the companion is the revert hook for the same work.
+ */
+export interface ModuleGeneration {
+	module: string;
+	iteration: number;
+	sequence: number;
+	stateDigest?: string;
+	ownedObjects?: string[];
+	/** Where the generation ran, for the iteration report. */
+	executionMode: "branch" | "live";
+}
+
+type RunManifest = Pick<BlenderWorkspaceManifest, "branchRuns" | "moduleRuns">;
+
+/** Newest first would be cheaper, but callers need a stable order to compare. */
+export function collectModuleGenerations(manifest: RunManifest, moduleName: string): ModuleGeneration[] {
+	const generations: ModuleGeneration[] = [];
+	for (const run of manifest.branchRuns ?? []) {
+		if (run.module !== moduleName || run.status !== "applied") continue;
+		generations.push({
+			module: run.module,
+			iteration: run.iteration,
+			sequence: run.sequence,
+			stateDigest: run.stateDigest,
+			ownedObjects: run.ownedObjects,
+			executionMode: "branch",
+		});
+	}
+	for (const run of manifest.moduleRuns ?? []) {
+		if (run.name !== moduleName || run.status !== "ok" || run.viaBranchApply) continue;
+		generations.push({
+			module: run.name,
+			iteration: run.iteration,
+			sequence: run.sequence,
+			stateDigest: run.stateDigest,
+			ownedObjects: run.ownedObjects,
+			executionMode: "live",
+		});
+	}
+	return generations.sort((a, b) => a.sequence - b.sequence);
+}
+
+/** The most recent generation strictly before `sequence`, if any. */
+export function previousModuleGeneration(
+	manifest: RunManifest,
+	moduleName: string,
+	sequence: number,
+): ModuleGeneration | undefined {
+	return collectModuleGenerations(manifest, moduleName)
+		.filter((generation) => generation.sequence < sequence)
+		.at(-1);
+}
+
+/**
+ * What this module owns as of its latest generation.
+ *
+ * Ownership is carried forward by the runner, so the latest generation is the
+ * answer. Records written before ownership was recorded have no field at all,
+ * which is different from owning nothing: the fallback unions the known
+ * ownership of earlier generations rather than restarting the digest subject at
+ * empty and reporting the next unchanged run as a change.
+ */
+export function collectModuleOwnership(manifest: RunManifest, moduleName: string): string[] {
+	const generations = collectModuleGenerations(manifest, moduleName);
+	for (let index = generations.length - 1; index >= 0; index -= 1) {
+		const owned = generations[index]?.ownedObjects;
+		if (owned !== undefined) return [...owned].sort();
+	}
+	const known = new Set<string>();
+	for (const generation of generations) {
+		for (const name of generation.ownedObjects ?? []) known.add(name);
+	}
+	return [...known].sort();
+}
+
+/**
+ * A digest is comparable when there is one.
+ *
+ * An empty subject produces no digest, and an empty string must never be
+ * compared: every empty run would match it and read as "unchanged" for a module
+ * whose subject was never recorded. Digests recorded before the shared
+ * accounting used MD5 while current ones use SHA-256; those two values can never
+ * be equal, so an upgrade reports one changed run rather than a false all-clear,
+ * which is the safe direction for the one number the loop trusts.
+ */
+export function isComparableStateDigest(digest: string | undefined | null): digest is string {
+	return typeof digest === "string" && digest.length > 0;
+}
