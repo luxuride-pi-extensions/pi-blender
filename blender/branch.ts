@@ -534,6 +534,18 @@ def _render_review_sheet(plan, framing, render_request):
 camera_plan = payload.get("cameraPlan") or {}
 camera_framing = _frame_module_camera(module_name, camera_plan)
 
+# Save before the preflight: a preflight that runs long must not turn a finished
+# build into a timeout with no branch file. Preflight only reads, so the saved
+# bytes are the bytes it measured.
+if exit_code == 0:
+    bpy.ops.wm.save_mainfile()
+    # A process-level render failure (crash, OOM, timeout) produces no JSON at
+    # all, so the caller cannot tell "nothing was saved" from "the branch is on
+    # disk and only the picture failed" without a marker written before the risky
+    # stage.
+    with open(os.path.join(payload["runDir"], "branch-saved"), "w") as marker:
+        marker.write(module_name)
+
 preflight = None
 if exit_code == 0:
     front = str(camera_plan.get("frontAxis") or "-Y")
@@ -602,19 +614,6 @@ bpy.context.view_layer.update()
 owned_objects = owned_after(owned_objects, apply_objects, removed_objects)
 owned_materials = owned_materials_after(owned_materials, touched_materials)
 state_digest = compute_state_digest(after, owned_objects, owned_materials)
-
-# The save happens HERE, after the framing and after the apply set is settled --
-# not inside the try above. Saving earlier wrote a branch file without the camera,
-# so the render could not find it, and the apply reported the camera as missing
-# from its own branch: the framing existed in memory and nowhere else.
-if exit_code == 0:
-    bpy.ops.wm.save_mainfile()
-    # A process-level render failure (crash, OOM, timeout) produces no JSON at
-    # all, so the caller cannot tell "nothing was saved" from "the branch is on
-    # disk and only the picture failed" without a marker written before the risky
-    # stage.
-    with open(os.path.join(payload["runDir"], "branch-saved"), "w") as marker:
-        marker.write(module_name)
 
 # Framing deliberately does NOT happen again in the apply. This run's render was
 # taken on this branch, so the framing that reaches model.blend is the framing of

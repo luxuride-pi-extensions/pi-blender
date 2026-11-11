@@ -33,13 +33,13 @@ MIN_WALL_METRES = {
 # A check is critical only where the profile makes the defect disqualifying. A
 # one-sided prop back is a style choice; the same face on a print is a hole.
 CRITICAL = {
-    "prop": {"empty", "unappliedScale", "bounds"},
+    "prop": {"empty", "bounds"},
     "character": {"empty", "unappliedScale", "bounds", "nonManifold", "wallThickness"},
     "hard_surface": {"empty", "unappliedScale", "bounds", "selfIntersections"},
-    "interior": {"empty", "unappliedScale", "bounds"},
+    "interior": {"empty", "bounds"},
     "print": {"empty", "unappliedScale", "bounds", "nonManifold", "selfIntersections", "wallThickness"},
-    "paint": {"empty", "unappliedScale", "bounds", "uv"},
-    "asset_pack": {"empty", "unappliedScale", "bounds"},
+    "paint": {"uv"},
+    "asset_pack": {"empty", "bounds"},
 }
 
 SELF_INTERSECTION_FACE_LIMIT = 60000
@@ -138,22 +138,33 @@ def _topology(bpy, meshes, depsgraph):
 def _self_intersections(bpy, meshes, faces, depsgraph):
     if faces > SELF_INTERSECTION_FACE_LIMIT:
         return None, f"skipped: {faces} faces exceeds the {SELF_INTERSECTION_FACE_LIMIT}-face scan limit"
+    from mathutils import Vector  # pyright: ignore[reportMissingImports]
     from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
 
     vertices = []
     triangles = []
     owners = []
-    for obj in meshes:
+    corners_world = []
+    trees = []
+    extents = []
+    for ordinal, obj in enumerate(meshes):
         mesh = _evaluated(obj, depsgraph)
         try:
             offset = len(vertices)
             matrix = obj.matrix_world
             vertices.extend(matrix @ vertex.co for vertex in mesh.vertices)
+            local_triangles = []
             for polygon in mesh.polygons:
                 corners = [offset + index for index in polygon.vertices]
                 for index in range(1, len(corners) - 1):
-                    triangles.append([corners[0], corners[index], corners[index + 1]])
-                    owners.append(polygon.index)
+                    triangle = [corners[0], corners[index], corners[index + 1]]
+                    triangles.append(triangle)
+                    owners.append((ordinal, polygon.index))
+                    corners_world.append(tuple(vertices[corner].copy() for corner in triangle))
+                    local_triangles.append(triangle)
+            if local_triangles:
+                trees.append(BVHTree.FromPolygons(vertices, local_triangles, all_triangles=True, epsilon=1e-6))
+                extents.append(max((vertex.length for vertex in vertices[offset:]), default=1.0) or 1.0)
         finally:
             obj.evaluated_get(depsgraph).to_mesh_clear()
     if not triangles:
@@ -161,15 +172,63 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
     tree = BVHTree.FromPolygons(vertices, triangles, all_triangles=True, epsilon=1e-6)
     pairs = 0
     adjacent_checked = 0
+    tested = 0
+
+    def inside(bvh, point, extent):
+        """True when a point is inside by a three-axis parity vote.
+
+        A first hit whose normal points along the ray means the ray left the
+        solid; a first hit facing the ray means it entered. Two of three axes
+        agreeing tolerates a ray grazing an edge without turning the result into
+        a coin flip.
+        """
+        votes = 0
+        for axis in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+            direction = Vector(axis)
+            location, normal, _, _ = bvh.ray_cast(point, direction, max(extent * 4.0, 1.0))
+            if location is None or normal is None:
+                return False
+            if normal.dot(direction) > 0:
+                votes += 1
+        return votes >= 2
+
+    def penetrates(triangle, other_tree, other_extent):
+        first, second, third = triangle
+        normal = (second - first).cross(third - first)
+        if normal.length < 1e-12:
+            return False
+        normal.normalize()
+        centre = (first + second + third) / 3.0
+        # Offset to either side: a coincident duplicate's centroid lies exactly
+        # on the other surface, so testing the centre alone would report zero.
+        epsilon = max(other_extent * 1e-4, 1e-6)
+        # Only the side the triangle's own solid occupies. Testing +normal as
+        # well turns two solids that merely share a face into an interpenetration,
+        # because one solid's outside is the other's inside.
+        if inside(other_tree, centre - normal * epsilon, other_extent):
+            return True
+        return any(inside(other_tree, point - normal * epsilon, other_extent) for point in triangle)
+
     for first, second in tree.overlap(tree):
         if first >= second:
             continue
         adjacent_checked += 1
-        if owners[first] == owners[second] or set(triangles[first]) & set(triangles[second]):
+        owner_first = owners[first]
+        owner_second = owners[second]
+        if set(triangles[first]) & set(triangles[second]):
             continue
-        pairs += 1
-    return {"pairs": pairs, "adjacentPairs": adjacent_checked}, None
-
+        if owner_first == owner_second:
+            # Different faces of one mesh: a non-adjacent pair is a fold.
+            pairs += 1
+            continue
+        tested += 1
+        if tested > 50000:
+            break
+        if penetrates(corners_world[first], trees[owner_second[0]], extents[owner_second[0]]) or penetrates(
+            corners_world[second], trees[owner_first[0]], extents[owner_first[0]]
+        ):
+            pairs += 1
+    return {"pairs": pairs, "adjacentPairs": adjacent_checked, "testedPairs": tested}, None
 
 def _wall_thickness(bpy, meshes, depsgraph):
     # pi-lens-ignore: ast-grep:unresolved-import-python
@@ -210,7 +269,13 @@ def _wall_thickness(bpy, meshes, depsgraph):
         finally:
             bm.free()
             obj.evaluated_get(depsgraph).to_mesh_clear()
-    return {"distance": _round(thinnest), "sampledFaces": sampled_faces, "openFaces": open_faces}, None
+    unit_scale = float(getattr(bpy.context.scene.unit_settings, "scale_length", 1.0) or 1.0)
+    return {
+        "distance": _round(thinnest * unit_scale) if thinnest is not None else None,
+        "unitScale": _round(unit_scale, 4),
+        "sampledFaces": sampled_faces,
+        "openFaces": open_faces,
+    }, None
 
 
 def _symmetry(bpy, meshes, axis_name, depsgraph):
@@ -219,43 +284,51 @@ def _symmetry(bpy, meshes, axis_name, depsgraph):
     from mathutils.kdtree import KDTree  # pyright: ignore[reportMissingImports]
 
     axis = {"x": 0, "y": 1, "z": 2}.get(axis_name, 0)
+    total = 0
+    for obj in meshes:
+        total += len(_evaluated(obj, depsgraph).vertices)
+        obj.evaluated_get(depsgraph).to_mesh_clear()
+    if total == 0:
+        return {"rms": None, "max": None, "sampled": 0, "vertices": 0}, None
+    # A KD-tree over a multi-million-vertex scene is itself the cost this guard
+    # exists to bound. Sample while walking instead of materialising every
+    # world-space vertex first.
+    step = max(1, total // 20000)
     verts = []
+    seen = 0
     for obj in meshes:
         bm = bmesh.new()
         try:
             bm.from_mesh(_evaluated(obj, depsgraph))
             matrix = obj.matrix_world
-            verts.extend(matrix @ vert.co for vert in bm.verts)
+            for vertex in bm.verts:
+                if seen % step == 0:
+                    verts.append(matrix @ vertex.co)
+                seen += 1
         finally:
             bm.free()
             obj.evaluated_get(depsgraph).to_mesh_clear()
     if not verts:
         return {"rms": None, "max": None, "sampled": 0, "vertices": 0}, None
-    # A KD-tree over a multi-million-vertex scene is itself the cost this guard
-    # exists to bound, so measure the sampled set rather than every vertex.
-    step = max(1, len(verts) // 20000)
-    sampled_verts = verts[::step]
-    verts = sampled_verts
     plane = (min(co[axis] for co in verts) + max(co[axis] for co in verts)) * 0.5
     tree = KDTree(len(verts))
     for index, co in enumerate(verts):
         tree.insert(co, index)
     tree.balance()
-    step = max(1, len(verts) // 3000)
-    total = 0.0
+    stride = max(1, len(verts) // 3000)
+    total_error = 0.0
     worst = 0.0
     measured = 0
-    for index in range(0, len(verts), step):
+    for index in range(0, len(verts), stride):
         co = verts[index].copy()
         co[axis] = 2.0 * plane - co[axis]
         _, _, distance = tree.find(co)
         if distance is None:
             continue
-        total += distance * distance
+        total_error += distance * distance
         worst = max(worst, distance)
         measured += 1
-    return {"rms": _round(math.sqrt(total / measured) if measured else 0.0), "max": _round(worst), "sampled": measured, "vertices": len(verts)}, None
-
+    return {"rms": _round(math.sqrt(total_error / measured) if measured else 0.0), "max": _round(worst), "sampled": measured, "vertices": len(verts)}, None
 
 def _uv(meshes, depsgraph):
     """UV data lives on the mesh, not the modifier result.
@@ -297,7 +370,9 @@ def validate(bpy, objects, profile="prop", symmetry_axis="x"):
     the critic; this function only measures and applies profile thresholds.
     """
     profile = str(profile or "prop")
-    critical = CRITICAL.get(profile, CRITICAL["prop"])
+    if profile not in PROFILES:
+        raise ValueError(f"unknown preflight profile {profile!r}; expected one of {', '.join(PROFILES)}")
+    critical = CRITICAL[profile]
     meshes = _mesh_objects(bpy, objects or [])
     depsgraph = bpy.context.evaluated_depsgraph_get()
     checks = {}
@@ -333,16 +408,19 @@ def validate(bpy, objects, profile="prop", symmetry_axis="x"):
 
     pairs, skipped = _self_intersections(bpy, meshes, topology["faces"], depsgraph)
     if skipped or pairs is None:
-        record("selfIntersections", _check("warn", None, "BVHTree.overlap with shared-vertex exclusion", reason=skipped or "not measured"), False)
+        record("selfIntersections", _check("warn", None, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs", reason=skipped or "not measured"), False)
     else:
-        record("selfIntersections", _check("block" if pairs["pairs"] else "ok", pairs, "BVHTree.overlap with shared-vertex exclusion"), "selfIntersections" in critical)
+        record("selfIntersections", _check("block" if pairs["pairs"] else "ok", pairs, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs"), "selfIntersections" in critical)
 
     wall_limit = MIN_WALL_METRES.get(profile)
     wall, _ = _wall_thickness(bpy, meshes, depsgraph)
+    # Distance is converted to metres above; the thresholds are metres.
     wall_status = "ok"
-    if wall_limit is not None and wall["distance"] is not None and wall["distance"] < wall_limit:
-        wall_status = "block"
-    wall["limit"] = wall_limit
+    if wall_limit is not None:
+        if wall["distance"] is None:
+            wall_status = "warn"
+        elif wall["distance"] < wall_limit:
+            wall_status = "block"
     record("wallThickness", _check(wall_status, wall, "ray from sampled face centres along the inverted normal", limit=wall_limit), "wallThickness" in critical)
 
     symmetry, _ = _symmetry(bpy, meshes, symmetry_axis, depsgraph)

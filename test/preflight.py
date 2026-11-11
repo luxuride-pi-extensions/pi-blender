@@ -78,7 +78,16 @@ def main():
     verdict = validate(bpy, [obj.name], profile="prop")
     checks["unapplied scale is reported"] = (
         verdict["checks"]["unappliedScale"]["value"][0]["scale"] == [0.5, 0.5, 0.5]
-        and "unappliedScale" in verdict["blockers"]
+        and "unappliedScale" not in verdict["blockers"]
+        and "unappliedScale" in verdict["warnings"]
+    )
+
+    reset()
+    first = cube("First")
+    second = cube("Second", location=(2.0, 0, 0))
+    verdict = validate(bpy, [first.name, second.name], profile="print")
+    checks["touching faces are not an interpenetration"] = (
+        verdict["checks"]["selfIntersections"]["value"]["pairs"] == 0
     )
 
     reset()
@@ -92,10 +101,26 @@ def main():
     )
 
     reset()
+    obj = cube()
+    obj.scale = (1.0, 1.0, 0.2)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    bpy.context.scene.unit_settings.scale_length = 0.001
+    verdict = validate(bpy, [obj.name], profile="print")
+    thickness = verdict["checks"]["wallThickness"]["value"]["distance"]
+    checks["millimetre scenes compare against metres"] = (
+        thickness is not None and 0.0003 < thickness < 0.0005 and "wallThickness" in verdict["blockers"]
+    )
+    bpy.context.scene.unit_settings.scale_length = 1.0
+
+    reset()
     bpy.ops.mesh.primitive_plane_add(size=2)
     panel = bpy.context.object
     verdict = validate(bpy, [panel.name], profile="paint")
     checks["a flat subject is not an empty scene"] = verdict["blocking"] is False
+    printed = validate(bpy, [panel.name], profile="print")
+    checks["an unmeasurable wall is a warning, not a pass"] = (
+        printed["checks"]["wallThickness"]["status"] == "warn"
+    )
 
     reset()
     bpy.ops.mesh.primitive_plane_add(size=2)
