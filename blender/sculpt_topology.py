@@ -63,6 +63,8 @@ def ensure_density(obj, strokes, *, max_faces=500_000, subdivide="auto", voxel_s
     """
     if obj is None or obj.type != "MESH":
         raise ValueError("density pass needs a mesh object")
+    if obj.mode != "OBJECT":
+        raise ValueError("density pass needs object mode; switch out of edit or sculpt first")
     before = {"vertices": len(obj.data.vertices), "faces": len(obj.data.polygons)}
     had_uvs = len(obj.data.uv_layers) > 0
     reasons = []

@@ -38,6 +38,10 @@ report = ensure_density(obj, [{"radius": 0.5}], subdivide=6, max_faces=100)
 checks["cap_clamps"] = report["clamped"] is True and report["after"]["faces"] <= 100
 checks["clamp_has_reason"] = any("cap" in reason for reason in report["reasons"])
 
+all_ok = all(checks.values())
+print(json.dumps({"ok": all_ok, "checks": checks}))
+if not all_ok:
+    raise SystemExit(1)
 print("PASS: density pass reports the geometry it leaves")
 print(json.dumps({"ok": all(checks.values()), "checks": checks}))
 if not all(checks.values()):

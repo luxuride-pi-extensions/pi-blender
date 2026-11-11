@@ -97,7 +97,8 @@ checks["mirror_keeps_symmetric_pairs_off_the_plane"] = (
     sum(1 for vert in mirrored.data.vertices if abs(vert.co.x) <= 1e-6) == on_plane_before
 )
 
-print("PASS: sculpt strokes are local, closed and deterministic")
-print(json.dumps({"ok": all(checks.values()), "checks": checks}))
-if not all(checks.values()):
+all_ok = all(checks.values())
+print(json.dumps({"ok": all_ok, "checks": checks}))
+if not all_ok:
     raise SystemExit(1)
+print("PASS: sculpt strokes are local, closed and deterministic")
