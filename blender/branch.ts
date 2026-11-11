@@ -191,6 +191,9 @@ apply_objects, removed_objects = widen_apply_objects(
     touched_objects,
     delta["removedObjects"],
 )
+# widen_apply_objects answers with a list (it is shared with the live bridge,
+# which reports JSON). Framing below adds to this set, so take a set here.
+apply_objects = set(apply_objects)
 
 # ---- auto-framing -----------------------------------------------------------
 # The module's camera is framed HERE, from the bounds of the objects this run

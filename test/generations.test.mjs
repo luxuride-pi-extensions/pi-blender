@@ -73,6 +73,9 @@ test("a failed or conflicted run between two applied ones is skipped, not the ne
 
 	assert.equal(previousModuleGeneration(manifest, "mug", 5)?.iteration, 4);
 	assert.equal(collectModuleGenerations(manifest, "mug")[1].stateDigest, "good-four");
+	// The old predicate took the newest run below the target regardless of
+	// status, which would answer 3 here. Only the applied one may be a baseline.
+	assert.equal(previousModuleGeneration(manifest, "mug", 3)?.stateDigest, "good-one");
 });
 
 test("the moduleRun a branch apply writes is not a second generation", () => {
@@ -148,6 +151,9 @@ test("an empty digest is not comparable, so it can never read as unchanged", () 
 	assert.equal(isComparableStateDigest(""), false);
 	assert.equal(isComparableStateDigest(undefined), false);
 	assert.equal(isComparableStateDigest(null), false);
-	assert.equal(isComparableStateDigest("abc"), true);
+	// A 32-hex legacy MD5 value is not a SHA-256 digest; comparing it with a new
+	// run would report a change that did not happen.
+	assert.equal(isComparableStateDigest("abc"), false);
+	assert.equal(isComparableStateDigest("0".repeat(32)), false);
 	assert.equal(isComparableStateDigest("0".repeat(64)), true);
 });

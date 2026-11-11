@@ -61,7 +61,7 @@ function branchRun(iteration, stateDigest, module = "mug") {
     addedObjects: [],
     removedObjects: [],
     applyObjects: [],
-    stateDigest,
+    stateDigest: stateDigest.padEnd(64, "0"),
   };
 }
 
@@ -190,4 +190,14 @@ test("a missing moduleName is refused rather than summarised for every module at
     () => blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "  " }),
     /requires the moduleName/,
   );
+});
+
+test("a staged branch is not the last run, because it applied nothing", async () => {
+  const applied = branchRun(1, "aaa");
+  const staged = { ...branchRun(2, "bbb"), status: "staged" };
+  const workspacePath = makeWorkspace("staged-only", {
+    manifest: manifestFor({ branchRuns: [applied, staged] }),
+  });
+  const state = await blenderIterationState({ cwd: root, workspace: workspacePath, moduleName: "mug" });
+  assert.equal(state.lastRun.iteration, 1, "the staged branch never reached model.blend");
 });

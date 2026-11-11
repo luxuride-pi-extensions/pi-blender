@@ -120,5 +120,8 @@ function union(
  * which is the safe direction for the one number the loop trusts.
  */
 export function isComparableStateDigest(digest: string | undefined | null): digest is string {
-	return typeof digest === "string" && digest.length > 0;
+	// SHA-256 output only. An MD5 digest from a pre-#57 workspace and an empty
+	// subject both mean "no comparable state": comparing either would report a
+	// change that did not happen, or an unchanged build that did.
+	return typeof digest === "string" && /^[0-9a-f]{64}$/i.test(digest);
 }

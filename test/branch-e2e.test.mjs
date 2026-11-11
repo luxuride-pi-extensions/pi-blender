@@ -761,6 +761,18 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
 			render: false,
 			timeoutSeconds: 300,
 		});
+		// Re-run the paint module untouched: its geometry set is empty, so the
+		// digest can only survive if material ownership was carried forward.
+		const repainted = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "glaze",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.ok(painted.stateDigest, "a material-only edit still has a subject");
+		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
+		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
 		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");

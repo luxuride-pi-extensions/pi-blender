@@ -144,12 +144,13 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly seven files
-      # and 41 tests survive:
+      # not exist -- which is the state this step creates. Exactly eight files
+      # and 44 tests survive:
       #
       #   concurrency-budget.test.mjs   11
       #   generations.test.mjs           8
       #   headless-changed.test.mjs      2
+      #   live-ownership.test.mjs        3
       #   module-paths.test.mjs          7
       #   module-state.test.mjs          5
       #   tool-params.test.mjs           3
@@ -164,7 +165,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the seven core-free suites
+      - name: typecheck and the eight core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -176,6 +177,7 @@ jobs:
             test/concurrency-budget.test.mjs \
             test/generations.test.mjs \
             test/headless-changed.test.mjs \
+            test/live-ownership.test.mjs \
             test/module-paths.test.mjs \
             test/module-state.test.mjs \
             test/tool-params.test.mjs \
@@ -268,7 +270,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations \
-                          -e module-state)
+                          -e live-ownership -e module-state)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.

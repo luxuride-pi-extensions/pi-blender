@@ -161,8 +161,8 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
  * are expected to match, while two runs of a script being edited under a failing
  * iteration are not. Comparison is against the most recent PRIOR APPLIED
  * generation only, and it is skipped when either side lacks a comparable digest
- * (a pre-digest workspace, an empty subject, or a legacy algorithm) rather than
- * guessed.
+ * (a pre-digest workspace, an empty subject, or a 32-hex MD5 legacy value)
+ * rather than guessed.
  */
 async function compareWithPreviousDigest(
 	cwd: string,
@@ -376,12 +376,17 @@ export function pruneRevertedGenerations(
 	target: { name: string; sequence: number } | undefined,
 ): void {
 	if (!target) return;
-	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => run.sequence < target.sequence);
+	// Records written before `sequence` existed use the iteration they claimed;
+	// both counters only ever go up, so treating the missing field as its
+	// iteration keeps the comparison the same instead of silently pruning or
+	// silently ignoring the record.
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	current.moduleRuns = (current.moduleRuns ?? []).filter((run) => sequence(run) < target.sequence);
 	// Not scoped to the target module: the checkpoint is a whole-file restore,
 	// so every module's applied generation at or after this point is gone, not
 	// just the one being reverted.
 	current.branchRuns = (current.branchRuns ?? []).filter(
-		(run) => run.sequence < target.sequence || run.status !== "applied",
+		(run) => sequence(run) < target.sequence || run.status !== "applied",
 	);
 }
 
@@ -491,7 +496,12 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 
 	// Guard against the destructive case: reverting module A after module B ran
 	// throws away B's work too, because they share one model.blend.
-	const laterRuns = moduleRuns.filter((run) => run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER));
+	// A pre-`sequence` record still blocks a revert: `undefined > n` is false,
+	// which would let the revert discard its work without a guard.
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	const laterRuns = moduleRuns.filter(
+		(run) => sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER),
+	);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");
