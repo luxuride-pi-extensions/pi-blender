@@ -18,7 +18,7 @@ thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
-skills: blender-modules, blender-paint
+skills: blender-modules, blender-paint, blender-sculpt
 defaultContext: fresh
 defaultProgress: false
 ---

@@ -5,7 +5,7 @@ description: Paint textures, UVs, vertex/weight colors, and pose armatures in a 
 
 # Blender Paint
 
-Use this skill when the user wants texture paint, UV painting/UV layout, vertex paint, weight paint, face paint, sculpting, or bone/rig work (pose, edit armature) in a Blender workspace.
+Use this skill when the user wants texture paint, UV painting/UV layout, vertex paint, weight paint, face paint, or bone/rig work (pose, edit armature) in a Blender workspace.
 
 Core idea: Blender's paint strokes are interactive UI actions and cannot be driven reliably by scripts. Instead, **apply the paint result as bpy data** (image pixels, UV layer coordinates, vertex color layers, vertex group weights, bone transforms), then **switch the live viewport into the matching paint mode** with `blender_set_mode` so the user sees the correct workspace and can refine by hand.
 
@@ -27,13 +27,13 @@ Workflow:
 Loop rules (shared — keep byte-identical in every skill that runs the loop): run at most five critic iterations per module; the critic calls `blender_log_critique`; stop when the critic passes or the cap is reached. Before spending another run, call `blender_iteration_state`: an exhausted budget, two identical critiques, or an unchanged digest ends the loop. Present the result when the loop ends.
 
 6. The worker is responsible for setting the live viewport into the paint context with `blender_set_mode`:
-   - texture paint → `TEXTURE_PAINT`, vertex paint → `VERTEX_PAINT`, weight paint → `WEIGHT_PAINT`, face paint → `FACE_PAINT`, sculpt → `SCULPT`, UV work → `UV` (enters edit mode with the viewport UV editor overlay on), pose → `POSE`, rig editing → `EDIT_ARMATURE`.
+   - texture paint → `TEXTURE_PAINT`, vertex paint → `VERTEX_PAINT`, weight paint → `WEIGHT_PAINT`, face paint → `FACE_PAINT`, UV work → `UV` (enters edit mode with the viewport UV editor overlay on), pose → `POSE`, rig editing → `EDIT_ARMATURE`.
    - Pass `objectName` when the target is not the active object. Paint modes require a MESH; `POSE`/`EDIT_ARMATURE` require an ARMATURE — the tool returns an error otherwise.
    - With no watch window open the call reports `switched: false` and a `reason`. That is not a failure and not a reason to stop: the paint is bpy data and is already applied, so continue to the critic and mention in the report that the viewport was not switched, so the user can open `/blender-watch` and look at it themselves.
 7. Spawn a fresh `blender-critic`. It renders with `blender_render` (live, material-preview) to verify: painted textures/vertex colors should be visible on the model; for UV layout, render is optional but for weight paint a quick render or `blender_scene_info` re-check of vertex groups is enough. It then reports and logs its verdict, and you decide whether to stop or issue a follow-up brief (max 5 iterations, exactly like the blender-edit skill): score accuracy/geometry/materials/completeness/quality 0-2 each plus view adequacy. Remember the critic's one-image budget: it gets ONE render and at most ONE reference, so a paint pass that needs several angles costs several fresh critics, and each of their critiques spends one of the same five per-module slots.
 
 Rules:
-- Do not simulate interactive brush strokes with `bpy.ops.sculpt.brush_stroke`. Sculpt strokes are **data**: use the deterministic helpers in `blender/sculpt.py` (`docs/SCULPT.md`), and add vertices with `blender/sculpt_topology.py` before deforming a primitive.
+- Sculpt is surface geometry, not paint: use the `blender-sculpt` skill (stroke data in `blender/sculpt.py`, no brush ops), and switch to `SCULPT` only so the user can see it. Do not simulate `bpy.ops.sculpt.brush_stroke`.
 - Always create or verify the paint target data (image, UV layer, color attribute, vertex group, bone) in the same script run before writing into it.
 - Image pixel writes use straight RGBA floats in [0,1]; remember `image.update()` after bulk pixel assignment before saving.
 - After UV or texture edits that changed material images, save the image out to the workspace (`image.filepath_raw` under `$workspace` + `image.save()` or `image.save_as()`) when the user needs the file, and note the path in the result.

@@ -60,7 +60,7 @@ inheritSkills: true
 # Recorded, not granted. `skills:` was how a spawned child was told what to
 # load; a command session instead discovers the skills this extension publishes
 # through resources_discover, which is the authoritative list.
-skills: blender-create, blender-edit
+skills: blender-create, blender-edit, blender-sculpt
 defaultContext: fresh
 defaultProgress: false
 ---
@@ -529,6 +529,11 @@ convention is missing from this list it does not exist.
   stall the build. The paint is bpy data either way, so carry on to the critic
   and note in the report that the viewport was not switched, because only the
   user can run `/blender-watch` to see it.
+- **Sculpt work**: organic surface change (rounding a shoulder, softening an
+  edge, repairing symmetry) is not paint. Load `blender-sculpt`, brief the
+  worker with a stroke table and a face cap, and have the worker report the
+  sculpt probe (self-intersections, wall thickness, symmetry, density), not just
+  a render. Deterministic strokes only; no brush sessions.
 - **Paint and UV work**: inspect first with `blender_scene_info` categories
   `uv`, `textures`, `armatures`, `paintSettings`, then brief the worker to
   apply paint as bpy data in the script it authors (image pixels, UV layer
@@ -942,9 +947,11 @@ rather than asking or guessing.
 
 The extension publishes its skills through `resources_discover`, and the ones
 that matter here are `blender-create` (starting a scene in a new managed
-workspace) and `blender-edit` (changing an existing workspace or a source
-blend, with inspection before mutation). Read the matching skill before the
-first build in a session, and follow it over your own instinct about how a
+workspace), `blender-edit` (changing an existing workspace or a source blend,
+with inspection before mutation) and `blender-sculpt` (deterministic stroke
+tables, density budgets and the sculpt probe for organic surface work). Read the
+matching skill before the first build in a session, and follow it over your own
+instinct about how a
 workspace should be initialised. The `skills:` line in the frontmatter above
 records what this role expects; it does not grant them, and a skill the
 extension does not publish is one you cannot open.
