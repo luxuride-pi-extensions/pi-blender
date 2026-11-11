@@ -456,17 +456,24 @@ test("the revert checkpoint describes the state the run started from", { skip },
 		await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", render: false, timeoutSeconds: 300 });
 
 		const marker = join(ws.workspacePath, "slow.started");
+		const fastDone = join(ws.workspacePath, "fast.done");
 		writeScript(
 			ws.workspacePath,
 			"slow",
 			`
-import bpy, time
+import bpy, os, time
 bpy.data.objects["Mug"].location.x = 3.0
 open(${JSON.stringify(marker)}, "w").write("started")
 bpy.context.view_layer.update()
-time.sleep(2.0)
+for _ in range(1200):
+    if os.path.exists(${JSON.stringify(fastDone)}):
+        break
+    time.sleep(0.1)
+else:
+    raise RuntimeError("the fast module never completed")
 `,
 		);
+		const beforeSlow = readFileSync(ws.blendPath);
 		const slowPromise = branch.blenderBranchRun({
 			cwd: ws.root,
 			workspace: ws.workspacePath,
@@ -481,11 +488,19 @@ time.sleep(2.0)
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 
-		// Apply a sibling while the slow run is still sleeping inside its script.
+		// Apply a sibling while the slow run is still polling inside its script.
+		// The poll keeps the overlap causal rather than a race with a sleep: the
+		// slow run cannot finish until this test has seen the fast apply return.
 		writeScript(ws.workspacePath, "fast", box("Fast", 1.0, 1.0, 1.0, 0, 5, 0));
 		await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "fast", render: false, timeoutSeconds: 300 });
+		writeFileSync(fastDone, "done");
 
 		const slow = await slowPromise;
+		assert.deepEqual(
+			readFileSync(slow.checkpointPath),
+			beforeSlow,
+			"the checkpoint must be byte-identical to model.blend before the run started, not a later read",
+		);
 		const checkpointNames = await objectNames(ws.root, slow.checkpointPath);
 		assert.ok(checkpointNames.includes("Mug"), "the checkpoint is model.blend before this run");
 		assert.ok(

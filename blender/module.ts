@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
@@ -444,8 +444,16 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	}
 
 	// Guard against the destructive case: reverting module A after module B ran
-	// throws away B's work too, because they share one model.blend.
-	const laterRuns = moduleRuns.filter((run) => run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER));
+	// throws away B's work too, because they share one model.blend. Sequence
+	// order alone is not enough: a sibling that claimed a LOWER sequence can
+	// apply after this checkpoint was taken, so a run that landed after the
+	// checkpoint is "later" whatever number it claimed.
+	const checkpointTakenAt = (await stat(checkpointPath)).mtimeMs;
+	const laterRuns = moduleRuns.filter(
+		(run) =>
+			run !== target &&
+			(run.sequence > (target?.sequence ?? Number.MAX_SAFE_INTEGER) || Date.parse(run.at) > checkpointTakenAt),
+	);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");

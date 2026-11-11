@@ -462,13 +462,18 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
 	await copyFile(manifest.blendPath, branchPath);
 
-	// The revert checkpoint must describe the state this run REPLACES, so it is
-	// taken from the same read of model.blend as the branch copy. Taking it
-	// after the script (as this used to) lets a sibling's apply land in the
-	// window, and the checkpoint then carries work this run never saw: reverting
-	// would silently keep the sibling while claiming to undo this module.
+	// The revert checkpoint must describe the state this run REPLACES. Copying
+	// the branch rather than re-reading model.blend makes it the SAME read: an
+	// apply landing between two reads would put a sibling's merged work into the
+	// checkpoint, and a revert would then silently keep work this run never saw.
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
-	await copyFile(manifest.blendPath, checkpointPath);
+	try {
+		await copyFile(branchPath, checkpointPath);
+	} catch (error) {
+		await rm(branchPath, { force: true }).catch(() => undefined);
+		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		throw error;
+	}
 
 	const rawScript = await readFile(scriptPath, "utf-8");
 	let effectiveScriptPath = scriptPath;
@@ -1106,8 +1111,9 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			}
 			// An apply is a module run as far as revert is concerned: it changed
 			// model.blend, so it needs a run record with a checkpoint the revert
-			// can restore. Recorded HERE rather than at run time, because the
-			// checkpoint is the state the apply replaced and is written by the run.
+			// can restore. Recorded HERE rather than at run time. The checkpoint is
+			// the state the RUN replaced, taken when its branch was copied, so it
+			// can predate this apply by however long the branch was staged.
 			const moduleRuns = (current.moduleRuns ?? []) as BlenderModuleRunRecord[];
 			current.moduleRuns = [
 				...moduleRuns,
