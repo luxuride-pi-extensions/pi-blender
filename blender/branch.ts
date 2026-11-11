@@ -462,6 +462,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
 	await copyFile(manifest.blendPath, branchPath);
 
+	// The revert checkpoint must describe the state this run REPLACES, so it is
+	// taken from the same read of model.blend as the branch copy. Taking it
+	// after the script (as this used to) lets a sibling's apply land in the
+	// window, and the checkpoint then carries work this run never saw: reverting
+	// would silently keep the sibling while claiming to undo this module.
+	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
+	await copyFile(manifest.blendPath, checkpointPath);
+
 	const rawScript = await readFile(scriptPath, "utf-8");
 	let effectiveScriptPath = scriptPath;
 	if (!rawScript.includes(MODULE_PREAMBLE_MARKER)) {
@@ -509,12 +517,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		// A headless launch that never produced JSON leaves the branch in an
 		// unknown state, so it is removed rather than left for an apply to find.
 		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw error;
 	}
 
 	if (payload.exitCode !== 0) {
 		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw new Error(
 			formatBlenderFailure({
@@ -560,11 +570,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		});
 	}
 
-	// The checkpoint is model.blend as it is NOW, which is the state the apply
-	// will replace — so it is taken before the apply, at run time, and is the
-	// point blender_module_revert restores.
-	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
-	await copyFile(manifest.blendPath, checkpointPath);
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const record: BlenderBranchRunRecord = {
