@@ -22,7 +22,7 @@
  * and model.blend is left holding whichever branch was applied first.
  */
 
-import { copyFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
@@ -460,6 +460,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// a sibling has been applied since, which is what makes concurrent branches
 	// meaningful rather than a race.
 	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
+	const capturedAt = new Date();
 	await copyFile(manifest.blendPath, branchPath);
 
 	// The revert checkpoint must describe the state this run REPLACES. Copying
@@ -469,8 +470,15 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
 	try {
 		await copyFile(branchPath, checkpointPath);
+		// The checkpoint's mtime is the revert guard's clock, and copyFile stamps
+		// it when the copy FINISHES, after the read it represents. Dating it to
+		// the read closes that window: a run that applied while the bytes were
+		// being copied is then still seen as later. Erring early can only add
+		// refusals, never lose a sibling's work.
+		await utimes(checkpointPath, capturedAt, capturedAt);
 	} catch (error) {
 		await rm(branchPath, { force: true }).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw error;
 	}
