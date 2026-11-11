@@ -144,8 +144,8 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly ten files
-      # and 63 tests survive:
+      # not exist -- which is the state this step creates. Exactly eleven files
+      # and 65 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
@@ -156,7 +156,7 @@ jobs:
       #   module-state.test.mjs          6
       #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
-      #   unchanged-routing.test.mjs     1
+      #   unchanged-routing.test.mjs     3
       #   windowless-tools.test.mjs      5
       #
       # Every other file fails at import on one hard error --
@@ -340,7 +340,7 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "63 tests ran, in 11 files: camera-plan, concurrency-budget,"
+            echo "65 tests ran, in 11 files: camera-plan, concurrency-budget,"
             echo "generations, headless-changed, live-ownership, module-paths,"
             echo "module-state, tool-params, tool-surface, unchanged-routing and"
             echo "windowless-tools."

@@ -13,7 +13,7 @@ test("an unchanged branch is not applied and its render is reused", () => {
 
 test("the module path treats an unchanged apply as success", () => {
 	assert.match(module, /unchanged && branchResult\.changed === false/);
-	assert.match(module, /unchanged rebuild; model\.blend was not rewritten/);
+	assert.match(module, /no fingerprint-visible change; model\.blend was not rewritten/);
 });
 
 test("the reuse key covers only picture inputs", () => {

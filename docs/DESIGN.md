@@ -172,8 +172,8 @@ Start pi in any project dir. The extension:
   (`changed: false`, `reused: true`; the apply marks the branch `unchanged`
   instead of rewriting identical bytes). A picture input the content
   fingerprint cannot see — view, resolution, samples, engine, review sheet or
-  camera plan — forces the render through `forceRender`.
-  and `blender_session_context` reads the blend on disk
+  camera plan — forces the render through `forceRender`, and
+  `blender_session_context` reads the blend on disk.
 - registers the `/blender` slash command — everything after `/blender`
   becomes the Blender task and engages the extension. The session it engages
   IS the manager: there is no manager subagent and no router hop, so the

@@ -147,7 +147,10 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			cameraPlan: branchResult.cameraPlan,
 			reviewSheet: branchResult.reviewSheet,
 			reused: branchResult.reused,
-			warnings: ["unchanged rebuild; model.blend was not rewritten", ...branchResult.cameraPlan.warnings],
+			warnings: [
+			"no fingerprint-visible change; model.blend was not rewritten",
+			...branchResult.cameraPlan.warnings,
+		],
 			...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 				iteration: branchResult.iteration,
 				sequence: branchResult.sequence,
@@ -156,7 +159,8 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		};
 	}
 	const blocking = skipped.filter((entry) => entry.reason !== "unchanged");
-	if (blocking.length > 0 || applyResult.missing.includes(moduleName)) {
+	const merged = applyResult.applied.some((entry) => entry.module === moduleName);
+	if (blocking.length > 0 || applyResult.missing.includes(moduleName) || (!merged && branchResult.changed !== false)) {
 		throw new Error(
 			`Module "${moduleName}" ran headlessly but was NOT merged into model.blend: ` +
 				`${blocking[0]?.conflicts.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`).join("; ") ?? "its branch blend went missing"}. ` +

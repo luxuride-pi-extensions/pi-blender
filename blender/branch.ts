@@ -813,8 +813,26 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// picture the critic can be pointed at; a staged branch's render was never
 	// merged, so reusing it would show work that is not in model.blend.
 	const previousRenderRun = [...(manifest.branchRuns ?? [])]
-		.filter((run) => run.module === moduleName && run.status === "applied" && run.renderOutputPath)
+		.filter(
+			(run) =>
+				run.module === moduleName &&
+				run.status === "applied" &&
+				run.renderOutputPath &&
+				existsSync(run.renderOutputPath),
+		)
 		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0];
+	// A picture of model.blend is only reusable if no OTHER module has landed
+	// since it was taken. This module's own apply advances the sequence and the
+	// file identically, so counting it would force a render on every re-run.
+	const appliedWatermark = Math.max(
+		0,
+		...(manifest.branchRuns ?? [])
+			.filter((run) => run.status === "applied" && run.module !== moduleName)
+			.map((run) => run.sequence),
+		...(manifest.moduleRuns ?? [])
+			.filter((run) => run.status === "ok" && run.name !== moduleName)
+			.map((run) => run.sequence),
+	);
 	// Only the fields a picture depends on. The resolved plan carries framing
 	// numbers that are recomputed per run; comparing them would force a render
 	// every time and defeat the fast path the key exists for.
@@ -829,6 +847,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		samples: options.samples ?? null,
 		renderEngine: options.renderEngine ?? null,
 		reviewSheet: options.reviewSheet === true,
+		scene: appliedWatermark,
 	});
 	const forceRender =
 		options.forceRender === true || !previousRenderRun || previousRenderRun.renderKey !== renderKey;
@@ -1577,7 +1596,7 @@ export function contestableStagedRuns(
 	for (const run of manifest.branchRuns ?? []) {
 		// A failed or conflicted attempt proved nothing about the module's state,
 		// so it does not supersede a branch that is still waiting to be applied.
-		if (run.status !== "staged" && run.status !== "applied") continue;
+		if (run.status !== "staged" && run.status !== "applied" && run.status !== "unchanged") continue;
 		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
 	}
 	for (const run of manifest.moduleRuns ?? []) {

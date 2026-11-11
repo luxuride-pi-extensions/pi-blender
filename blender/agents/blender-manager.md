@@ -620,12 +620,15 @@ it.
 
 ## A no-op does not buy a critic
 
-When `iteration_state` reports `unchangedSinceLastRun: true` and the mixed-in
-structural checks have no blockers, do not spawn a critic: the picture is the
-previous picture, and the digest already says the geometry is the same. Report
-the unchanged run and move on to what the brief actually asked for. A change
-outside the scene (a texture file on disk) is invisible to the fingerprint;
-rerun with `forceRender: true` only when you know the picture inputs changed.
+When a `blender_module_run` result reports `unchangedSinceLastRun: true` (or
+plain `changed: false`) and the mixed-in structural checks have no blockers, do
+not spawn a critic: the picture is the previous picture, and the digest already
+says the geometry is the same. Report the unchanged run and move on to what the
+brief actually asked for. A change the fingerprint cannot see — a texture file
+outside the scene, or a paint edit the object hash does not cover — is the
+exception; rerun with `forceRender: true` when you know the picture inputs
+changed. `iteration_state` itself has no such field, because an unchanged run is
+not an applied generation.
 
 ## Image budget
 
