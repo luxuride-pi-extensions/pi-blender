@@ -359,6 +359,80 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
+  # THE bpy CODE PATHS.
+  #
+  # Everything above proves the TypeScript callers and the shipped Python's
+  # syntax. This job is the only one that executes the probes against a real
+  # Blender, because every one of them otherwise skips itself on a runner with
+  # no Blender and the run still looks green.
+  #
+  # A portable Linux build, cached by exact version: flatpak is not available
+  # on hosted runners, and the download dominates the job when the cache misses.
+  # The probe and object-detail suites must report zero skips; the window-only
+  # suites are deliberately not run and stay skipped everywhere.
+  # ===========================================================================
+  blender:
+    name: real Blender probes (headless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install pi-blender
+        run: npm ci --legacy-peer-deps
+
+      - name: cache Blender 4.2.3
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender
+          key: blender-4.2.3-linux-x64
+
+      - name: download and unpack Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/blender"
+          url="https://download.blender.org/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/blender.tar.xz"
+          tar -xJf "${RUNNER_TEMP}/blender.tar.xz" -C "${RUNNER_TEMP}/blender" --strip-components=1
+
+      - name: put Blender on PATH
+        run: |
+          set -euo pipefail
+          echo "${RUNNER_TEMP}/blender" >> "$GITHUB_PATH"
+          echo "BLENDER_PATH=${RUNNER_TEMP}/blender/blender" >> "$GITHUB_ENV"
+
+      - name: verify Blender
+        run: blender --version
+
+      # The probe suites skip themselves when detectBlender() finds nothing.
+      # A skip here is the exact failure this job exists to prevent, so it is
+      # turned into a failed step with the reason, not left as an annotation.
+      - name: headless probes must not skip
+        run: |
+          set -euo pipefail
+          out="$(node --test test/blender-probes.test.mjs test/object-detail.test.mjs 2>&1)"
+          printf '%s\n' "$out"
+          if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
+            echo "::error title=Blender tests skipped despite a real Blender::The" \
+              "probe or object-detail suite skipped at least one test. That" \
+              "means detectBlender() did not find the unpacked build, and" \
+              "this job verified nothing."
+            exit 1
+          fi
+
+      - name: background render, export, compare and import paths
+        run: |
+          node --test test/compare-baseline.test.mjs test/import-asset.test.mjs \
+            test/scene-health.test.mjs test/scene-stats.test.mjs
+
+  # ===========================================================================
   # THE ALWAYS-RUNNING AUDIT.
   #
   # A sibling of `test` with no `if` at all, so it executes on every trigger

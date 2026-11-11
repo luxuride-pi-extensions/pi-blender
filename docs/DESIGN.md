@@ -675,6 +675,19 @@ a machine that configures Blender later is not blocked here.
 npm run check:setup     # read-only: reports problems, repairs nothing, exit 1 on any
 ```
 
+The `blender` CI job runs the headless probe and object-detail suites against
+a portable Blender 4.2.3 build, cached by version. To run the same suites
+locally, put a Blender binary on `PATH` (or set `BLENDER_PATH` for the launch
+path) and run:
+
+```bash
+node --test test/blender-probes.test.mjs test/object-detail.test.mjs
+```
+
+The probe suites skip themselves when no Blender is found; the CI job fails
+instead of accepting that skip, and the window-only tools stay skipped because
+the job has no X server.
+
 `--check` is genuinely read-only, including the agent check: it compares the
 installed copies against the repo and fails on drift instead of silently
 repairing it first. That distinction matters — a check that writes before it
