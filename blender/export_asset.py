@@ -117,7 +117,7 @@ def handle_export(request, open_blend):
     previously_selected = set(obj.name for obj in bpy.context.selected_objects)
     try:
         if selection_given:
-            wanted = set(str(name) for name in selection)
+            wanted = {str(name) for name in selection}
             missing = wanted - set(obj.name for obj in bpy.data.objects)
             if missing:
                 raise RuntimeError(
@@ -149,17 +149,23 @@ def handle_export(request, open_blend):
             "returned successfully and wrote nothing.".format(fmt, export_path)
         )
 
+    exported_names = None if not selection_given else {str(name) for name in selection}
+    exported_materials = {
+        slot.material
+        for obj in bpy.data.objects
+        if exported_names is None or obj.name in exported_names
+        for slot in obj.material_slots
+        if slot.material is not None
+    }
     procedural_materials = sorted(
-        material.name for material in bpy.data.materials if material_summary(material)["procedural"]
+        {material.name for material in exported_materials if material_summary(material)["procedural"]}
     )
     warnings = []
     if procedural_materials and fmt in {"glb", "gltf"}:
         warnings.append(
             "glTF exports image textures, not procedural nodes. These materials "
             "will arrive with only their Principled defaults: {}. Bake them to "
-            "images before exporting (see the bake_textures helper).".format(
-                ", ".join(procedural_materials)
-            )
+            "images before exporting.".format(", ".join(procedural_materials))
         )
 
     return {

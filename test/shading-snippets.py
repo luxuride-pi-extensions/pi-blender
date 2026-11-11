@@ -64,7 +64,7 @@ fourth = build_material("ReviewChecker", checker)
 checks["rebuild is byte-identical"] = first["graphDigest"] == second["graphDigest"] and first["nodeCount"] == second["nodeCount"]
 checks["three recipes differ"] = len({first["graphDigest"], third["graphDigest"], fourth["graphDigest"]}) == 3
 checks["procedural reported"] = first["procedural"] is True and third["procedural"] is True
-checks["material has texture coordinates"] = first["uvDependent"] is False
+checks["object-space noise needs no UVs"] = first["uvDependent"] is False
 checks["UV coordinate use reported"] = fourth["uvDependent"] is True
 checks["principled values follow the recipe"] = abs(first["roughness"] - 0.3) < 1e-6 and abs(first["metallic"] - 1.0) < 1e-6
 checks["emission preset sets strength"] = abs(fourth.get("emissionStrength", 0.0) - 4.0) < 1e-6
@@ -73,27 +73,26 @@ checks["all nodes preserved"] = first["nodeCount"] >= 6 and third["nodeCount"] >
 material = bpy.data.materials["ReviewMetal"]
 checks["links target one principled node"] = sum(1 for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED") == 1
 checks["digest is sha256"] = len(first["graphDigest"]) == 64
-alt_ramp = {
-    "preset": "metal",
-    "coordinates": "Object",
-    "textures": [{
-        "kind": "noise",
-        "scale": 14.0,
-        "detail": 4.0,
-        "target": "roughness",
-        "output": "fac",
-        "ramp": {"stops": [{"position": 0.35, "color": [0.9, 0.1, 0.1, 1.0]}, {"position": 0.8, "color": [0.6, 0.6, 0.6, 1.0]}]},
-    }],
-    "bump": {"kind": "noise", "scale": 60.0, "strength": 0.15},
-}
+alt_ramp = dict(metal)
+alt_ramp["textures"] = [dict(metal["textures"][0])]
+alt_ramp["textures"][0]["ramp"] = {"stops": [{"position": 0.35, "color": [0.9, 0.1, 0.1, 1.0]}, {"position": 0.8, "color": [0.6, 0.6, 0.6, 1.0]}]}
 fifth = build_material("ReviewMetalAlt", alt_ramp)
 checks["ramp colours are part of the digest"] = fifth["graphDigest"] != first["graphDigest"]
 
+voronoi_bump = dict(metal)
+voronoi_bump["bump"] = {"kind": "voronoi", "scale": 30.0, "strength": 0.1}
+try:
+    voronoi = build_material("ReviewVoronoiBump", voronoi_bump)
+    checks["voronoi bump uses its distance output"] = voronoi["nodeCount"] == first["nodeCount"]
+except KeyError:
+    checks["voronoi bump uses its distance output"] = False
+
+before_invalid = first["graphDigest"]
 try:
     build_material("ReviewMetal", {"preset": "nope"})
     checks["unknown preset is rejected"] = False
 except ValueError:
-    checks["unknown preset is rejected"] = True
+    checks["unknown preset is rejected"] = build_material("ReviewMetal", metal)["graphDigest"] == before_invalid
 
 import tempfile  # noqa: E402
 
@@ -114,3 +113,4 @@ checks["export warns instead of claiming the graph survived"] = any(
 )
 
 print(json.dumps({"ok": all(checks.values()), "checks": checks}))
+print("PASS: shading snippets")

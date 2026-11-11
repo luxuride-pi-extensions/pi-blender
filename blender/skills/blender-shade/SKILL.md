@@ -63,7 +63,9 @@ report = build_material("BrushedSteel", {
 - Every node is named deterministically (`Texture0_Noise`, `Ramp0`, `Bump`),
   which keeps the digest stable across runs and Blender sessions.
 - Textures share one `Mapping` node; `coordinates` chooses what drives it.
-  `Generated` and `Object` do not need a UV layer; `UV` does.
+  `Generated` and `Object` do not need a UV layer; `UV` does. Pass `uvMap` when
+  the mesh's active layer is not the one you mean; the default binds whatever
+  the object has active.
 - There are no random seeds: the noise/voronoi fields are inputs, so two runs
   with the same recipe cannot differ.
 - Do not add `ShaderNodeTexImage` unless the image is already packed or on disk;
@@ -74,7 +76,9 @@ report = build_material("BrushedSteel", {
 `build_material` and `blender_scene_info` return the same material summary:
 
 - `procedural` — any node glTF cannot carry (anything beyond Principled, image
-  texture, normal map, bump, mapping and coordinates);
+  texture, normal map, mapping and coordinates). Bump nodes and colour ramps are
+  not delivered either, so the flag is conservative: a bump-only material is
+  reported procedural rather than silently flat;
 - `uvDependent` — the graph reads image or UV data;
 - `graphDigest` — SHA-256 over sorted node inputs and links; compare it, not the
   node count, when asking "is this the same material?";

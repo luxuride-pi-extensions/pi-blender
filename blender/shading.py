@@ -28,7 +28,6 @@ SAFE_GLTF_NODES = {
     "MAPPING",
     "TEX_COORD",
     "UVMAP",
-    "BUMP",
 }
 
 TARGET_SOCKETS = {
@@ -110,6 +109,33 @@ def _configure_texture(node, texture):
     return node
 
 
+def _validate_recipe(recipe):
+    preset = str(recipe.get("preset", "dielectric"))
+    if preset not in PRESETS:
+        raise ValueError(f"unknown shading preset {preset!r}; expected one of {sorted(PRESETS)}")
+    space = str(recipe.get("coordinates", "Generated"))
+    if space not in {"Object", "Generated", "UV"}:
+        raise ValueError(f"coordinates must be Object, Generated or UV, got {space!r}")
+    for texture in recipe.get("textures") or []:
+        kind = str(texture.get("kind", "noise"))
+        if kind not in TEXTURE_TYPES:
+            raise ValueError(f"unknown texture kind {kind!r}; expected one of {sorted(TEXTURE_TYPES)}")
+        output = str(texture.get("output", "color"))
+        if output not in {"color", "fac"}:
+            raise ValueError(f"texture output must be color or fac, got {output!r}")
+        target = str(texture.get("target", "base_color"))
+        if target not in TARGET_SOCKETS:
+            raise ValueError(f"unknown texture target {target!r}; expected one of {sorted(TARGET_SOCKETS)}")
+        ramp = texture.get("ramp")
+        stops = ramp.get("stops", []) if isinstance(ramp, dict) else (ramp or [])
+        if len(stops) > 32:
+            raise ValueError("a colour ramp supports at most 32 stops")
+    bump = recipe.get("bump") or {}
+    kind = str(bump.get("kind", "noise"))
+    if bump and kind not in {"noise", "voronoi"}:
+        raise ValueError(f"bump kind must be noise or voronoi, got {kind!r}")
+
+
 def _ramp_node(nodes, name, stops, interpolation="LINEAR"):
     node = nodes.new("ShaderNodeValToRGB")
     node.name = name
@@ -133,7 +159,13 @@ def _ramp_node(nodes, name, stops, interpolation="LINEAR"):
 
 def _texture_output(node, texture):
     output = str(texture.get("output", "color"))
-    return node.outputs["Color" if output == "color" else "Fac"]
+    if output == "color":
+        return node.outputs["Color"]
+    if "Fac" in node.outputs:
+        return node.outputs["Fac"]
+    if "Distance" in node.outputs:
+        return node.outputs["Distance"]
+    raise ValueError(f"{node.bl_idname} has no fac output; use output: color")
 
 
 def _mapping_node(nodes):
@@ -142,14 +174,14 @@ def _mapping_node(nodes):
     return mapping
 
 
-def _coordinates(nodes, space):
-    coordinates = nodes.new("ShaderNodeTexCoord")
-    coordinates.name = "Coordinates"
+def _coordinates(nodes, space, uv_map):
     if space == "UV":
         uv = nodes.new("ShaderNodeUVMap")
         uv.name = "UVMap"
-        uv.uv_map = "UVMap"
-        return coordinates, uv.outputs["UV"]
+        uv.uv_map = uv_map
+        return None, uv.outputs["UV"]
+    coordinates = nodes.new("ShaderNodeTexCoord")
+    coordinates.name = "Coordinates"
     return coordinates, coordinates.outputs[space]
 
 
@@ -166,13 +198,29 @@ def _digest(nodes, links):
             except TypeError:
                 inputs[socket.name] = _round(value)
         record = {"name": node.name, "type": node.type, "inputs": inputs}
-        if node.type == "VAL_TO_RGB":
+        if node.type == "VALTORGB":
             record["ramp"] = [
                 {"position": _round(element.position), "color": _round(list(element.color))}
                 for element in node.color_ramp.elements
             ]
             record["interpolation"] = node.color_ramp.interpolation
-        for attribute in ("gradient_type", "feature", "wave_type", "noise_dimensions"):
+        record["mute"] = bool(node.mute)
+        for attribute in (
+            "gradient_type",
+            "feature",
+            "distance",
+            "noise_type",
+            "noise_dimensions",
+            "wave_type",
+            "wave_profile",
+            "vector_type",
+            "offset",
+            "offset_frequency",
+            "squash",
+            "color_mode",
+            "hue_interpolation",
+            "uv_map",
+        ):
             if hasattr(node, attribute):
                 record[attribute] = str(getattr(node, attribute))
         node_records.append(record)
@@ -192,7 +240,7 @@ def _digest(nodes, links):
 
 
 def material_summary(material):
-    """Describe what a material's graph is made of, without relying on names."""
+    """Describe what a material's graph is made of."""
     nodes = material.node_tree.nodes if material.use_nodes and material.node_tree else []
     types = [node.type for node in nodes]
     procedural = any(node_type not in SAFE_GLTF_NODES for node_type in types)
@@ -228,9 +276,8 @@ def build_material(name, recipe):
     if not isinstance(recipe, dict):
         raise ValueError("build_material needs a recipe mapping")
 
+    _validate_recipe(recipe)
     preset = str(recipe.get("preset", "dielectric"))
-    if preset not in PRESETS:
-        raise ValueError(f"unknown shading preset {preset!r}; expected one of {sorted(PRESETS)}")
     settings = dict(PRESETS[preset])
     settings.update({key: value for key, value in recipe.items() if key not in {"preset", "textures", "bump"}})
 
@@ -258,14 +305,12 @@ def build_material(name, recipe):
         bsdf.inputs["Emission Strength"].default_value = _number(settings.get("emissionStrength", 0.0), "emissionStrength")
 
     space = str(recipe.get("coordinates", "Generated"))
-    if space not in {"Object", "Generated", "UV"}:
-        raise ValueError(f"coordinates must be Object, Generated or UV, got {space!r}")
 
     textures = list(recipe.get("textures") or [])
     bump = recipe.get("bump")
     mapping = None
     if textures or bump:
-        _coordinates_node, vector = _coordinates(nodes, space)
+        _coordinates_node, vector = _coordinates(nodes, space, str(recipe.get("uvMap") or ""))
         mapping = _mapping_node(nodes)
         links.new(vector, mapping.inputs["Vector"])
         mapping.inputs["Scale"].default_value = _round(settings.get("textureScale", [1.0, 1.0, 1.0]))
@@ -312,7 +357,7 @@ def build_material(name, recipe):
             bump_node.name = "Bump"
             bump_node.inputs["Strength"].default_value = _number(bump.get("strength", 0.2), "bump.strength")
             bump_node.inputs["Distance"].default_value = _number(bump.get("distance", 0.02), "bump.distance")
-            links.new(height.outputs["Fac"], bump_node.inputs["Height"])
+            links.new(_texture_output(height, {"output": "fac"}), bump_node.inputs["Height"])
             links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
 
     material.diffuse_color = _color(settings.get("baseColor"))
