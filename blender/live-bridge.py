@@ -838,6 +838,9 @@ def handle_switch_workspace(request):
         for area in window.screen.areas:
             active_spaces.append(area.type)
 
+    if target_ws is None:
+        raise RuntimeError(f'No workspace contains a {space_type} area.')
+
     return {
         "switched": True,
         "moved": True,

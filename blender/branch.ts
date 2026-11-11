@@ -22,12 +22,14 @@
  * and model.blend is left holding whichever branch was applied first.
  */
 
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { collectModuleOwnership } from "./generations.js";
+import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import type {
@@ -66,6 +68,9 @@ const BRANCH_FILE = "branch.blend";
  * budget, and a fresh blend carries Blender's 1920x1080 otherwise.
  */
 const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
+/** Extra budget a render may take beyond the script's own timeout. */
+const RENDER_TIMEOUT_MS = 360_000;
+const BRANCH_SAVED_MARKER = "branch-saved";
 
 /** The module's branch blend: its private copy of model.blend. */
 export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
@@ -128,6 +133,7 @@ from module_state import (
     state_digest as compute_state_digest,
     widen_apply_objects,
 )
+from render_scene import render_scene
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
@@ -329,8 +335,8 @@ cameras = [camera_framing] if camera_framing is not None else []
 # runs, so the digest has a stable subject whether or not this run changed it.
 #
 # Two exclusions, both to keep the number about geometry a critic would notice.
-# The camera AND its target empty, which is the pair framing rewrites on every
-# run. The suffix test has to cover both names: filtering on CAMERA_SUFFIX alone
+# The camera AND its target are excluded, because framing rewrites that pair on
+# every run. The suffix test has to cover both names: filtering on CAMERA_SUFFIX alone
 # leaves the target empty in the digest, and because the after-snapshot is taken
 # BEFORE framing creates the pair, the first run hashes a datablock that does
 # not exist yet as a dash while every later run hashes its real content -- so
@@ -347,11 +353,35 @@ state_digest = compute_state_digest(after, owned_objects, owned_materials)
 # from its own branch: the framing existed in memory and nowhere else.
 if exit_code == 0:
     bpy.ops.wm.save_mainfile()
+    # A process-level render failure (crash, OOM, timeout) produces no JSON at
+    # all, so the caller cannot tell "nothing was saved" from "the branch is on
+    # disk and only the picture failed" without a marker written before the risky
+    # stage.
+    with open(os.path.join(payload["runDir"], "branch-saved"), "w") as marker:
+        marker.write(module_name)
 
 # Framing deliberately does NOT happen again in the apply. This run's render was
 # taken on this branch, so the framing that reaches model.blend is the framing of
 # the geometry the critic judged; re-solving it against the merged scene would
 # silently disagree with that picture.
+
+# Render inside the SAME process that just authored the branch. The branch
+# blend is saved above, so this is the file the apply will merge and the image
+# the critic will judge; spawning a second Blender only to open the file again
+# bought nothing but a cold start.
+render_result = None
+render_error = None
+render_request = payload.get("render")
+if exit_code == 0 and render_request:
+    if not render_request.get("cameraName") and cameras:
+        render_request["cameraName"] = cameras[0]["cameraName"]
+    # A render failure must not discard the run: the geometry is already saved in
+    # the branch, and the caller can see which stage failed instead of a generic
+    # Blender crash.
+    try:
+        render_result = render_scene(render_request)
+    except Exception as exc:
+        render_error = str(exc)
 
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
@@ -368,6 +398,8 @@ print(json.dumps({
     "ownedMaterials": owned_materials,
     "stateDigest": state_digest,
     "cameras": cameras,
+    "render": render_result,
+    "renderError": render_error,
 }))
 print("__PI_BLENDER_JSON_END__")
 `;
@@ -399,6 +431,18 @@ interface BranchRunPayload {
 	stateDigest: string | null;
 	/** Framing solved for this module's camera; empty when it produced no mesh. */
 	cameras: BranchCameraFraming[];
+	/** The render this run took, or null when rendering was disabled. */
+	render: BranchRenderPayload | null;
+	/** Why the render failed, when the run itself succeeded. */
+	renderError: string | null;
+}
+
+interface BranchRenderPayload {
+	outputPath: string;
+	cameraName: string | null;
+	resolvedEngine: string;
+	requestedEngine: string | string[] | null;
+	resolution: { x: number; y: number; percentage: number };
 }
 
 /**
@@ -477,6 +521,21 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
+	const renderRequested = options.render !== false;
+	// A saved view or a named camera is resolved here, before the run, because it
+	// belongs in the render payload. The module's own auto-framed camera is not
+	// known until the script has run, so it is chosen inside that same process
+	// from `cameras` rather than guessed at here.
+	let requestedCameraName: string | undefined;
+	const savedView = options.view ? manifest.savedViews[options.view] : undefined;
+	if (savedView) {
+		requestedCameraName = getSavedViewCameraObjectName(savedView) ?? undefined;
+	} else if (options.view && options.view !== "active-camera") {
+		// Accept either a named camera object or a saved view; "active-camera"
+		// keeps the branch's own camera, same as the live module render.
+		requestedCameraName = options.view;
+	}
+
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.
 	const priorOwnership = collectModuleOwnership(manifest, moduleName);
@@ -491,6 +550,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				branchPath,
 				workspacePath: manifest.workspacePath,
 				iterationPath: runDir,
+				runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
 				// The generated run script is executed as a string, not as a file
@@ -505,16 +565,35 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				// subject on exactly the rebuild iterations it exists to measure.
 				ownedObjects: priorOwnership.objects,
 				ownedMaterials: priorOwnership.materials,
+				render: renderRequested
+					? {
+							outputPath: join(moduleDir, RENDER_FILE),
+							cameraName: requestedCameraName,
+							resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
+							samples: options.samples,
+							renderEngine: mapBackgroundRenderEngine(options.renderEngine ?? null),
+						}
+					: null,
 			},
 			signal: options.signal,
-			timeoutMs: (options.timeoutSeconds ?? 300) * 1000,
+			timeoutMs: (options.timeoutSeconds ?? 300) * 1000 + (renderRequested ? RENDER_TIMEOUT_MS : 0),
 		});
 	} catch (error) {
-		// A headless launch that never produced JSON leaves the branch in an
-		// unknown state, so it is removed rather than left for an apply to find.
-		await rm(branchPath, { force: true }).catch(() => undefined);
-		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		// A launch that never produced JSON leaves the branch in an unknown state
+		// UNLESS the run script marked it saved before rendering. Then the build is
+		// real, and only the picture failed: keep it so the caller can apply it.
+		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
+		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
+		if (!branchSaved) {
+			await rm(branchPath, { force: true }).catch(() => undefined);
+			await rm(checkpointPath, { force: true }).catch(() => undefined);
+		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		if (branchSaved) {
+			throw new Error(
+				`${(error as Error).message}\nThe branch was saved before the render failed and is intact at ${branchPath}.`,
+			);
+		}
 		throw error;
 	}
 
@@ -533,37 +612,19 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
-	let renderOutputPath: string | null = null;
+	// The render already happened in the run process, against the branch blend
+	// this record describes. An explicit view names itself; otherwise the label
+	// is the module's own framed camera, which is what the run actually used.
+	const renderOutputPath = payload.render?.outputPath ?? null;
+	const renderError = payload.renderError ?? undefined;
+	if (renderRequested && !renderOutputPath) {
+		// The path is stable per module, so a failed render would otherwise leave
+		// the PREVIOUS iteration's picture where a critic expects this one.
+		await rm(join(moduleDir, RENDER_FILE), { force: true }).catch(() => undefined);
+	}
 	let viewLabel = options.view ?? "active-camera";
-	if (options.render !== false) {
-		let cameraName: string | undefined;
-		const savedView = options.view ? manifest.savedViews[options.view] : undefined;
-		if (savedView) {
-			cameraName = getSavedViewCameraObjectName(savedView) ?? undefined;
-		} else if (options.view && options.view !== "active-camera") {
-			// Accept either a named camera object or a saved view; "active-camera"
-			// keeps the branch's own camera, same as the live module render.
-			cameraName = options.view;
-		} else {
-			// No explicit view: render from THIS MODULE'S OWN auto-framed camera.
-			// Falling through to scene.camera would render from the studio camera,
-			// which is aimed at the world origin and points at nothing once a build
-			// has parts — the exact defect the framing exists to remove. Falls back
-			// to the scene camera only when the run produced no mesh to frame.
-			cameraName = payload.cameras[0]?.cameraName;
-			viewLabel = cameraName ?? "active-camera";
-		}
-		renderOutputPath = await renderBranch({
-			cwd: options.cwd,
-			workspacePath: manifest.workspacePath,
-			branchPath,
-			moduleName,
-			outputPath: join(moduleDir, RENDER_FILE),
-			cameraName,
-			resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
-			samples: options.samples,
-			signal: options.signal,
-		});
+	if (renderRequested && !requestedCameraName) {
+		viewLabel = payload.cameras[0]?.cameraName ?? "active-camera";
 	}
 
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
@@ -629,89 +690,12 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedObjects: payload.ownedObjects,
 		ownedMaterials: payload.ownedMaterials,
 		renderOutputPath,
+		renderError,
+		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		stateDigest: payload.stateDigest ?? undefined,
 		status: "staged",
 	};
-}
-
-/**
- * Render a branch blend with a headless Blender.
- *
- * Deliberately the same engine the live render uses (blender/render.ts
- * buildRenderScript), including the enum-probing fallback, so a branch render and
- * a live render of the same scene agree: a critic comparing two images is
- * looking at the geometry, not at two different renderers.
- */
-async function renderBranch(options: {
-	cwd: string;
-	workspacePath: string;
-	branchPath: string;
-	/** Named on the run lease, so an open run says which module it renders. */
-	moduleName?: string;
-	outputPath: string;
-	cameraName: string | undefined;
-	resolution: { x: number; y: number; percentage?: number };
-	samples?: number;
-	signal?: AbortSignal;
-}): Promise<string> {
-	const script = `
-import bpy
-import json
-import os
-import sys
-
-payload = json.loads(sys.argv[sys.argv.index("--") + 1])
-scene = bpy.context.scene
-
-camera_name = payload.get("cameraName")
-if camera_name:
-    camera_object = bpy.data.objects.get(camera_name)
-    if camera_object is None:
-        raise RuntimeError("Camera not found: %s" % camera_name)
-    scene.camera = camera_object
-
-if scene.camera is None:
-    fallback = bpy.data.objects.get("Camera")
-    if fallback is not None:
-        scene.camera = fallback
-if scene.camera is None:
-    raise RuntimeError("No camera available for rendering")
-
-resolution = payload.get("resolution") or {}
-scene.render.resolution_x = int(resolution.get("x", scene.render.resolution_x))
-scene.render.resolution_y = int(resolution.get("y", scene.render.resolution_y))
-scene.render.resolution_percentage = int(resolution.get("percentage", scene.render.resolution_percentage))
-
-samples = payload.get("samples")
-if samples is not None and hasattr(scene, "cycles"):
-    scene.cycles.samples = int(samples)
-
-output_path = payload["outputPath"]
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-scene.render.image_settings.file_format = "PNG"
-scene.render.filepath = output_path
-bpy.ops.render.render(write_still=True)
-
-print("__PI_BLENDER_JSON_START__")
-print(json.dumps({"outputPath": output_path, "cameraName": scene.camera.name if scene.camera else None}))
-print("__PI_BLENDER_JSON_END__")
-`;
-
-	return await runBlenderJson<{ outputPath: string }>({
-		cwd: options.cwd,
-		blendPath: options.branchPath,
-		label: `branch render ${options.moduleName ?? ""}`.trim(),
-		scriptSource: script,
-		payload: {
-			cameraName: options.cameraName,
-			outputPath: options.outputPath,
-			resolution: options.resolution,
-			samples: options.samples,
-		},
-		signal: options.signal,
-		timeoutMs: 360_000,
-	}).then((result) => result.outputPath);
 }
 
 /* ------------------------------------------------------------------ *
