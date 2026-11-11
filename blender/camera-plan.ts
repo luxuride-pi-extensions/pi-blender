@@ -142,6 +142,7 @@ function sanitizePrevious(previous: ResolvedCameraPlan | undefined): ResolvedCam
 	if (!previous.shots.every((shot) => shot && typeof shot === "object" && Object.hasOwn(SHOT_LENS, shot.kind))) {
 		return undefined;
 	}
+	if (previous.distance !== undefined && !Number.isFinite(previous.distance)) return undefined;
 	return previous;
 }
 
@@ -151,12 +152,12 @@ export function resolveCameraPlan(options: CameraPlanOptions): ResolvedCameraPla
 	const warnings: string[] = [];
 	if (!options.profile) warnings.push('No camera profile given; using "prop".');
 	if (!options.frontAxis) warnings.push('No frontAxis given; assuming "-Y". Declare it in the brief.');
-	if (options.profile && !PROFILE_SHOTS[options.profile]) {
+	if (options.profile && !Object.hasOwn(PROFILE_SHOTS, options.profile)) {
 		throw new Error(`Unknown camera profile: ${options.profile}`);
 	}
 	const kinds = options.shots?.length ? options.shots : PROFILE_SHOTS[profile];
 	const shots = kinds.map((kind) => {
-		if (!SHOT_LENS[kind]) throw new Error(`Unknown camera shot: ${kind}`);
+		if (!Object.hasOwn(SHOT_LENS, kind)) throw new Error(`Unknown camera shot: ${kind}`);
 		return {
 			name: kind,
 			kind,

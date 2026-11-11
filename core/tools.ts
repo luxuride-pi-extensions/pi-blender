@@ -784,7 +784,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.",
+				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
