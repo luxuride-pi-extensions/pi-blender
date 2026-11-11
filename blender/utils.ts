@@ -7,7 +7,13 @@ import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
-import { acquireRunLease, releaseRunLease } from "./run-leases.js";
+import {
+	acquireHeadlessSlot,
+	acquireRunLease,
+	claimHeadlessSlot,
+	releaseHeadlessSlot,
+	releaseRunLease,
+} from "./run-leases.js";
 import type {
 	BlenderRunResult,
 	BlenderSavedView,
@@ -211,11 +217,14 @@ export async function runBlenderProcess(options: {
 		console.warn(`[pi-blender] ${clampWarning}`);
 	}
 
+	// The session-wide slot comes first: a worker whose tree already holds the
+	// budget waits here instead of admitting its own private copy of it. The
+	// in-process gate below then orders the remaining local callers.
+	const slot = await acquireHeadlessSlot(budget.effective, { signal: options.signal });
 	const release = await headlessGate().acquire();
 	// Leased after the slot and after the spawn, so what gets counted is a
-	// process that exists. The lease is what makes the count correct across the
-	// session tree: the gate above is per-process, so a manager asking how many
-	// Blenders are open would otherwise see only its own.
+	// process that exists. The lease is the diagnostic count; the slot is what
+	// actually admits the run across processes.
 	let leasedPid: number | null = null;
 	try {
 		const result = await execCommand(command, args, options.cwd, {
@@ -223,6 +232,7 @@ export async function runBlenderProcess(options: {
 			timeout: options.timeoutMs,
 			onSpawn: (pid) => {
 				leasedPid = pid;
+				claimHeadlessSlot(slot, pid);
 				acquireRunLease(pid, options.label);
 			},
 		});
@@ -235,6 +245,7 @@ export async function runBlenderProcess(options: {
 	} finally {
 		if (leasedPid !== null) releaseRunLease(leasedPid);
 		release();
+		releaseHeadlessSlot(slot);
 	}
 }
 
@@ -246,10 +257,10 @@ const warnedAboutClamp = new Set<string>();
  *
  * One gate for the whole process rather than one per call site: the limit is a
  * machine property, and a per-call-site gate would let four callers each admit
- * four runs and produce sixteen on a box that budgeted for four. Deliberately
- * not shared across processes either — each pi session has its own budget to
- * honour, and a cross-process gate would put module workers in the same queue
- * as the session that spawned them.
+ * four runs and produce sixteen on a box that budgeted for four. It is paired
+ * with a cross-process slot in run-leases.ts: this gate orders callers inside
+ * one pi process, and the slot makes the same ceiling hold across the session
+ * tree, so a fan-out cannot multiply it by the number of workers.
  */
 let gate: ParallelRunGate | null = null;
 function headlessGate(): ParallelRunGate {

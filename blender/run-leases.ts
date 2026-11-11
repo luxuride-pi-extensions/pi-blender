@@ -25,7 +25,7 @@
  * EPERM means running, not dead.
  */
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
 
@@ -147,5 +147,267 @@ export function readRunLease(pid: number): HeadlessRunLease | null {
 		return JSON.parse(readFileSync(join(leasesDir(), `${pid}.json`), "utf-8")) as HeadlessRunLease;
 	} catch {
 		return null;
+	}
+}
+/** Directory holding one file per admitted run slot, shared by every pi process. */
+const SLOTS_DIR_NAME = "headless-slots";
+/** Short-lived mutex making "count the slots, take a free one" one action. */
+const ADMISSION_LOCK_NAME = "admission.lock";
+/** An unparseable slot is reclaimed past this age, matching the admission lock. */
+const SLOT_STALE_MS = 10_000;
+/** A wait longer than this is a broken workspace, not a busy one. */
+const SLOT_WAIT_DEADLINE_MS = 120_000;
+
+export interface HeadlessSlot {
+	/** Slot index, or -1 for the no-op slot used when the bridge dir is unusable. */
+	index: number;
+	path: string;
+	/** The limit this slot was admitted under; peers respect the smallest one. */
+	limit: number;
+}
+
+interface SlotRecord {
+	owner: number;
+	blenderPid?: number;
+	limit: number;
+	at: string;
+}
+
+function slotsDir(): string {
+	return join(getBlenderBridgeDir(), SLOTS_DIR_NAME);
+}
+
+function slotPath(index: number): string {
+	return join(slotsDir(), `slot-${index}.json`);
+}
+
+function readSlot(path: string): SlotRecord | null {
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<SlotRecord>;
+		if (typeof parsed.owner !== "number" || typeof parsed.limit !== "number") return null;
+		return {
+			owner: parsed.owner,
+			blenderPid: typeof parsed.blenderPid === "number" ? parsed.blenderPid : undefined,
+			limit: parsed.limit,
+			at: typeof parsed.at === "string" ? parsed.at : "",
+		};
+	} catch {
+		return null;
+	}
+}
+
+function writeSlot(path: string, record: SlotRecord, exclusive: boolean): void {
+	const tmp = `${path}.${process.pid}.tmp`;
+	writeFileSync(tmp, JSON.stringify(record), { flag: "wx" });
+	try {
+		// A link is the exclusive, atomic publish: the slot appears complete or
+		// not at all, so a concurrent reader never sees a truncated record and
+		// frees an index that is already taken.
+		if (exclusive) linkSync(tmp, path);
+		else renameSync(tmp, path);
+	} finally {
+		rmSync(tmp, { force: true });
+	}
+}
+
+/**
+ * Remove slots whose run is gone and report how many slots are live.
+ *
+ * A pi process can die while its Blender keeps running, so the owner alone is
+ * not proof the seat is free: the recorded Blender pid has to be gone too. An
+ * unparseable or 0-byte slot is reclaimed by age, because otherwise one killed
+ * writer wedges that index forever.
+ */
+function liveSlots(): { live: SlotRecord[]; free: number[] } {
+	const live: SlotRecord[] = [];
+	const free: number[] = [];
+	const seen = new Set<number>();
+	let names: string[] = [];
+	try {
+		names = readdirSync(slotsDir());
+	} catch {
+		return { live, free: [0] };
+	}
+	for (const name of names) {
+		const match = /^slot-(\d+)\.json$/.exec(name);
+		if (!match) continue;
+		const index = Number(match[1]);
+		seen.add(index);
+		const path = slotPath(index);
+		const record = readSlot(path);
+		if (!record) {
+			try {
+				if (Date.now() - statSync(path).mtimeMs > SLOT_STALE_MS) rmSync(path, { force: true });
+			} catch {
+				// Vanished between read and stat; the next sweep sees the truth.
+			}
+			free.push(index);
+			continue;
+		}
+		const ownerDead = !pidIsRunning(record.owner);
+		const blenderGone = record.blenderPid === undefined || !pidIsRunning(record.blenderPid);
+		if (ownerDead && blenderGone) {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// A stale slot costs one wait; the next admission retries.
+			}
+			free.push(index);
+			continue;
+		}
+		live.push(record);
+	}
+	free.sort((a, b) => a - b);
+	for (let index = 0; ; index += 1) {
+		if (!seen.has(index)) {
+			free.push(index);
+			break;
+		}
+	}
+	return { live, free };
+}
+
+/**
+ * Take the admission mutex, or report that another process holds it.
+ *
+ * `wx` is the atomic primitive: exactly one process can create the file. A
+ * holder that died leaves the file behind, so both the pid and its age are
+ * checked -- the age covers a reused pid, and a wait that outlives a whole
+ * admission is not a healthy lock either.
+ */
+function tryLockAdmission(): boolean {
+	const path = join(slotsDir(), ADMISSION_LOCK_NAME);
+	try {
+		writeSlot(path, { owner: process.pid, limit: 0, at: new Date().toISOString() }, true);
+		return true;
+	} catch {
+		let pid: number | null = null;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf-8")) as { pid?: unknown; owner?: unknown };
+			const holder = parsed.pid ?? parsed.owner;
+			pid = typeof holder === "number" ? holder : null;
+		} catch {
+			// A torn or vanished lock is handled by the age check below.
+		}
+		let stale = pid !== null && !pidIsRunning(pid);
+		try {
+			stale = stale || Date.now() - statSync(path).mtimeMs > SLOT_STALE_MS;
+		} catch {
+			// Vanished between the open and the stat: the next attempt can take it.
+		}
+		if (stale) {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// Another process won the sweep; retrying is correct either way.
+			}
+		}
+		return false;
+	}
+}
+
+function unlockAdmission(): void {
+	try {
+		rmSync(join(slotsDir(), ADMISSION_LOCK_NAME), { force: true });
+	} catch {
+		// A mutex that cannot be removed blocks until its age makes it stale.
+	}
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let warnedAboutNoop = false;
+
+/**
+ * Admit one headless run against the SESSION-WIDE budget.
+ *
+ * The in-process gate in utils.ts knows only its own count, so four pi workers
+ * each admitting their own limit used to multiply the ceiling by the fan-out
+ * width -- and the RSS clamp with it, because every worker measured the same
+ * free memory at start. Slots in the shared bridge dir make the admission
+ * question cross-process: a worker waits when the session tree already holds
+ * its whole budget, whichever process holds the slots.
+ *
+ * A slot records the limit it was admitted under, and admission uses the
+ * smallest limit among the live slots and the caller. A memory-clamped worker
+ * therefore really holds the line instead of merely contributing its own
+ * number: the session can never exceed the narrowest active budget, and the
+ * hard cap of four runs means the RSS clamp is not multiplied either.
+ */
+export async function acquireHeadlessSlot(
+	limit: number,
+	options?: { signal?: AbortSignal; deadlineMs?: number },
+): Promise<HeadlessSlot> {
+	const noop: HeadlessSlot = { index: -1, path: "", limit: 0 };
+	try {
+		mkdirSync(slotsDir(), { recursive: true });
+	} catch {
+		// Bookkeeping must not break a run, but the fallback restores the old
+		// per-process ceiling, so it is worth saying so once.
+		if (!warnedAboutNoop) {
+			warnedAboutNoop = true;
+			console.error(`[pi-blender] headless slots unavailable under ${slotsDir()}; run budget is per-process here.`);
+		}
+		return noop;
+	}
+	const effective = Math.max(1, Math.trunc(limit));
+	const deadline = Date.now() + (options?.deadlineMs ?? SLOT_WAIT_DEADLINE_MS);
+	let lastLive = liveSlots().live.length;
+	for (;;) {
+		if (options?.signal?.aborted) throw new Error("Headless slot wait was aborted.");
+		if (tryLockAdmission()) {
+			try {
+				const { live, free } = liveSlots();
+				lastLive = live.length;
+				const capacity = Math.min(effective, ...live.map((slot) => slot.limit));
+				if (live.length < capacity) {
+					for (const index of free) {
+						try {
+							writeSlot(slotPath(index), { owner: process.pid, limit: effective, at: new Date().toISOString() }, true);
+							return { index, path: slotPath(index), limit: effective };
+						} catch {
+							// Taken between the sweep and this write; try the next index.
+						}
+					}
+				}
+			} finally {
+				unlockAdmission();
+			}
+		}
+		if (Date.now() > deadline) {
+			throw new Error(
+				`Timed out waiting for a headless run slot (${lastLive} of ${effective} in use). The session-wide budget is held by another pi process; check ${slotsDir()} for a stale slot.`,
+			);
+		}
+		await sleep(100);
+	}
+}
+
+/**
+ * Record the Blender pid on a slot, so a slot whose owning pi process died is
+ * not reclaimed while the Blender it admitted is still running.
+ */
+export function claimHeadlessSlot(slot: HeadlessSlot, blenderPid: number): void {
+	if (slot.index < 0) return;
+	try {
+		writeSlot(
+			slot.path,
+			{ owner: process.pid, blenderPid, limit: slot.limit, at: new Date().toISOString() },
+			false,
+		);
+	} catch {
+		// The owner check still covers the common case.
+	}
+}
+
+/** Release a slot taken by acquireHeadlessSlot. Safe for the no-op slot. */
+export function releaseHeadlessSlot(slot: HeadlessSlot): void {
+	if (slot.index < 0) return;
+	try {
+		rmSync(slot.path, { force: true });
+	} catch {
+		// A slot that outlives its run is swept when its pid dies.
 	}
 }
