@@ -32,6 +32,9 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		meshCount: number;
 		blendPath: string | null;
 		proceduralMaterials: string[];
+		images: number;
+		textures: number;
+		texturesVerified: boolean | null;
 		warnings: string[];
 	}>({
 		payload: {
@@ -66,6 +69,9 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		meshCount: result.meshCount,
 		objects: options.objects,
 		proceduralMaterials: result.proceduralMaterials,
+		images: result.images,
+		textures: result.textures,
+		texturesVerified: result.texturesVerified,
 		warnings: result.warnings,
 	};
 }

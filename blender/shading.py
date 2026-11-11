@@ -293,11 +293,39 @@ def _digest(nodes, links):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def reachable_nodes(material, allowed=None):
+    """Nodes feeding the surface output, optionally through allowed types only."""
+    if not material.use_nodes or material.node_tree is None:
+        return []
+    tree = material.node_tree
+    outputs = [node for node in tree.nodes if node.type == "OUTPUT_MATERIAL"]
+    seen = set()
+    queue = list(outputs)
+    while queue:
+        node = queue.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        if allowed is not None and node.type not in allowed:
+            continue
+        for socket in node.inputs:
+            for link in socket.links:
+                queue.append(link.from_node)
+    return [node for node in tree.nodes if node in seen]
+
+
 def material_summary(material):
     """Describe what a material's graph is made of."""
-    nodes = material.node_tree.nodes if material.use_nodes and material.node_tree else []
+    tree_nodes = material.node_tree.nodes if material.use_nodes and material.node_tree else []
+    nodes = reachable_nodes(material)
     types = [node.type for node in nodes]
-    procedural = any(node_type not in SAFE_GLTF_NODES for node_type in types)
+    outputs = [node for node in tree_nodes if node.type == "OUTPUT_MATERIAL"]
+    surface_linked = any(link for node in outputs for link in node.inputs["Surface"].links)
+    procedural = bool(tree_nodes) and (
+        not outputs
+        or not surface_linked
+        or any(node_type not in SAFE_GLTF_NODES for node_type in types)
+    )
     images = sorted(node.image.name for node in nodes if node.type == "TEX_IMAGE" and node.image is not None)
     uv_dependent = any(node.type in {"TEX_IMAGE", "UVMAP"} for node in nodes)
     summary = {
@@ -307,7 +335,14 @@ def material_summary(material):
         "nodeCount": len(nodes),
         "imageNodes": images,
         "uvDependent": uv_dependent,
-        "graphDigest": _digest(nodes, material.node_tree.links) if material.node_tree else None,
+        "graphDigest": _digest(
+            nodes,
+            [
+                link
+                for link in material.node_tree.links
+                if link.from_node in nodes and link.to_node in nodes
+            ],
+        ) if material.node_tree else None,
     }
     bsdf = next((node for node in nodes if node.type == "BSDF_PRINCIPLED"), None)
     if bsdf is not None:

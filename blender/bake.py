@@ -97,7 +97,7 @@ def bake_normal(
     if samples < 1 or samples > 4096:
         raise ValueError(f"samples {samples} is outside 1..4096")
 
-    previously_selected = [obj for obj in bpy.context.selected_objects]
+    previously_selected = list(bpy.context.selected_objects)
     previous_active = bpy.context.view_layer.objects.active
     output_path = os.path.abspath(output_path)
     try:
@@ -187,4 +187,330 @@ def bake_normal(
         "uvCreated": created_uv,
         "cageExtrusion": round(used_cage, 5),
         "margin": margin,
+    }
+
+
+CHANNEL_COLOR_SPACE = {
+    "base_color": "sRGB",
+    "emission": "sRGB",
+    "roughness": "Non-Color",
+    "metallic": "Non-Color",
+    "ao": "Non-Color",
+    "normal": "Non-Color",
+}
+
+CHANNEL_SOCKET = {
+    "base_color": "Base Color",
+    "roughness": "Roughness",
+    "metallic": "Metallic",
+    "emission": "Emission Color",
+}
+
+
+def _estimate_bake_seconds(resolution, samples, channels):
+    pixels = resolution * resolution
+    return max(1.0, pixels * samples * len(channels) / 900000.0)
+
+
+def _principled(material):
+    return next((node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"), None)
+
+
+def _material_output(material):
+    return next((node for node in material.node_tree.nodes if node.type == "OUTPUT_MATERIAL"), None)
+
+
+def _bake_image(target, channel, resolution, output_dir):
+    name = f"{target.name}_{channel}"
+    image = bpy.data.images.get(name)
+    if image is None:
+        image = bpy.data.images.new(name, width=resolution, height=resolution, alpha=False)
+    elif image.size[0] != resolution or image.size[1] != resolution:
+        image.scale(resolution, resolution)
+    image.colorspace_settings.name = CHANNEL_COLOR_SPACE[channel]
+    path = os.path.join(output_dir, f"{name}.png")
+    return image, path
+
+
+def _target_node(material, channel, image):
+    nodes = material.node_tree.nodes
+    name = f"Baked_{channel}"
+    node = nodes.get(name)
+    if node is None:
+        node = nodes.new("ShaderNodeTexImage")
+        node.name = name
+        node.location = (-620, 420 - 220 * list(CHANNEL_COLOR_SPACE).index(channel))
+    node.image = image
+    nodes.active = node
+    return node
+
+
+def _with_emission_source(material, socket):
+    """Route `socket` through an emission shader for an EMIT bake."""
+    tree = material.node_tree
+    output = _material_output(material)
+    if output is None or socket is None:
+        raise RuntimeError("the material has no surface output or emission socket to bake")
+    emission = tree.nodes.new("ShaderNodeEmission")
+    emission.name = "PI_BakeEmission"
+    original_links = [(link.from_socket, link.to_socket) for link in output.inputs["Surface"].links]
+    for _from_socket, to_socket in original_links:
+        for link in list(to_socket.links):
+            tree.links.remove(link)
+    if socket.is_linked:
+        tree.links.new(socket.links[0].from_socket, emission.inputs["Color"])
+    else:
+        value = socket.default_value
+        if isinstance(value, float):
+            value = (value, value, value, 1.0)
+        emission.inputs["Color"].default_value = value
+    tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
+
+    def restore():
+        for link in list(output.inputs["Surface"].links):
+            tree.links.remove(link)
+        for from_socket, to_socket in original_links:
+            tree.links.new(from_socket, to_socket)
+        tree.nodes.remove(emission)
+
+    return restore
+
+
+def _attach_ao(tree, node):
+    group = bpy.data.node_groups.get("glTF Material Output")
+    if group is None:
+        group = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        group.interface.new_socket(name="Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    holder = tree.nodes.get("BakedAO")
+    if holder is None:
+        holder = tree.nodes.new("ShaderNodeGroup")
+        holder.name = "BakedAO"
+        holder.node_tree = group
+        holder.location = (-620, -220)
+    tree.links.new(node.outputs["Color"], holder.inputs["Occlusion"])
+
+
+def _channel_linked(material, channel):
+    tree = material.node_tree
+    if tree is None:
+        return False
+    if channel == "ao":
+        holder = tree.nodes.get("BakedAO")
+        return holder is not None and bool(holder.inputs["Occlusion"].links)
+    if channel == "normal":
+        normal_map = tree.nodes.get("BakedNormalMap")
+        if normal_map is None:
+            return False
+        bsdf = _principled(material)
+        return bsdf is not None and bool(bsdf.inputs["Normal"].links)
+    bsdf = _principled(material)
+    if bsdf is None:
+        return False
+    socket = bsdf.inputs.get("Emission Color" if channel == "emission" else CHANNEL_SOCKET[channel])
+    return socket is not None and bool(socket.links)
+
+
+def _attach_baked(material, nodes):
+    tree = material.node_tree
+    for channel, node in nodes.items():
+        if channel == "ao":
+            _attach_ao(tree, node)
+            continue
+        if channel == "normal":
+            normal_map = tree.nodes.get("BakedNormalMap")
+            if normal_map is None:
+                normal_map = tree.nodes.new("ShaderNodeNormalMap")
+                normal_map.name = "BakedNormalMap"
+            tree.links.new(node.outputs["Color"], normal_map.inputs["Color"])
+            bsdf = _principled(material)
+            if bsdf is not None:
+                for link in list(bsdf.inputs["Normal"].links):
+                    tree.links.remove(link)
+                tree.links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
+            continue
+        socket = CHANNEL_SOCKET.get(channel)
+        bsdf = _principled(material)
+        if socket and bsdf is not None and socket in bsdf.inputs:
+            for link in list(bsdf.inputs[socket].links):
+                tree.links.remove(link)
+            tree.links.new(node.outputs["Color"], bsdf.inputs[socket])
+
+
+def bake_textures(target, channels=None, resolution=512, samples=32, margin=8, output_dir=None, time_budget_seconds=None):
+    """Bake PBR channels from a material into packed images.
+
+    Channels are baked in one pass with one engine switch. Colour space is set
+    on the image at bake time because an sRGB roughness map looks right in
+    Blender and wrong in every engine that reads it as data.
+    """
+    channels = list(channels or ["base_color", "roughness", "ao", "normal"])
+    unknown = [channel for channel in channels if channel not in CHANNEL_COLOR_SPACE]
+    if unknown:
+        raise ValueError(f"unknown bake channel(s) {unknown}; expected {sorted(CHANNEL_COLOR_SPACE)}")
+    if target is None or target.type != "MESH":
+        raise ValueError("bake_textures needs a mesh target")
+    if len(target.data.materials) > 1:
+        raise ValueError(
+            f"bake_textures bakes one material and {target.name} has {len(target.data.materials)}; "
+            "split the mesh or make the target single-material before baking"
+        )
+    if not target.data.uv_layers:
+        raise ValueError(
+            f"bake_textures needs UVs on {target.name}: unwrap it first "
+            "(bpy.ops.uv.smart_project) or run the density pass before baking"
+        )
+    if resolution < 16 or resolution > 8192:
+        raise ValueError(f"resolution {resolution} is outside 16..8192")
+    if samples < 1 or samples > 4096:
+        raise ValueError(f"samples {samples} is outside 1..4096")
+    estimate = _estimate_bake_seconds(resolution, samples, channels)
+    if time_budget_seconds is not None and estimate > float(time_budget_seconds):
+        raise ValueError(
+            f"bake would take about {estimate:.0f}s at {resolution}x{resolution} with "
+            f"{samples} samples for {len(channels)} channel(s), over the "
+            f"{float(time_budget_seconds):.0f}s budget; lower resolution or samples"
+        )
+
+    material = target.active_material
+    if material is None:
+        material = bpy.data.materials.new(f"{target.name}_baked")
+        target.data.materials.append(material)
+    material.use_nodes = True
+    output_dir = os.path.abspath(output_dir or os.path.join(os.getcwd(), "textures"))
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as error:
+        raise RuntimeError(f"bake could not create {output_dir}: {error}") from error
+
+    scene = bpy.context.scene
+    previous_engine = scene.render.engine
+    try:
+        previous_samples = int(scene.cycles.samples)
+        previous_device = scene.cycles.device
+    except AttributeError as error:
+        raise RuntimeError("bake_textures needs the Cycles addon enabled") from error
+    bake = scene.render.bake
+    previous_bake = {
+        "use_selected_to_active": bake.use_selected_to_active,
+        "margin": bake.margin,
+        "use_pass_direct": bake.use_pass_direct,
+        "use_pass_indirect": bake.use_pass_indirect,
+        "use_pass_color": bake.use_pass_color,
+    }
+    selected = list(bpy.context.selected_objects)
+    active = bpy.context.view_layer.objects.active
+    previous_ao_distance = None
+    ao_distance = None
+    if "ao" in channels:
+        if scene.world is None:
+            raise RuntimeError("ao bake needs a world to measure occlusion against")
+        previous_ao_distance = float(scene.world.light_settings.distance)
+        ao_distance = 0.1 * max(target.dimensions)
+    results = []
+    nodes = {}
+    switched = previous_engine != "CYCLES"
+    started_all = time.monotonic()
+    try:
+        for other in bpy.context.selected_objects:
+            other.select_set(False)
+        target.select_set(True)
+        bpy.context.view_layer.objects.active = target
+        scene.render.engine = "CYCLES"
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = samples
+        bake.use_selected_to_active = False
+        bake.margin = margin
+        bake.use_pass_direct = False
+        bake.use_pass_indirect = False
+        bake.use_pass_color = True
+
+        for channel in channels:
+            if time_budget_seconds is not None and time.monotonic() - started_all > float(time_budget_seconds):
+                done = ", ".join(entry["channel"] for entry in results) or "none"
+                raise RuntimeError(
+                    f"bake exceeded its {float(time_budget_seconds):.0f}s budget after {done}; "
+                    "lower resolution, samples or channel count"
+                )
+            image, path = _bake_image(target, channel, resolution, output_dir)
+            node = _target_node(material, channel, image)
+            nodes[channel] = node
+            restore = None
+            started = time.monotonic()
+            try:
+                if channel == "base_color":
+                    bsdf = _principled(material)
+                    if bsdf is None:
+                        raise RuntimeError("the material has no Principled BSDF")
+                    restore = _with_emission_source(material, bsdf.inputs.get("Base Color"))
+                    bpy.ops.object.bake(type="EMIT")
+                elif channel == "roughness":
+                    bpy.ops.object.bake(type="ROUGHNESS")
+                elif channel == "normal":
+                    bpy.ops.object.bake(type="NORMAL")
+                elif channel == "ao":
+                    if scene.world is not None and ao_distance:
+                        scene.world.light_settings.distance = ao_distance
+                    bpy.ops.object.bake(type="AO")
+                else:
+                    bsdf = _principled(material)
+                    if bsdf is None:
+                        raise RuntimeError("the material has no Principled BSDF")
+                    socket_name = "Emission Color" if channel == "emission" else "Metallic"
+                    restore = _with_emission_source(material, bsdf.inputs.get(socket_name))
+                    bpy.ops.object.bake(type="EMIT")
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"{channel} bake failed at {resolution}x{resolution} with {samples} samples: {error}"
+                ) from error
+            finally:
+                if restore is not None:
+                    restore()
+            elapsed = round(time.monotonic() - started, 2)
+            image.filepath_raw = path
+            image.file_format = "PNG"
+            image.save()
+            image.pack()
+            if not os.path.exists(path) or os.path.getsize(path) == 0:
+                raise RuntimeError(f"{channel} bake wrote no PNG at {path}")
+            results.append({
+                "channel": channel,
+                "imagePath": path,
+                "imageName": image.name,
+                "resolution": resolution,
+                "colorSpace": image.colorspace_settings.name,
+                "linked": False,
+                "elapsedSeconds": elapsed,
+            })
+        _attach_baked(material, nodes)
+        for entry in results:
+            entry["linked"] = _channel_linked(material, entry["channel"])
+    finally:
+        scene.render.engine = previous_engine
+        scene.cycles.samples = previous_samples
+        scene.cycles.device = previous_device
+        bake.use_selected_to_active = previous_bake["use_selected_to_active"]
+        bake.margin = previous_bake["margin"]
+        bake.use_pass_direct = previous_bake["use_pass_direct"]
+        bake.use_pass_indirect = previous_bake["use_pass_indirect"]
+        bake.use_pass_color = previous_bake["use_pass_color"]
+        for other in bpy.context.selected_objects:
+            other.select_set(False)
+        for obj in selected:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = active
+        if previous_ao_distance is not None and scene.world is not None:
+            scene.world.light_settings.distance = previous_ao_distance
+        restored = scene.render.engine == previous_engine
+
+    return {
+        "materialName": material.name,
+        "targetName": target.name,
+        "resolution": resolution,
+        "samples": samples,
+        "uvCreated": False,
+        "engineSwitched": switched,
+        "engineRestored": restored,
+        "estimatedSeconds": round(estimate, 1),
+        "aoDistance": round(ao_distance, 6) if ao_distance is not None else None,
+        "channels": results,
     }

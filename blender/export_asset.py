@@ -20,11 +20,12 @@ behind an import that only works from inside live-bridge.py.
 
 import os
 import re
+from urllib.parse import unquote
 
 # Provided by Blender's own runtime, not by anything installed here.
 # pi-lens-ignore: ast-grep:unresolved-import-python
 import bpy  # pyright: ignore[reportMissingImports]
-from shading import material_summary
+from shading import SAFE_GLTF_NODES, material_summary
 
 # Blender's operator name for each supported format, and its extension.
 EXPORT_FORMATS = {
@@ -56,6 +57,7 @@ def _run_export(fmt, export_path, selection_given, animations):
             # model whose training geometry differs from its rendered geometry.
             export_apply=True,
             export_animations=animations,
+            export_image_format="AUTO",
         )
 
     if fmt == "obj":
@@ -72,6 +74,131 @@ def _run_export(fmt, export_path, selection_given, animations):
         export_selected_objects=selection_given,
         apply_modifiers=True,
     )
+
+
+def _open_binary(path):
+    try:
+        return open(path, "rb")
+    except OSError as error:
+        raise RuntimeError(f"the exported glb could not be read: {error}") from error
+
+
+def _read_gltf_json(path):
+    import json
+    import struct
+
+    if path.lower().endswith(".glb"):
+        with _open_binary(path) as handle:
+            header = handle.read(12)
+            try:
+                magic, version, _length = struct.unpack("<III", header)
+            except struct.error as error:
+                raise RuntimeError(f"the exporter wrote a truncated glb header: {error}") from error
+            if magic != 0x46546C67 or version != 2:
+                raise RuntimeError("the exporter wrote a file that is not a glTF 2.0 binary")
+            while True:
+                header = handle.read(8)
+                if len(header) < 8:
+                    break
+                try:
+                    chunk_length, chunk_type = struct.unpack("<II", header)
+                except struct.error as error:
+                    raise RuntimeError(f"the glb chunk header is truncated: {error}") from error
+                payload = handle.read(chunk_length)
+                if chunk_type == 0x4E4F534A:
+                    try:
+                        return json.loads(payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        raise RuntimeError(f"the glb JSON chunk is unreadable: {error}") from error
+        raise RuntimeError("the glb has no JSON chunk")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except OSError as error:
+        raise RuntimeError(f"the exported glTF could not be read: {error}") from error
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"the exported glTF is not valid JSON: {error}") from error
+
+
+def _verify_textures(fmt, export_path, materials):
+    """A GLB that silently drops its images must fail the tool, not the user."""
+    # Only textures the exporter carries to a real texture slot count. A
+    # texture behind Bump or a colour ramp, or driving Emission Strength,
+    # is reported as procedural instead of being demanded in the file.
+    texture_sockets = {
+        "Base Color", "Metallic", "Roughness", "Normal", "Emission Color", "Alpha",
+    }
+    image_nodes = []
+    for material in materials:
+        if not material.use_nodes or material.node_tree is None:
+            continue
+        seeds = [
+            socket
+            for node in material.node_tree.nodes
+            if node.type == "BSDF_PRINCIPLED"
+            for socket in node.inputs
+            if socket.name in texture_sockets
+        ]
+        seen = set()
+        queue = [link.from_node for socket in seeds for link in socket.links]
+        while queue:
+            node = queue.pop()
+            if node in seen or node.type not in SAFE_GLTF_NODES:
+                continue
+            seen.add(node)
+            if node.type == "TEX_IMAGE" and node.image is not None:
+                image_nodes.append(node)
+            for socket in node.inputs:
+                queue.extend(link.from_node for link in socket.links)
+    uses_images = bool(image_nodes)
+    if fmt not in {"glb", "gltf"}:
+        return {"images": 0, "textures": 0, "verified": None}
+    if os.path.getsize(export_path) < 12:
+        raise RuntimeError("the exporter wrote an empty file, so no glTF JSON can be read")
+    document = _read_gltf_json(export_path)
+    images = document.get("images") or []
+    textures = document.get("textures") or []
+    materials_out = document.get("materials") or []
+    if uses_images and not images:
+        names = sorted({material.name for material in materials})
+        raise RuntimeError(
+            f"the exported glTF contains no images although {', '.join(names)} sample "
+            "an image; the texture was dropped in export and the asset would arrive flat"
+        )
+    if uses_images and not textures:
+        raise RuntimeError("the exported glTF has images but no textures referencing them")
+    if images and fmt == "glb":
+        for index, image in enumerate(images):
+            if "bufferView" not in image or "uri" in image:
+                raise RuntimeError(
+                    f"the exported glb image {index} is not embedded; it has no bufferView "
+                    "and would need an external file at load time"
+                )
+    for index, texture in enumerate(textures):
+        source = texture.get("source")
+        if source is not None and (source < 0 or source >= len(images)):
+            raise RuntimeError(f"the exported glTF texture {index} points at image {source}, which does not exist")
+    if uses_images:
+        referenced = False
+        for material in materials_out:
+            pbr = material.get("pbrMetallicRoughness") or {}
+            if any(
+                key in pbr or key in material
+                for key in ("baseColorTexture", "metallicRoughnessTexture", "normalTexture", "occlusionTexture", "emissiveTexture")
+            ):
+                referenced = True
+                break
+        if not referenced:
+            raise RuntimeError("the exported glTF has textures but no material references any of them")
+    if fmt == "gltf":
+        base = os.path.dirname(export_path)
+        for image in images:
+            uri = image.get("uri")
+            if uri and not uri.startswith("data:"):
+                path = os.path.join(base, unquote(uri))
+                if not os.path.exists(path):
+                    raise RuntimeError(f"the exported glTF points at a missing image file: {uri}")
+    return {"images": len(images), "textures": len(textures), "verified": True if uses_images else None}
 
 
 def handle_export(request, open_blend):
@@ -107,18 +234,18 @@ def handle_export(request, open_blend):
         # Sanitised because the name usually comes from a prompt, and a prompt
         # is not obliged to avoid slashes.
         base = re.sub(r"[^A-Za-z0-9._-]", "_", str(request["name"]))
-    export_path = os.path.join(output_dir, "{}.{}".format(base, EXPORT_FORMATS[fmt][1]))
+    export_path = os.path.join(output_dir, f"{base}.{EXPORT_FORMATS[fmt][1]}")
 
     # Selection is an explicit list or "everything", never inferred: exporting
     # the studio rig alongside the asset is the commonest way a dataset ends up
     # full of default cameras, and it has to be asked for to happen.
     selection = request.get("objects")
     selection_given = selection is not None
-    previously_selected = set(obj.name for obj in bpy.context.selected_objects)
+    previously_selected = {obj.name for obj in bpy.context.selected_objects}
     try:
         if selection_given:
             wanted = {str(name) for name in selection}
-            missing = wanted - set(obj.name for obj in bpy.data.objects)
+            missing = wanted - {obj.name for obj in bpy.data.objects}
             if missing:
                 raise RuntimeError(
                     "Export asked for objects that are not in this blend: {}.".format(
@@ -132,10 +259,10 @@ def handle_export(request, open_blend):
             _run_export(fmt, export_path, selection_given, bool(request.get("animations", False)))
         except Exception as error:
             raise RuntimeError(
-                "Blender's {} exporter failed: {}. This build may not ship that "
-                "exporter; check whether the operator exists before relying on "
-                "this format.".format(fmt, error)
-            )
+                f"Blender's {fmt} exporter failed: {error}. This build may not ship "
+                "that exporter; check whether the operator exists before relying on "
+                "this format."
+            ) from error
     finally:
         # Restored on both paths. An export that leaves every object selected
         # changes what the NEXT call in the same session selects, which is the
@@ -145,8 +272,8 @@ def handle_export(request, open_blend):
 
     if not os.path.exists(export_path):
         raise RuntimeError(
-            "Blender reported {} exported but no file is at {}. The exporter "
-            "returned successfully and wrote nothing.".format(fmt, export_path)
+            f"Blender reported {fmt} exported but no file is at {export_path}. The "
+            "exporter returned successfully and wrote nothing."
         )
 
     exported_names = None if not selection_given else {str(name) for name in selection}
@@ -160,6 +287,7 @@ def handle_export(request, open_blend):
     procedural_materials = sorted(
         {material.name for material in exported_materials if material_summary(material)["procedural"]}
     )
+    texture_report = _verify_textures(fmt, export_path, exported_materials)
     warnings = []
     if procedural_materials and fmt in {"glb", "gltf"}:
         warnings.append(
@@ -179,5 +307,8 @@ def handle_export(request, open_blend):
         ),
         "blendPath": bpy.data.filepath if bpy.data.filepath else None,
         "proceduralMaterials": procedural_materials,
+        "images": texture_report["images"],
+        "textures": texture_report["textures"],
+        "texturesVerified": texture_report["verified"],
         "warnings": warnings,
     }
