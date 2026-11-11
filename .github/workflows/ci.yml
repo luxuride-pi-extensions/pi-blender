@@ -368,8 +368,11 @@ jobs:
   #
   # A portable Linux build, cached by exact version: flatpak is not available
   # on hosted runners, and the download dominates the job when the cache misses.
-  # The probe and object-detail suites must report zero skips; the window-only
-  # suites are deliberately not run and stay skipped everywhere.
+  # Six suites must report zero skips; the window-only ones stay skipped
+  # everywhere because there is no X server. branch-e2e and headless-bridge-e2e
+  # are headless but deliberately excluded for runtime (dozens of launches).
+  # Five of the six import config.ts, so the job checks out pi-manager-core
+  # with CONSUMER_TOKEN; coverage-audit makes a missing token a red run.
   # ===========================================================================
   blender:
     name: real Blender probes (headless)
@@ -385,6 +388,36 @@ jobs:
 
       - name: install pi-blender
         run: npm ci --legacy-peer-deps
+
+      - name: detect the cross-repo token
+        id: token
+        env:
+          CONSUMER_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+        run: |
+          if [ -n "${CONSUMER_TOKEN}" ]; then
+            echo "has_token=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=" >> "$GITHUB_OUTPUT"
+            echo "::warning title=real-Blender suites need the sibling core::" \
+              "CONSUMER_TOKEN is not set, so pi-manager-core cannot be" \
+              "checked out and the suites that import config.ts cannot run." \
+              "coverage-audit fails the run for the missing token."
+          fi
+
+      - name: check out pi-manager-core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        uses: actions/checkout@v5
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          token: ${{ secrets.CONSUMER_TOKEN }}
+          fetch-depth: 1
+
+      - name: install the manager core
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        working-directory: projects/pi-manager-core
+        run: npm ci
 
       - name: cache Blender 4.2.3
         id: blender-cache
@@ -414,23 +447,33 @@ jobs:
       # The probe suites skip themselves when detectBlender() finds nothing.
       # A skip here is the exact failure this job exists to prevent, so it is
       # turned into a failed step with the reason, not left as an annotation.
-      - name: headless probes must not skip
+      # All six suites import config.ts (five of them transitively), so they
+      # need the sibling core AND a real Blender. One invocation and one
+      # guard: a split would let one step go green while the other skipped.
+      - name: probes, object detail, scene and import paths must not skip
+        if: ${{ steps.token.outputs.has_token == '1' }}
+        env:
+          PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
         run: |
           set -euo pipefail
-          out="$(node --test test/blender-probes.test.mjs test/object-detail.test.mjs 2>&1)"
-          printf '%s\n' "$out"
-          if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
-            echo "::error title=Blender tests skipped despite a real Blender::The" \
-              "probe or object-detail suite skipped at least one test. That" \
-              "means detectBlender() did not find the unpacked build, and" \
-              "this job verified nothing."
+          if ! out="$(node --test --test-reporter=spec \
+            test/blender-probes.test.mjs \
+            test/object-detail.test.mjs \
+            test/compare-baseline.test.mjs \
+            test/import-asset.test.mjs \
+            test/scene-health.test.mjs \
+            test/scene-stats.test.mjs 2>&1)"; then
+            printf '%s\n' "$out"
             exit 1
           fi
-
-      - name: background render, export, compare and import paths
-        run: |
-          node --test test/compare-baseline.test.mjs test/import-asset.test.mjs \
-            test/scene-health.test.mjs test/scene-stats.test.mjs
+          printf '%s\n' "$out"
+          if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
+            echo "::error title=Blender tests skipped despite a real Blender::At" \
+              "least one of the six suites skipped. detectBlender() did not" \
+              "find the unpacked build, or one suite looked on the wrong" \
+              "channel, and this job verified less than it claims."
+            exit 1
+          fi
 
   # ===========================================================================
   # THE ALWAYS-RUNNING AUDIT.
