@@ -742,8 +742,10 @@ diagnostician's numbers are the thing to spend.
      pair. `score-stalled` means two consecutive `continue` verdicts at the same
      score: diagnose rather than re-brief. `none` is the normal case and needs
      no comment.
-   - **lastVerdict** — the score, the blocking axes and the reject reason your
-     previous critic already returned, even if that critic's context is gone.
+   - **lastVerdict** — the score, all six axis scores, the blocking subset
+     (scored 0 or 1), the critic's `issues` and `nextAction`, and the reject
+     reason your previous critic already returned, even if that critic's context
+     is gone.
    - **knownFacts** — measurements already taken for this module, each with the
      tool that produced it. A brief that re-asks for a number already in this
      list is a brief that pays for a probe twice.

@@ -153,6 +153,12 @@ export async function blenderIterationState(options: {
           score: verdict.score,
           viewUsable: verdict.viewUsable,
           rejectReason: verdict.rejectReason,
+          axes: verdict.axes ?? {},
+          blockingAxes: Object.entries(verdict.axes ?? {})
+            .filter(([, score]) => score <= 1)
+            .map(([label]) => label),
+          issues: verdict.issues ?? [],
+          nextAction: verdict.nextAction,
         }
       : undefined,
     previousScore: previousVerdict?.score,

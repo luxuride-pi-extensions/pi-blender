@@ -66,14 +66,25 @@ function branchRun(iteration, stateDigest, module = "mug") {
 }
 
 /** A critique log block shaped like the one blender_log_critique appends. */
-function critiqueBlock({ iteration = 1, module = "mug", score = 8, decision = "continue iterating", view = 2, reason } = {}) {
+function critiqueBlock({
+  iteration = 1,
+  module = "mug",
+  score = 8,
+  decision = "continue iterating",
+  view = 2,
+  reason,
+  axes: overrides = {},
+  issues = [],
+  nextAction = "tighten the silhouette",
+} = {}) {
   const axes = ["Accuracy", "Geometry", "Materials", "Completeness", "Quality", "Category validity"];
   const lines = [
     `[2026-01-01T00:00:00.000Z] iteration_${String(iteration).padStart(2, "0")} module=${module} budget ${iteration}/5`,
     `Score: ${score}/12`,
   ];
-  for (const axis of axes) lines.push(`${axis}: 1/2`);
-  lines.push(`View adequacy: ${view}/2`, "Decision: " + (reason ? `REJECT — ${reason}` : decision));
+  for (const axis of axes) lines.push(`${axis}: ${overrides[axis] ?? 1}/2`);
+  lines.push("Issues:", ...(issues.length > 0 ? issues.map((issue) => `- ${issue}`) : ["- none"]));
+  lines.push(`Next action: ${nextAction}`, `View adequacy: ${view}/2`, "Decision: " + (reason ? `REJECT — ${reason}` : decision));
   return lines.join("\n") + "\n\n";
 }
 
