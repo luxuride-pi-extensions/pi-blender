@@ -92,6 +92,13 @@ except KeyError:
 
 before_invalid = first["graphDigest"]
 try:
+    build_material("ReviewMetal", {"bump": {"strength": "medium"}})
+    checks["invalid bump strength is rejected atomically"] = False
+except ValueError:
+    checks["invalid bump strength is rejected atomically"] = (
+        material_summary(bpy.data.materials["ReviewMetal"])["graphDigest"] == before_invalid
+    )
+try:
     build_material("ReviewMetal", {"preset": "nope"})
     checks["unknown preset is rejected"] = False
 except ValueError:

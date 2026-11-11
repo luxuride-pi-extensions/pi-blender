@@ -143,8 +143,19 @@ def _validate_recipe(recipe):
     for key in ("roughness", "metallic", "emissionStrength"):
         if key in recipe:
             _validate_number(recipe[key], key)
+    texture_numbers = {
+        "noise": ("scale", "detail", "roughness", "distortion", "lacunarity"),
+        "voronoi": ("scale", "detail", "roughness", "randomness"),
+        "brick": ("scale", "mortarSize", "bias", "brickWidth", "rowHeight"),
+        "checker": ("scale", "distortion", "detail"),
+        "wave": ("scale", "distortion", "detail"),
+        "gradient": (),
+    }
     for texture in recipe.get("textures") or []:
         kind = str(texture.get("kind", "noise"))
+        for key in texture_numbers.get(kind, ()):
+            if key in texture:
+                _validate_number(texture[key], key)
         if kind not in TEXTURE_TYPES:
             raise ValueError(f"unknown texture kind {kind!r}; expected one of {sorted(TEXTURE_TYPES)}")
         output = str(texture.get("output", "color"))
@@ -154,6 +165,9 @@ def _validate_recipe(recipe):
         if target not in TARGET_SOCKETS:
             raise ValueError(f"unknown texture target {target!r}; expected one of {sorted(TARGET_SOCKETS)}")
         ramp = texture.get("ramp")
+        interpolation = str(ramp.get("interpolation", "LINEAR")).upper() if isinstance(ramp, dict) else "LINEAR"
+        if interpolation not in {"LINEAR", "CONSTANT", "EASE"}:
+            raise ValueError(f"ramp interpolation must be LINEAR, CONSTANT or EASE, got {interpolation!r}")
         stops = ramp.get("stops", []) if isinstance(ramp, dict) else (ramp or [])
         if len(stops) > 32:
             raise ValueError("a colour ramp supports at most 32 stops")
@@ -166,6 +180,9 @@ def _validate_recipe(recipe):
     kind = str(bump.get("kind", "noise"))
     if bump and kind not in {"noise", "voronoi"}:
         raise ValueError(f"bump kind must be noise or voronoi, got {kind!r}")
+    for key in ("strength", "distance"):
+        if key in bump:
+            _validate_number(bump[key], key)
 
 
 def _ramp_node(nodes, name, stops, interpolation="LINEAR"):
