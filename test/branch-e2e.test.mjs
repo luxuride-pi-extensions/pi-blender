@@ -292,6 +292,41 @@ test("applying a branch brings its object into model.blend", { skip }, async () 
 	}
 });
 
+test("a multi-module apply merges the batch in one pass and skips only the branch that is gone", { skip }, async () => {
+	// The batch is meant to be one Blender process and one save. The observable
+	// half is that the two good modules both land and the missing one is the only
+	// thing reported, with its record left unusable rather than half-applied.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "one", box("One", 1.0, 1.0, 1.0, 5, 0, 0));
+		writeScript(ws.workspacePath, "two", box("Two", 1.0, 1.0, 1.0, 10, 0, 0));
+		writeScript(ws.workspacePath, "gone", box("Gone", 1.0, 1.0, 1.0, 15, 0, 0));
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "one", render: false, timeoutSeconds: 300 });
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "two", render: false, timeoutSeconds: 300 });
+		const gone = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "gone", render: false, timeoutSeconds: 300 });
+		rmSync(gone.branchPath, { force: true });
+
+		const result = await branch.blenderBranchApply({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			modules: ["one", "two", "gone"],
+			timeoutSeconds: 300,
+		});
+
+		assert.deepEqual(result.applied.map((entry) => entry.module), ["one", "two"]);
+		assert.deepEqual(result.missing, ["gone"], `skipped: ${JSON.stringify(result.skipped)}`);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.ok(names.includes("One") && names.includes("Two"), `both good branches must land, got ${JSON.stringify(names)}`);
+		assert.ok(!names.includes("Gone"), "a branch that is gone must not be half-applied");
+
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		const goneRecord = manifest.branchRuns.find((run) => run.module === "gone");
+		assert.equal(goneRecord.status, "failed", "the missing branch's record must be retired, not left staged");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("two branches touching the same object are both reported and skipped", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {
@@ -441,6 +476,52 @@ test("an apply is recorded as a module run, so revert can restore what it replac
 		assert.equal(manifest.moduleRuns.length, 1, "the apply must leave a run record for revert to use");
 		assert.equal(manifest.moduleRuns[0].name, "body");
 		assert.ok(existsSync(manifest.moduleRuns[0].checkpointPath), "the recorded checkpoint must exist on disk");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a revert refuses when another module in the same batch shares its checkpoint", { skip }, async () => {
+	// One apply pass writes one save, so every module in it names the same
+	// pre-batch checkpoint. Reverting one would restore the blend from before
+	// all of them and silently drop the others' applied work.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "one", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "One"\n`);
+		writeScript(ws.workspacePath, "two", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "Two"\n`);
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "one", render: false, timeoutSeconds: 300 });
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "two", render: false, timeoutSeconds: 300 });
+		await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["one", "two"], timeoutSeconds: 300 });
+		await assert.rejects(
+			() => module.blenderModuleRevert({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "two" }),
+			/Refusing to revert module "two"/,
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an in-process probe skip leaves the siblings applied and the branch untouched", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "one", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "One"\n`);
+		writeScript(ws.workspacePath, "ghost", `import bpy\nbpy.ops.mesh.primitive_cube_add()\nbpy.context.object.name = "GhostBox"\n`);
+		await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "one", render: false, timeoutSeconds: 300 });
+		const staged = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "ghost", render: false, timeoutSeconds: 300 });
+
+		// Make the record claim a datablock its branch does not contain, which is
+		// what a branch that lost an object looks like to the apply.
+		const manifestPath = join(ws.workspacePath, "blender-workspace.json");
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		const record = manifest.branchRuns.find((run) => run.module === "ghost");
+		record.applyObjects = [...record.applyObjects, "Ghost"];
+		writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+		const result = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["one", "ghost"], timeoutSeconds: 300 });
+		assert.deepEqual(result.applied.map((run) => run.module), ["one"]);
+		assert.deepEqual(result.skipped.map((run) => run.module), ["ghost"]);
+		assert.deepEqual(result.skipped[0].conflicts.map((conflict) => conflict.objectName), ["Ghost"]);
+		assert.ok(existsSync(staged.branchPath), "a skipped branch is left for the author to fix");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

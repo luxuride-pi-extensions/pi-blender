@@ -635,7 +635,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Run a workspace module: checkpoint model.blend to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. A branch staged this way can be merged with other staged branches in one conflict-checked pass by blender_branch_apply, which the manager holds. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
+	"Run a workspace module: checkpoint model.blend as the run found it to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. A branch staged this way can be merged with other staged branches in one conflict-checked pass by blender_branch_apply, which the manager holds. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",
@@ -775,7 +775,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Apply staged branch runs into model.blend, one at a time under a lock, so concurrent module runs can be merged in a fixed order. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
+	"Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. The whole batch is pre-flighted first, merged by one headless Blender process and saved once, so concurrent module runs cannot interleave through a half-applied fan-out. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. A branch whose blend is missing from disk is reported in `missing` and does not stop the rest of the batch. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",
@@ -786,7 +786,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 	}),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Per-apply timeout in seconds.",
+			description: "Timeout for the whole apply batch in seconds.",
 			default: 300,
 		}),
 	),

@@ -461,6 +461,29 @@ export function applySuccessfulRun(
 	}
 }
 
+/**
+ * Runs a revert would discard.
+ *
+ * A whole apply pass stamps every record it writes with one `at`, so two
+ * siblings from that pass are equally late and either revert refuses. Sequence
+ * orders runs from before that convention; it is not sufficient on its own,
+ * because a sibling can claim a lower sequence and still land after the
+ * checkpoint was taken.
+ */
+export function laterModuleRuns<
+	T extends { name: string; iteration: number; sequence?: number; at: string; viaBranchApply?: string },
+>(moduleRuns: T[], target: T | undefined, checkpointTakenAt: number, moduleName: string): T[] {
+	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
+	const targetAt = target ? Date.parse(target.at) : Number.NEGATIVE_INFINITY;
+	return moduleRuns.filter(
+		(run) =>
+			run !== target &&
+			(sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER) ||
+				(run.name !== moduleName && run.viaBranchApply && target?.viaBranchApply && Math.abs(Date.parse(run.at) - targetAt) < 1_000) ||
+				(run.name !== moduleName && Date.parse(run.at) > checkpointTakenAt)),
+	);
+}
+
 export async function blenderModuleRevert(options: ModuleRevertOptions): Promise<ModuleRevertResult> {
 	const moduleName = normalizeModuleName(options.moduleName);
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
@@ -504,13 +527,8 @@ export async function blenderModuleRevert(options: ModuleRevertOptions): Promise
 	// apply after this checkpoint was taken, so a run that landed after it is
 	// "later" whatever number it claimed. A pre-`sequence` record still blocks:
 	// `undefined > n` is false, which would let the revert discard it silently.
-	const sequence = (run: { sequence?: number; iteration: number }) => run.sequence ?? run.iteration;
 	const checkpointTakenAt = (await stat(checkpointPath)).mtimeMs;
-	const laterRuns = moduleRuns.filter(
-		(run) =>
-			run !== target &&
-			(sequence(run) > (target?.sequence ?? Number.MAX_SAFE_INTEGER) || Date.parse(run.at) > checkpointTakenAt),
-	);
+	const laterRuns = laterModuleRuns(moduleRuns, target, checkpointTakenAt, moduleName);
 	const discardedLaterRuns = laterRuns.map((run) => `${run.name} (iteration ${run.iteration})`);
 	if (laterRuns.length > 0 && !options.force) {
 		const names = [...new Set(laterRuns.map((run) => run.name))].join(", ");

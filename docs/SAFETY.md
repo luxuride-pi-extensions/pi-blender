@@ -85,9 +85,9 @@ Authoring tools (`blender_execute_python`, `blender_module_run`, `blender_branch
 #### The Mitigation: Recoverability, Not Prevention
 Safety on authoring paths is achieved through structured recoverability:
 1. **Modular Work Isolation**: Each part or concern is authored in an isolated script (`modules/<name>/script.py`).
-2. **Pre-Run Checkpoints**: Every run of `blender_module_run` automatically creates a checkpoint before execution:
-   `modules/<name>/runs/<NN>/pre-<NN>.blend`
-3. **Automated Rollback**: If a run corrupts the scene, introduces a regression, or fails evaluation, `blender_module_revert` restores the exact pre-run checkpoint. Revert refuses if subsequent module runs have touched the scene unless `force: true` is explicitly passed.
+2. **Pre-Merge Checkpoints**: Every run of `blender_module_run` records a checkpoint of `model.blend` as the run found it:
+   `modules/<name>/runs/<NN>/pre-<NN>.blend`. A live run copies it before execution; a headless branch run copies it at run end, before the branch is applied, which is the same state the apply replaces.
+3. **Automated Rollback**: If a run corrupts the scene, introduces a regression, or fails evaluation, `blender_module_revert` restores that checkpoint. Revert refuses if later module runs — including another module merged in the same apply pass, which shares the same pre-batch state — have touched the scene unless `force: true` is explicitly passed.
 4. **Branch Runs**: `blender_branch_run` runs headless modules against private `branch.blend` copies. Contested datablocks are caught before merging via `blender_branch_apply`.
 5. **Cross-Process Serialization & Scene Diffing**: The bridge file lock (`bridge.lock`) serializes live execution. The `blender-script-runner` agent diffs scene datablocks before and after execution to detect cross-module contamination.
 

@@ -811,89 +811,143 @@ import json
 import sys
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
-branch_path = payload["branchPath"]
-apply_objects = payload["applyObjects"]
-apply_materials = payload["applyMaterials"]
-remove_objects = payload["removeObjects"]
+branches = payload["branches"]
 
-# Materials first: an object removed below may be the last user of a material
-# we are about to replace, and a material with users cannot be overwritten.
-for name in apply_materials:
-    existing = bpy.data.materials.get(name)
-    if existing is not None and existing.users == 0:
-        bpy.data.materials.remove(existing)
 
-replaced = []
-removed_existing = []
-for name in list(apply_objects) + list(remove_objects):
-    obj = bpy.data.objects.get(name)
-    if obj is None:
-        continue
-    if name in apply_objects:
-        replaced.append(name)
-    else:
-        removed_existing.append(name)
-    bpy.data.objects.remove(obj, do_unlink=True)
+def probe(branch):
+    """What the branch file holds, without loading anything yet.
 
-missing = []
-appended_objects = []
-with bpy.data.libraries.load(branch_path, link=False) as (data_from, data_to):
-    object_index = {name: index for index, name in enumerate(data_from.objects)}
-    present_objects = [n for n in apply_objects if n in object_index]
-    missing.extend(n for n in apply_objects if n not in object_index)
-    data_to.objects = [data_from.objects[object_index[n]] for n in present_objects]
+    A branch that lost a datablock is skipped BEFORE model.blend is touched, so
+    one broken branch cannot leave the merge half-applied. The probe opens the
+    library with an empty data_to, which loads nothing.
+    """
+    missing = []
+    try:
+        with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
+            object_index = {name: index for index, name in enumerate(data_from.objects)}
+            material_index = {name: index for index, name in enumerate(data_from.materials)}
+            missing.extend(name for name in branch["applyObjects"] if name not in object_index)
+            missing.extend(name for name in branch["applyMaterials"] if name not in material_index)
+    except Exception as exc:
+        # The pre-flight check runs without the apply lock, so a branch can be
+        # replaced or truncated between that check and this load. Report it as a
+        # skipped branch instead of aborting every other branch in the batch.
+        return [f"<unreadable branch blend: {exc}>"]
+    return missing
 
-    material_index = {name: index for index, name in enumerate(data_from.materials)}
-    present_materials = [m for m in apply_materials if m in material_index]
-    missing.extend(m for m in apply_materials if m not in material_index)
-    data_to.materials = [data_from.materials[material_index[m]] for m in present_materials]
 
-# Link every appended object into the scene. Without this the append is undone
-# by the save below, silently -- see the note on libraries.load in the header.
-scene_collection = bpy.context.scene.collection
-for name in apply_objects:
-    obj = bpy.data.objects.get(name)
-    if obj is not None and len(obj.users_collection) == 0:
-        scene_collection.objects.link(obj)
+def apply_branch(branch):
+    apply_objects = branch["applyObjects"]
+    apply_materials = branch["applyMaterials"]
+    remove_objects = branch["removeObjects"]
 
-appended_objects = sorted(obj.name for obj in bpy.data.objects if obj.name in set(apply_objects))
-appended_materials = sorted(m.name for m in bpy.data.materials if m.name in set(apply_materials))
+    # Materials first: an object removed below may be the last user of a material
+    # we are about to replace, and a material with users cannot be overwritten.
+    for name in apply_materials:
+        existing = bpy.data.materials.get(name)
+        if existing is not None and existing.users == 0:
+            bpy.data.materials.remove(existing)
 
-# A datablock the branch said it had but which is not in the branch file means
-# the two disagree, so the apply is reported as incomplete rather than saved: a
-# partial merge leaves model.blend describing neither generation.
-if missing:
-    print("__PI_BLENDER_JSON_START__")
-    print(json.dumps({
+    replaced = []
+    removed_existing = []
+    for name in list(apply_objects) + list(remove_objects):
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        if name in apply_objects:
+            replaced.append(name)
+        else:
+            removed_existing.append(name)
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+    # Membership is tested through an INDEX over the library's name list, not by
+    # subscripting data_from.objects: those are plain lists in Blender 5.2.
+    with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
+        object_index = {name: index for index, name in enumerate(data_from.objects)}
+        material_index = {name: index for index, name in enumerate(data_from.materials)}
+        data_to.objects = [data_from.objects[object_index[n]] for n in apply_objects]
+        data_to.materials = [data_from.materials[material_index[m]] for m in apply_materials]
+
+    # Link every appended object into the scene. Without this the append is
+    # undone by the save below, silently: Blender only writes datablocks that
+    # have users.
+    scene_collection = bpy.context.scene.collection
+    for name in apply_objects:
+        obj = bpy.data.objects.get(name)
+        if obj is not None and len(obj.users_collection) == 0:
+            scene_collection.objects.link(obj)
+
+    return {
         "replaced": replaced,
         "removedExisting": removed_existing,
-        "appended": [],
-        "appendedMaterials": [],
-        "missing": missing,
-    }))
-    print("__PI_BLENDER_JSON_END__")
-    raise SystemExit(0)
+        "appended": sorted(obj.name for obj in bpy.data.objects if obj.name in set(apply_objects)),
+        "appendedMaterials": sorted(m.name for m in bpy.data.materials if m.name in set(apply_materials)),
+    }
 
-bpy.ops.wm.save_mainfile()
+
+outcomes = []
+saved = False
+aborted = False
+for branch in branches:
+    missing = probe(branch)
+    if not missing:
+        try:
+            result = apply_branch(branch)
+        except Exception as exc:
+            missing = [f"<branch could not be read: {exc}>"]
+            aborted = True
+        else:
+            outcomes.append({
+                "module": branch["module"],
+                "applied": True,
+                "missing": [],
+                **result,
+            })
+            saved = True
+            continue
+    if missing:
+        outcomes.append({
+            "module": branch["module"],
+            "applied": False,
+            "replaced": [],
+            "removedExisting": [],
+            "appended": [],
+            "appendedMaterials": [],
+            "missing": missing,
+        })
+        continue
+
+# ONE save for the whole apply. A failure before this point leaves model.blend
+# exactly as it was, so a hard failure cannot remove one module's objects and
+# then leave the file without the branch that was meant to replace them. An
+# in-process failure may already have removed datablocks, so it suppresses the
+# save entirely and downgrades every outcome: nothing was written.
+if aborted:
+    reason = next((name for outcome in outcomes for name in outcome["missing"]), "the batch was aborted")
+    for outcome in outcomes:
+        outcome["applied"] = False
+        outcome["missing"] = outcome["missing"] or [reason]
+if saved and not aborted:
+    bpy.ops.wm.save_mainfile()
 
 print("__PI_BLENDER_JSON_START__")
-print(json.dumps({
-    "replaced": replaced,
-    "removedExisting": removed_existing,
-    "appended": appended_objects,
-    "appendedMaterials": appended_materials,
-    "missing": missing,
-}))
+print(json.dumps({"branches": outcomes}))
 print("__PI_BLENDER_JSON_END__")
 `;
 }
 
-interface BranchApplyPayload {
+interface BranchApplyOutcome {
+	module: string;
+	applied: boolean;
 	replaced: string[];
 	removedExisting: string[];
 	appended: string[];
 	appendedMaterials: string[];
 	missing: string[];
+}
+
+interface BranchApplyPayload {
+	branches: BranchApplyOutcome[];
 }
 
 const APPLY_LOCK_FILE = ".branch-apply.lock";
@@ -973,8 +1027,16 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
 }
 
 /**
- * Apply staged branches into model.blend, reporting and skipping any that
- * conflict with another staged branch.
+ * Apply staged branches into model.blend in ONE pass, reporting and skipping
+ * any that conflict with another staged branch.
+ *
+ * The whole batch is pre-flighted before model.blend is opened, then merged by
+ * one Blender process holding the apply lock for the whole merge and saving
+ * once. A conflict or a vanished branch is decided from the records, so it
+ * never reaches that process; a branch whose blend disagrees with its record is
+ * skipped inside the process before it mutates anything. A hard failure before
+ * the single save leaves model.blend exactly as it was, and the caller can
+ * retry the batch.
  *
  * A conflicted module is NOT applied and NOT merged: its changes stay in its
  * branch blend, so nothing is lost and the operator can decide which side was
@@ -1016,77 +1078,125 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const applied: BranchApplyResult["applied"] = [];
 	const skipped: BranchApplyResult["skipped"] = [];
 	const missing: string[] = [];
+	const contested: Array<{ record: BlenderBranchRunRecord; conflicts: BranchConflict[] }> = [];
+	const absent: BlenderBranchRunRecord[] = [];
+	const eligible: BlenderBranchRunRecord[] = [];
 
+	// Pre-flight the whole batch BEFORE a Blender process starts: a conflict or
+	// a vanished branch is a reason not to open model.blend at all, and finding
+	// it after the save would report work that did land as if it had not.
 	for (const record of staged) {
-		const markStatus = async (status: BlenderBranchRunRecord["status"], conflicts?: BranchConflict[]): Promise<void> => {
-			await updateManifest(manifest.manifestPath, (current) => {
-				const target = current.branchRuns?.find((run) => run.sequence === record.sequence);
-				if (target) {
-					target.status = status;
-					if (conflicts) target.conflicts = conflicts;
-				}
-			}, { signal: options.signal });
-		};
-
 		const conflicts = findRecordConflicts(record, allStaged.filter((run) => run !== record));
 		if (conflicts.length > 0) {
+			contested.push({ record, conflicts });
 			skipped.push({ module: record.module, conflicts });
-			await markStatus("conflict", conflicts);
 			continue;
 		}
-
 		if (!(await fileExists(record.branchPath))) {
+			absent.push(record);
 			missing.push(record.module);
-			await markStatus("failed", [
-				{ objectName: record.branchPath, modules: ["the branch blend is missing from disk"] },
-			]);
 			continue;
 		}
+		eligible.push(record);
+	}
 
+	let outcomes: BranchApplyOutcome[] = [];
+	if (eligible.length > 0) {
+		// ONE lock, ONE process, ONE save for the whole batch. The lock used to be
+		// per record, which let a second apply interleave between two records of
+		// this one and observe a fan-out that was only half merged.
 		const release = await acquireApplyLock(manifest.manifestPath, { signal: options.signal });
-		let payload: BranchApplyPayload;
 		try {
-			payload = await runBlenderJson<BranchApplyPayload>({
+			const payload = await runBlenderJson<BranchApplyPayload>({
 				cwd: options.cwd,
 				blendPath: manifest.blendPath,
-				label: `branch apply ${record.module}`,
+				label: `branch apply ${eligible.map((record) => record.module).join(", ")}`,
 				scriptSource: buildBranchApplyScript(),
 				payload: {
-					branchPath: record.branchPath,
-					applyObjects: record.applyObjects,
-					applyMaterials: record.touchedMaterials,
-					removeObjects: record.removedObjects,
+					branches: eligible.map((record) => ({
+						module: record.module,
+						branchPath: record.branchPath,
+						applyObjects: record.applyObjects,
+						applyMaterials: record.touchedMaterials,
+						removeObjects: record.removedObjects,
+					})),
 				},
 				signal: options.signal,
 				timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 			});
+			outcomes = payload.branches;
 		} finally {
 			await release();
 		}
+	}
 
-		if (payload.missing.length > 0) {
-			skipped.push({
-				module: record.module,
-				conflicts: payload.missing.map((objectName) => ({ objectName, modules: ["missing from its branch"] })),
-			});
-			await markStatus("conflict");
-			continue;
+	const outcomeByModule = new Map<string, BranchApplyOutcome>();
+	outcomes.forEach((outcome) => {
+		outcomeByModule.set(outcome.module, outcome);
+	});
+	const outcomeFor = (record: BlenderBranchRunRecord) =>
+		outcomeByModule.get(record.module) ?? outcomeBySequenceFallback(record, outcomes);
+
+	// Records whose branch the process could not read are identified by module;
+	// index is only a fallback for a payload that lost its module name.
+	function outcomeBySequenceFallback(record: BlenderBranchRunRecord, all: BranchApplyOutcome[]) {
+		const index = eligible.findIndex((entry) => entry.sequence === record.sequence);
+		return index >= 0 ? all[index] : undefined;
+	}
+
+	// A branch the process skipped because its blend disagreed with its record is
+	// reported with the datablocks that were missing; it did not touch model.blend.
+	const short = eligible.flatMap((record) => {
+		const outcome = outcomeFor(record);
+		return outcome && !outcome.applied ? [{ record, outcome }] : [];
+	});
+	for (const { record, outcome } of short) {
+		skipped.push({
+			module: record.module,
+			conflicts: outcome.missing.map((name) => ({
+				objectName: name,
+				modules: ["missing from its branch"],
+			})),
+		});
+	}
+
+	await updateManifest(manifest.manifestPath, (current) => {
+		const mark = (sequence: number, status: BlenderBranchRunRecord["status"], conflicts?: BranchConflict[]): BlenderBranchRunRecord | undefined => {
+			const target = current.branchRuns?.find((run) => run.sequence === sequence);
+			if (target) {
+				target.status = status;
+				if (conflicts) target.conflicts = conflicts;
+			}
+			return target;
+		};
+
+		for (const { record, conflicts } of contested) mark(record.sequence, "conflict", conflicts);
+		for (const record of absent) {
+			mark(record.sequence, "failed", [
+				{ objectName: record.branchPath, modules: ["the branch blend is missing from disk"] },
+			]);
+		}
+		for (const { record, outcome } of short) {
+			mark(record.sequence, "conflict", outcome.missing.map((name) => ({
+				objectName: name,
+				modules: ["missing from its branch"],
+			})));
 		}
 
-		applied.push({
-			module: record.module,
-			iteration: record.iteration,
-			appended: payload.appended,
-			removed: payload.removedExisting,
-			cameras: record.cameras ?? [],
-		});
-
-		await updateManifest(manifest.manifestPath, (current) => {
+		const batchAt = nowIso();
+		for (const record of eligible) {
+			const outcome = outcomeFor(record);
+			if (!outcome?.applied) continue;
+			mark(record.sequence, "applied");
 			const target = current.branchRuns?.find((run) => run.sequence === record.sequence);
-			if (target) {
-				target.status = "applied";
-				target.appliedAt = nowIso();
-			}
+			if (target) target.appliedAt = batchAt;
+			applied.push({
+				module: record.module,
+				iteration: record.iteration,
+				appended: outcome.appended,
+				removed: outcome.removedExisting,
+				cameras: record.cameras ?? [],
+			});
 			// An apply is a module run as far as revert is concerned: it changed
 			// model.blend, so it needs a run record with a checkpoint the revert
 			// can restore. Recorded HERE rather than at run time, because the
@@ -1100,15 +1210,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 					name: record.module,
 					iteration: record.iteration,
 					checkpointPath: record.checkpointPath,
-					at: nowIso(),
+					at: batchAt,
 					sequence: record.sequence,
 					exitCode: 0,
 					status: "ok",
 					viaBranchApply: record.branchPath,
 				},
 			];
-		}, { signal: options.signal });
-	}
+		}
+	}, { signal: options.signal });
 
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an
