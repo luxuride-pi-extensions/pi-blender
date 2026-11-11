@@ -31,6 +31,8 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		bytes: number;
 		meshCount: number;
 		blendPath: string | null;
+		proceduralMaterials: string[];
+		warnings: string[];
 	}>({
 		payload: {
 			type: "export",
@@ -63,5 +65,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		bytes: result.bytes,
 		meshCount: result.meshCount,
 		objects: options.objects,
+		proceduralMaterials: result.proceduralMaterials,
+		warnings: result.warnings,
 	};
 }
