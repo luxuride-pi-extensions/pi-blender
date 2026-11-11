@@ -29,7 +29,7 @@ def _ensure_uv(obj):
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project()
+    bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02)
     bpy.ops.object.mode_set(mode="OBJECT")
     return True
 
@@ -101,11 +101,9 @@ def bake_normal(
     try:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
     except OSError as error:
-        raise RuntimeError(f"Cannot create the bake output directory for {output_path}: {error}") from error
+        raise RuntimeError(f"Normal bake could not create the output directory for {output_path}: {error}") from error
     low_triangles = _triangle_count(low)
     high_triangles = _triangle_count(high)
-    created_uv = _ensure_uv(low)
-    material, image = _bake_target(low, f"{low.name}_normal", resolution)
 
     scene = bpy.context.scene
     previous_engine = scene.render.engine
@@ -121,6 +119,8 @@ def bake_normal(
     used_cage = cage_extrusion if cage_extrusion is not None else max(0.001, low.dimensions.length * 0.02)
     started = time.monotonic()
     try:
+        created_uv = _ensure_uv(low)
+        material, image = _bake_target(low, f"{low.name}_normal", resolution)
         for other in bpy.context.selected_objects:
             other.select_set(False)
         low.select_set(True)
@@ -147,9 +147,9 @@ def bake_normal(
             image.save()
             image.pack()
         except (OSError, RuntimeError) as error:
-            raise RuntimeError(f"Normal bake could not write {output_path}: {error}") from error
+            raise RuntimeError(f"Normal bake could not write {output_path} at {resolution}x{resolution} with {samples} samples: {error}") from error
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise RuntimeError(f"Normal bake wrote no PNG at {output_path}")
+            raise RuntimeError(f"Normal bake wrote no PNG at {output_path} at {resolution}x{resolution} with {samples} samples")
     finally:
         # Engine, bake settings and selection are all process-wide state: a
         # failure halfway through must not change the next render's cost or look.

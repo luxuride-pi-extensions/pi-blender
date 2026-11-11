@@ -28,7 +28,7 @@ be writing at once.
 The verified `bpy`/`bmesh` snippets for shading, transforms, triangulation,
 welding, unwrapping and normals live in `docs/MODELING.md`, with the reason each
 exists and a real-Blender test. Use them instead of re-deriving the operator
-name from memory.
+name from memory. The normal-map bake that carries sculpted detail onto a low-poly cage is in `docs/SCULPT.md`.
 
 ## Why you are the serialization point
 

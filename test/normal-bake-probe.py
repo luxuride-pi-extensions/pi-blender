@@ -28,7 +28,7 @@ bake_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bake_module)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.mesh.primitive_cube_add(size=1)
+bpy.ops.mesh.primitive_cube_add(size=1, calc_uvs=False)
 low = bpy.context.object
 low.name = "LowCage"
 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7, segments=16, ring_count=8)
@@ -37,6 +37,10 @@ high.name = "HighSculpt"
 
 scene = bpy.context.scene
 engine_before = scene.render.engine
+samples_before = scene.cycles.samples
+device_before = scene.cycles.device
+bake_before = (scene.render.bake.use_selected_to_active, scene.render.bake.cage_extrusion, scene.render.bake.margin)
+active_before = bpy.context.view_layer.objects.active
 selected_before = list(bpy.context.selected_objects)
 output = os.path.join(tempfile.mkdtemp(prefix="pi-bake-"), "low_normal.png")
 report = bake_module.bake_normal(low, high, output, resolution=64, samples=1, cage_extrusion=0.25)
@@ -46,9 +50,12 @@ check(report["resolution"] == 64 and report["samples"] == 1, "the report names t
 check(report["lowTriangles"] < report["highTriangles"], "the cage has fewer triangles than the sculpt")
 check(0.0 <= report["triangleReduction"] <= 1.0, "the triangle reduction is a fraction")
 check(report["elapsedSeconds"] >= 0, "elapsed time is reported")
-check(len(low.data.uv_layers) > 0 and report["uvCreated"] in (True, False), "the low-poly cage has UVs for the bake")
+check(len(low.data.uv_layers) > 0 and report["uvCreated"] is True, "a cage without UVs is unwrapped for the bake")
 check(scene.render.engine == engine_before, "the previous engine is restored after the bake")
 check(list(bpy.context.selected_objects) == selected_before, "the previous selection is restored after the bake")
+check(bpy.context.view_layer.objects.active == active_before, "the previous active object is restored after the bake")
+check(scene.cycles.samples == samples_before and scene.cycles.device == device_before, "the sample count and device are restored after the bake")
+check((scene.render.bake.use_selected_to_active, scene.render.bake.cage_extrusion, scene.render.bake.margin) == bake_before, "the bake settings are restored after the bake")
 material = bpy.data.materials.get(report["materialName"])
 assert material is not None and material.node_tree is not None
 check(material.use_nodes, "the low-poly material was created")

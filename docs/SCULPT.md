@@ -1,7 +1,5 @@
 # Sculpt detail: normal-map bake
 
-## Carrying the detail out: normal-map bake
-
 A sculpt exported as-is is a high-poly mesh; glTF has no multires level. Bake
 the surface into a normal map on a low-poly cage before export:
 
