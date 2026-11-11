@@ -59,6 +59,14 @@ export function planCheckpointRetention(latestIteration: number, keep = DEFAULT_
  * operation mid-loop costs the session. Manifest records are deliberately left
  * alone -- blender_module_revert already reports a recorded-but-deleted
  * checkpoint as missing, which is a truer history than silently rewriting it.
+ *
+ * That retention rule covers HISTORY, not live claims. A `staged` branch is live
+ * state: it owns datablocks and contests siblings. Superseded staged records
+ * stay in the manifest but stop contesting (contestableStagedRuns keeps only the
+ * newest run per module, counting an applied branch or a successful live run as
+ * supersession), so an abandoned branch cannot block its module's objects for
+ * the rest of the build. There is no discard tool; re-running the module is the
+ * way to retire it.
  */
 export async function pruneOldModuleRuns(
 	workspacePath: string,

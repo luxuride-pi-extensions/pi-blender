@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadTs } from "./paths.mjs";
 
-const { computeBranchConflicts, findRecordConflicts, recordOwnedDatablocks } = await loadTs(
+const { computeBranchConflicts, contestableStagedRuns, findRecordConflicts, pruneBranchRunHistory, recordOwnedDatablocks } = await loadTs(
 	`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`,
 );
 
@@ -122,4 +122,77 @@ test("an empty pending set produces no conflicts rather than throwing", () => {
 	// The apply path calls this on an empty staged list when a caller names
 	// nothing, and an exception there would read as a workspace fault.
 	assert.equal(computeBranchConflicts([]).size, 0);
+});
+
+function manifest(runs, moduleRuns = []) {
+	return { branchRuns: runs, moduleRuns };
+}
+
+test("a superseded staged branch stops contesting the objects it used to own", () => {
+	// A module was re-run before its abandoned first branch was applied. The old
+	// branch still exists, but it is no longer the module's live claim: the
+	// re-run replaced it, so a sibling touching its old object must not be
+	// refused forever by a branch nobody will apply.
+	const old = record("body", { apply: ["OldMug"] });
+	old.sequence = 1;
+	const rerun = record("body", { apply: ["NewMug"] });
+	rerun.sequence = 2;
+	const active = contestableStagedRuns(manifest([old, rerun]));
+	assert.deepEqual(active.map((run) => run.sequence), [2]);
+	assert.equal(findRecordConflicts(record("handle", { apply: ["OldMug"] }), active).length, 0);
+});
+
+test("an applied branch retires the staged record before it", () => {
+	const old = record("body", { apply: ["Mug"] });
+	old.sequence = 1;
+	const applied = record("body", { apply: ["Mug"] });
+	applied.sequence = 2;
+	applied.status = "applied";
+	assert.deepEqual(contestableStagedRuns(manifest([old, applied])), []);
+});
+
+test("a successful live run also supersedes an older staged branch", () => {
+	const old = record("body", { apply: ["Mug"] });
+	old.sequence = 1;
+	const live = { name: "body", iteration: 2, sequence: 2, status: "ok" };
+	assert.deepEqual(contestableStagedRuns(manifest([old], [live])), []);
+});
+
+test("a failed later run does not retire a staged branch that still has work", () => {
+	// Nothing landed from the later run, so the staged branch is still the only
+	// description of that module's pending work.
+	const old = record("body", { apply: ["Mug"] });
+	old.sequence = 1;
+	const failed = { name: "body", iteration: 2, sequence: 2, status: "failed" };
+	assert.deepEqual(contestableStagedRuns(manifest([old], [failed])).map((run) => run.sequence), [1]);
+});
+
+test("branch history keeps the checkpoint window", () => {
+	const runs = Array.from({ length: 9 }, (_, index) => ({ ...record("body"), iteration: index + 1, sequence: index + 1 }));
+	const kept = pruneBranchRunHistory(runs, 9);
+	assert.deepEqual(kept.map((run) => run.iteration), [5, 6, 7, 8, 9]);
+});
+
+test("a staged branch outside the window survives while it is the newest work", () => {
+	const staged = { ...record("body", { apply: ["Mug"] }), iteration: 1, sequence: 1 };
+	const later = { ...record("body"), iteration: 6, sequence: 6, status: "applied" };
+	assert.deepEqual(pruneBranchRunHistory([staged], 6).map((run) => run.iteration), [1], "its checkpoint is gone, but its work is still pending");
+	assert.deepEqual(pruneBranchRunHistory([staged, later], 6).map((run) => run.iteration), [6], "a later run retires it");
+});
+
+test("a long multi-module build does not grow the manifest without bound", () => {
+	// The cost that matters is the name arrays and paths on every record, and
+	// the history had no ceiling: 40 modules x 20 iterations is a realistic
+	// build. After each iteration the retained history must be the window only.
+	let runs = [];
+	const modules = Array.from({ length: 40 }, (_, index) => `part-${index}`);
+	for (let iteration = 1; iteration <= 20; iteration += 1) {
+		for (const module of modules) {
+			runs.push({ ...record(module), iteration, sequence: iteration, status: "applied" });
+		}
+		runs = pruneBranchRunHistory(runs, iteration);
+	}
+	assert.equal(runs.length, modules.length * 5);
+	const bytes = Buffer.byteLength(JSON.stringify(runs), "utf8");
+	assert.ok(bytes < 300_000, `retained history is ${bytes} bytes; the manifest is a state file, not a log`);
 });

@@ -42,6 +42,7 @@ import type {
 } from "./types.js";
 import {
 	buildModuleScriptPreamble,
+	DEFAULT_CHECKPOINT_RETENTION,
 	getModuleDir,
 	getModuleRunCheckpointName,
 	getModuleScriptPath,
@@ -608,7 +609,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.branchRuns = [...(current.branchRuns ?? []), record];
+			current.branchRuns = pruneBranchRunHistory(
+				[...(current.branchRuns ?? []), record],
+				Math.max(current.latestIteration ?? iteration, iteration),
+			);
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,
@@ -1041,7 +1045,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// winner the rule leaves holding model.blend, and this is the one case where
 	// last-writer behaviour is not auto-merging, because the earlier apply is
 	// already on disk and this decision cannot undo it.
-	const allStaged = branchRuns.filter((run) => run.status === "staged");
+	const allStaged = contestableStagedRuns(manifest);
 
 	const applied: BranchApplyResult["applied"] = [];
 	const skipped: BranchApplyResult["skipped"] = [];
@@ -1155,7 +1159,54 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	return { workspacePath: manifest.workspacePath, blendPath: manifest.blendPath, applied, skipped, missing, liveBlenderMessage };
 }
 
-/** Staged branch runs, for a caller that wants to plan an apply. */
+/**
+ * The staged records that may still contest a datablock.
+ *
+ * Only the NEWEST run of a module can contest: a re-run (staged, applied, or
+ * live) supersedes the branch it replaces, and a record whose branch was
+ * abandoned must not block that module's objects forever. Superseded records
+ * stay in the manifest -- the deliberate checkpoint history -- but they are dead
+ * as live claims, which is the distinction the retention rule did not make.
+ */
+export function contestableStagedRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
+	const newest = new Map<string, number>();
+	for (const run of manifest.branchRuns ?? []) {
+		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
+	}
+	for (const run of manifest.moduleRuns ?? []) {
+		if (run.status !== "ok") continue;
+		newest.set(run.name, Math.max(newest.get(run.name) ?? 0, run.sequence));
+	}
+	return (manifest.branchRuns ?? []).filter(
+		(run) => run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence),
+	);
+}
+
+/**
+ * Keep the branch history that can still be used.
+ *
+ * A finish record costs a checkpoint path, a script path and a handful of name
+ * arrays, and nothing used to remove it: a long multi-module build grew the
+ * manifest without limit. The checkpoint retention window is the natural bound
+ * because a record whose checkpoint is gone cannot be reverted to -- keep the
+ * same window here. Active staged records are the exception: they still describe
+ * pending work and are kept until a later run supersedes them.
+ */
+export function pruneBranchRunHistory(
+	runs: BlenderBranchRunRecord[],
+	latestIteration: number,
+	keep = DEFAULT_CHECKPOINT_RETENTION,
+): BlenderBranchRunRecord[] {
+	const window = Math.max(1, Math.trunc(keep));
+	const floor = latestIteration - window + 1;
+	const newest = new Map<string, number>();
+	for (const run of runs) newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
+	return runs.filter(
+		(run) => run.iteration >= floor || (run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence)),
+	);
+}
+
+/** Staged branch runs that may still contest, for a caller planning an apply. */
 export function stagedBranchRuns(manifest: BlenderWorkspaceManifest): BlenderBranchRunRecord[] {
-	return (manifest.branchRuns ?? []).filter((run) => run.status === "staged");
+	return contestableStagedRuns(manifest);
 }
