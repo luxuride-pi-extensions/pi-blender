@@ -162,6 +162,17 @@ def main():
     plane_shape = result["objects"][plane.name]["shape"]
     check(plane_shape["openEdges"] > 0, "an open plane reported zero open edges")
 
+    # Above the sampling limit, so this exercises the strided path in both
+    # _sample_world_points and _shape_convexity. A bpy_prop_collection rejects a
+    # step slice on Blender 4.2, so before the index loop this aborted the probe.
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=150, y_subdivisions=150, size=2.0)
+    dense = bpy.context.active_object
+    dense.name = "DenseGrid"
+    dense_result = probe(live_bridge, scratch_blend, [dense.name], ["shape"])
+    dense_shape = dense_result["objects"][dense.name]["shape"]
+    check("convexityRatio" in dense_shape, "a dense mesh should still report a convexity ratio")
+    check("selfSymmetry" in dense_shape, "a dense mesh should still report self symmetry")
+
     if failures:
         print("FAIL")
         for failure in failures:

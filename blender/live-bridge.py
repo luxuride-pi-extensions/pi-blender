@@ -3520,8 +3520,8 @@ def _shape_convexity(obj, points):
     on_hull = 0
     counted = 0
     worst = 0.0
-    for vertex in obj.data.vertices[::stride]:
-        origin = matrix @ vertex.co
+    for index in range(0, len(obj.data.vertices), stride):
+        origin = matrix @ obj.data.vertices[index].co
         found, _, _, distance = hull.find_nearest(origin)
         if found is None:
             continue
