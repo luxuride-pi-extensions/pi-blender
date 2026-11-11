@@ -1263,6 +1263,18 @@ export interface IterationState {
 		score: number;
 		viewUsable: boolean;
 		rejectReason?: string;
+		/** The six axis scores as logged, keyed by their printed label. */
+		axes: Record<string, number>;
+		/**
+		 * Axis labels scored 0 or 1, the ones a follow-up brief must name.
+		 * Absent when the critique predates axis logging; that is not the same
+		 * as an empty list.
+		 */
+		blockingAxes?: string[];
+		/** Undefined for a log written before issues were logged; `[]` means none. */
+		issues?: string[];
+		/** The smallest fix the critic asked for, verbatim. */
+		nextAction?: string;
 	};
 	previousScore?: number;
 	/** Whether the last briefed fix actually changed the content. */
@@ -1283,6 +1295,12 @@ export interface CritiqueVerdictRecord {
 	viewUsable: boolean;
 	iterationBudgetExceeded: boolean;
 	rejectReason?: string;
+	/** The six 0-2 axis scores as logged, keyed by their printed label. */
+	axes?: Record<string, number>;
+	/** The critic's concrete issues, line by line; undefined when not logged. */
+	issues?: string[];
+	/** The smallest fix the critic asked for, verbatim. */
+	nextAction?: string;
 }
 
 export interface CritiqueLogResult {

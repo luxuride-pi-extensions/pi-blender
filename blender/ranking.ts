@@ -13,8 +13,9 @@
  * and the percentile cut disagree, the briefs are wrong rather than the assets.
  *
  * The log is parsed for STRUCTURE only — headers, the score line, the axis
- * lines, the decision line. Never the prose: an `issues:` bullet may say
- * anything at all, and a ranking that read it would rank on English.
+ * lines, the decision line. The prose is captured for the iteration state,
+ * which is where a manager recovers the follow-up brief, but it is never
+ * consulted by the ranking itself: ranking on English would rank on phrasing.
  */
 
 import { readFile } from "node:fs/promises";
@@ -54,6 +55,9 @@ export interface CritiqueRankingResult {
 const HEADER_MODULE = /^\[\S+\] iteration_(\d+) module=(\S+) budget (\d+)\/(\d+)$/;
 const SCORE_LINE = /^Score: (\d+)\/(\d+)$/;
 const AXIS_LINE = /^([A-Za-z][A-Za-z& ]*): (\d+)\/(\d+)$/;
+const ISSUES_HEADER = /^Issues:\s*$/;
+const ISSUE_LINE = /^\s*-\s+(.*)$/;
+const NEXT_ACTION = /^Next action:\s*(.*)$/;
 const VIEW_LINE = /^View adequacy: (\d+)\/(\d+)\b/;
 const DECISION_LINE = /^Decision: (present to user|continue iterating|REJECT)/;
 const REJECT_REASON = /^Decision: REJECT — (.*)$/;
@@ -67,8 +71,11 @@ const REJECT_REASON = /^Decision: REJECT — (.*)$/;
  */
 export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 	const entries: CritiqueVerdictRecord[] = [];
-	let current: (Partial<CritiqueVerdictRecord> & { iteration: number; validity?: number }) | null = null;
+	let current:
+		| (Partial<CritiqueVerdictRecord> & { iteration: number; validity?: number; axes?: Record<string, number> })
+		| null = null;
 	let sawView = false;
+	let inIssues = false;
 
 	const flush = () => {
 		// An entry needs a score, a module, a view and a decision to be
@@ -85,10 +92,14 @@ export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 				viewUsable: current.viewUsable ?? false,
 				iterationBudgetExceeded: current.iterationBudgetExceeded ?? false,
 				rejectReason: current.rejectReason,
+				axes: current.axes && Object.keys(current.axes).length > 0 ? current.axes : undefined,
+				issues: current.issues,
+				nextAction: current.nextAction,
 			});
 		}
 		current = null;
 		sawView = false;
+		inIssues = false;
 	};
 
 	for (const line of text.split("\n")) {
@@ -111,6 +122,29 @@ export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 			current.viewUsable = Number(view[1]) >= 1;
 			continue;
 		}
+		if (ISSUES_HEADER.test(line)) {
+			inIssues = true;
+			current.issues = [];
+			continue;
+		}
+		const nextAction = NEXT_ACTION.exec(line);
+		if (nextAction) {
+			inIssues = false;
+			const action = nextAction[1]?.trim();
+			if (action) current.nextAction = action;
+			continue;
+		}
+		if (inIssues) {
+			const issue = ISSUE_LINE.exec(line);
+			if (issue?.[1]) {
+				const text = issue[1].trim();
+				// The writer emits a literal "- none" for a clean critique;
+				// handing that to a manager as a concrete issue would be a lie.
+				if (text && text.toLowerCase() !== "none") current.issues?.push(text);
+				continue;
+			}
+			inIssues = false;
+		}
 		const decision = DECISION_LINE.exec(line);
 		if (decision) {
 			const verdict = decision[1] === "present to user" ? "present" : decision[1] === "continue iterating" ? "continue" : "reject";
@@ -126,8 +160,10 @@ export function parseCritiqueLog(text: string): CritiqueVerdictRecord[] {
 			continue;
 		}
 		const axis = AXIS_LINE.exec(line);
-		if (axis && axis[1] === "Category validity") {
-			current.validity = Number(axis[2]);
+		if (axis?.[1]) {
+			const label = axis[1].trim();
+			current.axes = { ...current.axes, [label]: Number(axis[2]) };
+			if (label === "Category validity") current.validity = Number(axis[2]);
 		}
 	}
 	flush();

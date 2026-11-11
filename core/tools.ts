@@ -1160,7 +1160,7 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict and score, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.",
+	"What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict with its six axis scores, blocking subset, issues and next action, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.",
 	parameters: Type.Object({
 	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
 	moduleName: Type.String({
@@ -1183,6 +1183,14 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 		result.lastVerdict
 			? `Last verdict: ${result.lastVerdict.verdict} at ${result.lastVerdict.score}/12${result.lastVerdict.viewUsable ? "" : " (view unusable — the judgement did not gate anything)"}${result.lastVerdict.rejectReason ? ` — ${result.lastVerdict.rejectReason}` : ""}`
 			: "Last verdict: never critiqued.",
+		...(result.lastVerdict
+			? [
+					`Axes: ${Object.entries(result.lastVerdict.axes).map(([label, score]) => `${label} ${score}/2`).join(", ") || "not logged"}`,
+					`Blocking axes: ${result.lastVerdict.blockingAxes === undefined ? "not logged" : result.lastVerdict.blockingAxes.join(", ") || "none"}`,
+					`Issues: ${result.lastVerdict.issues === undefined ? "not logged" : result.lastVerdict.issues.join("; ") || "none"}`,
+					...(result.lastVerdict.nextAction ? [`Next action: ${result.lastVerdict.nextAction}`] : []),
+				]
+			: []),
 		`Fix landed: ${result.fixLanded === undefined ? "unknown (no paired digests)" : result.fixLanded ? "yes" : "NO — the content did not move"}`,
 		`Waste guard: ${result.wasteGuard.kind} — ${result.wasteGuard.detail}`,
 	];
