@@ -133,7 +133,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		stdout: branchResult.stdout.trim(),
 		exitCode: branchResult.exitCode,
 		renderOutputPath: branchResult.renderOutputPath,
-		changed: branchResult.applyObjects.length > 0,
+		changed: branchResult.changed,
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,

@@ -119,7 +119,7 @@ from mathutils import Vector  # pyright: ignore[reportMissingImports]
 # One implementation of the fingerprint, shared with the live bridge: two copies
 # of this algorithm are two answers to "did anything change", and the apply side
 # only trusts a run if both paths agree.
-from fingerprint import snapshot
+from fingerprint import content_changed, snapshot
 
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
@@ -161,6 +161,12 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
 after = snapshot(bpy)
 after_objects = set(after["objects"])
 after_materials = set(after["materials"])
+
+# The same content fingerprint the live bridge reports, from the same snapshot
+# pair. Computed BEFORE framing: the auto-framed camera and its target are
+# harness bookkeeping, not the script's work, so including them would report
+# every successful framing run as a change and make the flag useless.
+changed = content_changed(before, after)
 
 touched_objects = sorted(
     name for name in (before_objects | after_objects) if before["objects"].get(name) != after["objects"].get(name)
@@ -372,6 +378,7 @@ print(json.dumps({
     "stdout": stdout_buffer.getvalue(),
     "stderr": stderr_buffer.getvalue(),
     "exitCode": exit_code,
+    "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
     "addedObjects": sorted(after_objects - before_objects),
@@ -389,6 +396,8 @@ interface BranchRunPayload {
 	stdout: string;
 	stderr: string;
 	exitCode: number;
+	/** Content fingerprint diff, the same definition the live bridge reports. */
+	changed: boolean;
 	touchedObjects: string[];
 	touchedMaterials: string[];
 	addedObjects: string[];
@@ -606,6 +615,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		runDir,
 		checkpointPath,
 		exitCode: payload.exitCode,
+		changed: payload.changed,
 		stdout: payload.stdout.trim(),
 		stderr: payload.stderr.trim(),
 		touchedObjects: payload.touchedObjects,

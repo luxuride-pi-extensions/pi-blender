@@ -219,6 +219,13 @@ export interface BranchRunResult {
 	runDir: string;
 	checkpointPath: string;
 	exitCode: number;
+	/**
+	 * True when the script changed the blend's object or material content.
+	 * Content fingerprint, not the apply set: the apply set also carries the
+	 * auto-framed camera and its target, and a paint module can change a material
+	 * without any object moving.
+	 */
+	changed: boolean;
 	stdout: string;
 	stderr: string;
 	touchedObjects: string[];
@@ -1336,7 +1343,7 @@ export interface ModuleRunResult {
 	exitCode: number;
 	renderOutputPath: string | null;
 	/**
-	 * True when this run changed the blend's object or material content.
+	 * True when the script changed the blend's object or material content.
 	 *
 	 * From a before/after content fingerprint, not from Blender's `is_dirty`
 	 * flag: that flag is UI-facing and stays false in background mode, so a
