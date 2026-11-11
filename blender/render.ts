@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { getBlenderAssetsDir } from "../config.js";
 import { NoWatchWindowError, requestLiveBlenderRender } from "./bridge.js";
 import { dispatchDeferredJob } from "./jobs.js";
 import type {
@@ -16,87 +17,19 @@ import { getIterationPaths, loadWorkspaceManifest, updateManifest } from "./work
 
 function buildRenderScript(): string {
 	return `
-import bpy
 import json
-import os
 import sys
 
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
-scene = bpy.context.scene
+sys.path.insert(0, payload["assetsDir"])
 
-# The engine enum identifier is version-dependent: "BLENDER_EEVEE" became
-# "BLENDER_EEVEE_NEXT" and the naming differs again on newer builds. Probing
-# the real enum is the only thing that cannot go stale, and the studio
-# template in workspace.ts already probes it this way.
-def set_engine(scene, desired):
-    if not desired:
-        return scene.render.engine
-    try:
-        scene.render.engine = desired
-    except (TypeError, ValueError):
-        # Not a member of this build's enum: fall back to the candidates in
-        # preference order, and only then give up.
-        try:
-            available = {
-                item.identifier
-                for item in scene.render.bl_rna.properties["engine"].enum_items
-            }
-        except (AttributeError, KeyError, TypeError):
-            available = set()
-        for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
-            if candidate in available:
-                scene.render.engine = candidate
-                return scene.render.engine
-        raise RuntimeError(
-            f'No usable render engine for "{desired}"; this build offers: '
-            + (", ".join(sorted(available)) or "nothing enumerable")
-        )
-    return scene.render.engine
-
-resolved_engine = set_engine(scene, payload.get("renderEngine"))
-
-camera_name = payload.get("cameraName")
-if camera_name:
-    camera_object = bpy.data.objects.get(camera_name)
-    if camera_object is None:
-        raise RuntimeError(f"Camera not found: {camera_name}")
-    scene.camera = camera_object
-
-if scene.camera is None:
-    fallback = bpy.data.objects.get("Camera")
-    if fallback is not None:
-        scene.camera = fallback
-
-if scene.camera is None:
-    raise RuntimeError("No camera available for rendering")
-
-resolution = payload.get("resolution") or {}
-scene.render.resolution_x = int(resolution.get("x", scene.render.resolution_x))
-scene.render.resolution_y = int(resolution.get("y", scene.render.resolution_y))
-scene.render.resolution_percentage = int(resolution.get("percentage", scene.render.resolution_percentage))
-
-samples = payload.get("samples")
-if samples is not None and hasattr(scene, "cycles"):
-    scene.cycles.samples = int(samples)
-
-output_path = payload["outputPath"]
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-scene.render.image_settings.file_format = "PNG"
-scene.render.filepath = output_path
-bpy.ops.render.render(write_still=True)
+# The engine probe and the camera/resolution handling live beside fingerprint in
+# the assets dir, shared with the branch run: one renderer means a branch render
+# and a background render of the same scene cannot disagree about the engine.
+from render_scene import render_scene
 
 print("__PI_BLENDER_JSON_START__")
-print(json.dumps({
-    "outputPath": output_path,
-    "cameraName": scene.camera.name if scene.camera else None,
-    "resolvedEngine": resolved_engine,
-    "requestedEngine": payload.get("renderEngine"),
-    "resolution": {
-        "x": int(scene.render.resolution_x),
-        "y": int(scene.render.resolution_y),
-        "percentage": int(scene.render.resolution_percentage),
-    },
-}))
+print(json.dumps(render_scene(payload)))
 print("__PI_BLENDER_JSON_END__")
 `;
 }
@@ -253,6 +186,7 @@ async function executeRender(options: RenderOptions): Promise<RenderResult> {
 					outputPath,
 					resolution: options.resolution,
 					samples: options.samples,
+					assetsDir: getBlenderAssetsDir(),
 				},
 				signal: options.signal,
 				timeoutMs: 360_000,
@@ -269,6 +203,7 @@ async function executeRender(options: RenderOptions): Promise<RenderResult> {
 				outputPath,
 				resolution: options.resolution,
 				samples: options.samples,
+				assetsDir: getBlenderAssetsDir(),
 			},
 			signal: options.signal,
 			timeoutMs: 360_000,

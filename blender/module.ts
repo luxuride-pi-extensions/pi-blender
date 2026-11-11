@@ -133,6 +133,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		stdout: branchResult.stdout.trim(),
 		exitCode: branchResult.exitCode,
 		renderOutputPath: branchResult.renderOutputPath,
+		resolvedEngine: branchResult.resolvedEngine,
 		changed: branchResult.changed,
 		executionMode: "headless-apply",
 		liveBlenderMessage: applyResult.liveBlenderMessage,

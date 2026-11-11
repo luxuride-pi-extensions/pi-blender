@@ -26,6 +26,7 @@ import { loadTs } from "./paths.mjs";
 const branch = await loadTs(`${fileURLToPath(new URL("../blender/branch.ts", import.meta.url))}`);
 const workspace = await loadTs(`${fileURLToPath(new URL("../blender/workspace.ts", import.meta.url))}`);
 const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", import.meta.url))}`);
+const render = await loadTs(`${fileURLToPath(new URL("../blender/render.ts", import.meta.url))}`);
 const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
@@ -474,6 +475,40 @@ test("blender_module_run works with NO window, by branching and applying", { ski
 		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
 		assert.equal(manifest.moduleRuns.length, 1, "a headless module run must leave one run record");
 		assert.ok(manifest.moduleRuns[0].viaBranchApply, "the record must say it came from a branch apply, so a caller can tell the two paths apart");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a branch render and a background render resolve the same engine", { skip }, async () => {
+	// Both paths used to carry their own copy of the render script, and only one
+	// of them probed the engine enum. A branch render could therefore pick an
+	// identifier this build does not have and fail where blender_render worked.
+	// They now share render_scene, so the resolved engine must be identical for
+	// the same scene -- that equality is what says the copies are gone.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "engine", ADD_CUBE);
+		const staged = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "engine",
+			render: true,
+			timeoutSeconds: 300,
+		});
+		assert.ok(staged.resolvedEngine, "a branch render must report the engine it used");
+
+		const background = await render.blenderRender({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			renderMethod: "background",
+			outputName: "engine.png",
+		});
+		assert.equal(
+			background.resolvedEngine,
+			staged.resolvedEngine,
+			"the branch render and blender_render must not pick different engines for the same scene",
+		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
