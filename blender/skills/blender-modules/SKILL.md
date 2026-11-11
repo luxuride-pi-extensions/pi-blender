@@ -9,9 +9,9 @@ Use this skill when a Blender task has **multiple objects or concerns** (e.g. "b
 
 **Delegation is mandatory.** The main session (you) IS the MANAGER. You MUST spawn `blender-worker` and `blender-critic` subagents for every module. You must NOT write module scripts, run `blender_module_run`, render, or edit scene objects directly. Delegating to subagents saves context by keeping each agent focused on one task.
 
-## Enabling delegation
+## Delegation
 
-Before spawning your **first worker or critic subagent**, call `subagents_enable` (no arguments) once. Fresh sessions do not have the `subagent` tool active until you enable it — spawning before enabling will fail or force a fallback to direct execution. If `subagents_enable` or `subagent` is not in your tool list at all, pi-subagents is not loaded in this app. Report that to the user and stop. Do not fall back to authoring the root `script.py` yourself: the session's write/edit gate blocks that path, and a direct `bash` write would bypass the module checkpointing that makes the work revertible.
+`subagent` is already in your tool list in most sessions, and then the first spawn needs no setup at all. A session on a model that adds tools mid-conversation starts with `subagents_enable` active instead: call it once, with no arguments, before the first spawn — some providers surface the tool only on the following turn, so wait rather than retrying. If neither `subagent` nor `subagents_enable` is in your tool list, pi-subagents is not loaded in this app. Report that to the user and stop. Do not fall back to authoring the root `script.py` yourself: the session's write/edit gate blocks that path, and a direct `bash` write would bypass the module checkpointing that makes the work revertible.
 
 ## Roles and context budget
 
@@ -36,7 +36,7 @@ Rules:
 
 ## Module run loop (per module)
 
-0. (Once, before the first module) Ensure delegation is enabled: `subagents_enable` (see above).
+0. (Once, before the first module) Confirm `subagent` is in your tool list; if it is not, call `subagents_enable` once (see Delegation above).
 1. Manager writes the brief (in the subagent task text). Run `blender_bridge_status` first if you are unsure whether the live UI is up — the worker's first tool call will otherwise pay the cold-start cost blindly.
 2. **Worker subagents** (`blender-worker`, one per module — spawn several in the same turn when the parts are independent):
    1. (First run only) writes `modules/<name>/script.py` in the workspace — a self-contained bpy script that is **idempotent-safe**: it should create or modify its objects by name and skip/rebuild what it owns (guard with `bpy.data.objects.get(...)`), so re-runs don't duplicate. It touches only the object names its brief says it owns.

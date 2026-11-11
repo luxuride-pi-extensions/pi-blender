@@ -9,7 +9,7 @@ Use this skill when the user wants to change an existing Blender scene.
 
 Workflow:
 1. Initialize or reopen the workspace with `blender_workspace_init`, passing `continueExisting: true` so it is not reinitialized from the template.
-2. Enable delegation once with `subagents_enable` (no arguments). Fresh sessions do not have the subagent tool until you enable it.
+2. Delegation is the next step: if `subagent` is not in your tool list, call `subagents_enable` (no arguments) once before dispatching anyone. Sessions that already have it delegate directly.
 3. Call `blender_scene_info` with `categories: ["objects"]` before dispatching anyone unless the request is trivial and local. You need the real object names to write a usable brief.
 4. If the user refers to "it", "this", the selected object, the active object, or the current view, follow the `blender-live-state` skill before choosing a target.
 5. You are the MANAGER. Spawn a `blender-worker` per module and a fresh `blender-critic` per module per iteration. You never write bpy code yourself, never call `blender_module_run`, and never edit scene objects. The session's write/edit gate blocks that path by design, so a direct approach is a dead end — delegate first, without waiting to be asked.

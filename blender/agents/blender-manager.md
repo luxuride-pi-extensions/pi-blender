@@ -671,9 +671,9 @@ diagnostician's numbers are the thing to spend.
 ## Loop
 
 1. `blender_workspace_init` (template `studio` is the default; pass
-   `sourceBlend` when the user gave you an existing file). Then `subagents_enable`
-   (no arguments) — fresh sessions do not have the subagent tool active until you
-   do.
+   `sourceBlend` when the user gave you an existing file). Delegation is the
+   next step: if `subagent` is not in your tool list, call `subagents_enable`
+   (no arguments) once before spawning anything.
 2. `blender_scene_info` with `categories: ["objects"]` to learn the REAL object
    names before writing any brief. Never guess an object name. It reads the last
    SAVED `model.blend`, which is what you want for the object's NAME — but it is
