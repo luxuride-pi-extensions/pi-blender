@@ -135,11 +135,13 @@ export function mergeCameraPlan(
 
 function sanitizePrevious(previous: ResolvedCameraPlan | undefined): ResolvedCameraPlan | undefined {
 	if (!previous || typeof previous !== "object") return undefined;
-	if (!(previous.profile in PROFILE_SHOTS)) return undefined;
-	if (!(previous.frontAxis in FRONT_VECTORS)) return undefined;
+	if (!Object.hasOwn(PROFILE_SHOTS, previous.profile)) return undefined;
+	if (!Object.hasOwn(FRONT_VECTORS, previous.frontAxis)) return undefined;
 	if (previous.frameSubject !== "module" && previous.frameSubject !== "apply") return undefined;
 	if (!Array.isArray(previous.shots) || previous.shots.length === 0) return undefined;
-	if (!previous.shots.every((shot) => shot.kind in SHOT_LENS)) return undefined;
+	if (!previous.shots.every((shot) => shot && typeof shot === "object" && Object.hasOwn(SHOT_LENS, shot.kind))) {
+		return undefined;
+	}
 	return previous;
 }
 

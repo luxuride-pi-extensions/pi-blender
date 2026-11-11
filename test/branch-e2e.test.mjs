@@ -895,6 +895,32 @@ detail.matrix_world.translation = (8.0, 0.0, 0.0)
 	}
 });
 
+test("a portrait frame fits a tall subject instead of cropping it", { skip }, async () => {
+	// sensor_fit AUTO fits 36 mm to the LONGER frame dimension, so a portrait
+	// render has a narrower horizontal view. Fitting with the landscape formula
+	// would under-estimate the required distance and crop the width.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "portrait", box("TallPart", 2, 2, 6));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "portrait",
+			render: false,
+			resolution: { x: 1080, y: 1920 },
+			timeoutSeconds: 300,
+		});
+		const framing = result.cameras?.[0];
+		assert.ok(framing, "the run framed a camera");
+		assert.ok(framing.coverage, "coverage was measured against the portrait frame");
+		assert.ok(framing.coverage.minX >= 0.02 && framing.coverage.maxX <= 0.98, `portrait width crops: ${JSON.stringify(framing.coverage)}`);
+		assert.ok(framing.coverage.minY >= 0.02 && framing.coverage.maxY <= 0.98, `portrait height crops: ${JSON.stringify(framing.coverage)}`);
+		assert.equal(framing.coverageOk, true);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("re-framing follows the part when it changes", { skip }, async () => {
 	// A camera fitted once is the defect this replaced, so the test is that the
 	// SECOND run moves it. Without this the feature is "creates a camera", which

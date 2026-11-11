@@ -668,7 +668,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	frontAxis: Type.Optional(
 		Type.String({
 			description:
-				"Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot. A live run reports that it ignored this.",
 			enum: ["-Y", "+Y", "-X", "+X"],
 		}),
 	),
@@ -690,19 +690,19 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 					"lineup_front",
 				],
 			}),
-			{ description: "Explicit shot list overriding the profile's default. The first shot is rendered." },
+			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered. A live run reports that it ignored this." },
 		),
 	),
 	frameSubject: Type.Optional(
 		Type.String({
 			description:
-				"Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body. A live run reports that it ignored this.",
 			enum: ["module", "apply"],
 		}),
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject. A live run reports that it ignored this.",
 			minimum: 0,
 		}),
 	),
@@ -791,7 +791,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	frontAxis: Type.Optional(
 		Type.String({
 			description:
-				"Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
 			enum: ["-Y", "+Y", "-X", "+X"],
 		}),
 	),
@@ -813,19 +813,19 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 					"lineup_front",
 				],
 			}),
-			{ description: "Explicit shot list overriding the profile's default. The first shot is rendered." },
+			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered." },
 		),
 	),
 	frameSubject: Type.Optional(
 		Type.String({
 			description:
-				"Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
 			enum: ["module", "apply"],
 		}),
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
 			minimum: 0,
 		}),
 	),

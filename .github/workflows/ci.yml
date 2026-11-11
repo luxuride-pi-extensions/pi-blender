@@ -145,16 +145,16 @@ jobs:
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
       # not exist -- which is the state this step creates. Exactly ten files
-      # and 61 tests survive:
+      # and 62 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
-      #   generations.test.mjs           8
+      #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
       #   live-ownership.test.mjs        3
       #   module-paths.test.mjs          7
-      #   module-state.test.mjs          5
-      #   tool-params.test.mjs           3
+      #   module-state.test.mjs          6
+      #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
       #   windowless-tools.test.mjs      5
       #
@@ -338,7 +338,7 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "61 tests ran, in 10 files: camera-plan, concurrency-budget,"
+            echo "62 tests ran, in 10 files: camera-plan, concurrency-budget,"
             echo "generations, headless-changed, live-ownership, module-paths,"
             echo "module-state, tool-params, tool-surface and windowless-tools."
             echo "Those are the only files measured to pass without a"

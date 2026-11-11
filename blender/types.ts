@@ -383,7 +383,11 @@ export interface BranchCameraFraming {
 	orthoScale?: number | null;
 	fitDistance?: number | null;
 	coverage?: { minX: number; maxX: number; minY: number; maxY: number } | null;
-	/** False when ten refits still left a corner outside the safe frame. */
+	/**
+	 * False when ten refits still left a corner outside the safe frame, or when
+	 * coverage could not be measured (a corner behind the camera) and
+	 * `coverage` is null.
+	 */
 	coverageOk?: boolean;
 	shot?: string;
 }

@@ -359,13 +359,14 @@ def _frame_module_camera(module, plan):
     # baked now, and leaving the empty would keep it in the module's ownership
     # forever; only the exact legacy name is removed, never a user empty.
     legacy_target = bpy.data.objects.get(camera_name + "Target")
+    removed_legacy = []
     if legacy_target is not None and legacy_target.type == "EMPTY":
+        removed_legacy.append(legacy_target.name)
         bpy.data.objects.remove(legacy_target, do_unlink=True)
     camera.data.type = "ORTHO" if orthographic else "PERSP"
     camera.data.lens = lens
     camera.data.sensor_width = FRAME_SENSOR_MM
     camera.data.sensor_fit = "AUTO"
-    camera.data.clip_end = max(camera.data.clip_end, distance + radius * 2.0)
 
     # Bake the rotation rather than constrain it to an empty: coverage is
     # evaluated immediately, and a constraint is only resolved after a depsgraph
@@ -389,6 +390,8 @@ def _frame_module_camera(module, plan):
             ortho_scale *= 1.15
         else:
             distance *= 1.15
+
+    camera.data.clip_end = max(camera.data.clip_end, distance + radius * 2.0)
 
     # camera_fit_coords is the independent check: if it asks for more distance
     # than we chose for this direction, the arithmetic fit missed something.
@@ -433,6 +436,7 @@ def _frame_module_camera(module, plan):
         "fitDistance": fit_distance,
         "coverage": coverage,
         "coverageOk": coverage_ok,
+        "removedLegacy": removed_legacy,
         "shot": shot.get("name") or "hero",
         "subjects": subjects,
     }
@@ -443,6 +447,14 @@ camera_framing = _frame_module_camera(module_name, camera_plan)
 cameras = [camera_framing] if camera_framing is not None else []
 camera_plan_report = dict(camera_plan)
 camera_plan_report["resolved"] = camera_framing
+if camera_framing and camera_framing.get("removedLegacy"):
+    for legacy_name in camera_framing["removedLegacy"]:
+        if legacy_name not in removed_objects:
+            removed_objects.append(legacy_name)
+if camera_framing and not camera_framing.get("coverageOk") and payload.get("render"):
+    camera_plan_report["warnings"] = list(camera_plan_report.get("warnings") or []) + [
+        "The camera was not shown to fit the subject; coverage is reported on the framing."
+    ]
 
 # A digest of the geometry this run left behind, over the datablocks this
 # MODULE owns. It exists to make one question decidable without an image: did
