@@ -51,6 +51,7 @@ const USER_SESSION_ONLY = new Set([
 	"blender_focus_view",
 	"blender_get_python_api_docs",
 	"blender_import_asset",
+	"blender_job_cancel",
 	"blender_job_status",
 	"blender_object_detail",
 	"blender_search_api_docs",

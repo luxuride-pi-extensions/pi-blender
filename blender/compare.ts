@@ -33,7 +33,7 @@ export async function blenderCompare(options: CompareOptions): Promise<CompareRe
 	if (options.async) {
 		return await dispatchDeferredJob(
 			"compare",
-			() => executeCompare({ ...options, async: false }),
+			(signal) => executeCompare({ ...options, async: false, signal }),
 			{
 				workspace: options.workspace,
 				moduleName: options.moduleName,

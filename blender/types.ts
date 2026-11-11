@@ -2473,7 +2473,7 @@ export interface CompareResult extends MontageResult {
 	framing: MontageFraming & { fromUnion: true };
 }
 
-export type DeferredJobState = "running" | "completed" | "failed";
+export type DeferredJobState = "running" | "completed" | "failed" | "cancelled";
 
 export interface DeferredJobHandle {
 	jobId: string;
@@ -2488,6 +2488,7 @@ export interface DeferredJobRecord {
 	updatedAt: string;
 	result?: unknown;
 	error?: string;
+	cancelReason?: string;
 	metadata?: Record<string, unknown>;
 }
 

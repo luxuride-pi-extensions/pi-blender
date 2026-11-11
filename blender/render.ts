@@ -102,7 +102,7 @@ export async function blenderRender(options: RenderOptions): Promise<RenderResul
 	if (options.async) {
 		return await dispatchDeferredJob(
 			"render",
-			() => executeRender({ ...options, async: false }),
+			(signal) => executeRender({ ...options, async: false, signal }),
 			{
 				workspace: options.workspace,
 				view: options.view,

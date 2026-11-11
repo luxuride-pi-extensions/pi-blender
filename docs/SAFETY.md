@@ -205,3 +205,4 @@ annotations: {
 | `blender_read_only_python` | `false` | `false` | `false` | `true` | Guards `bpy` in live scene, but has un-sandboxed filesystem access. |
 | `blender_montage` | `false` | `false` | `false` | `true` | Multi-angle orbit/interior renders tiled to disk; interacts with live session. |
 | `blender_compare` | `false` | `false` | `false` | `true` | Side-by-side generational comparison renders; interacts with live session. |
+| `blender_job_cancel` | `false` | `false` | `true` | `true` | Cancels a deferred job; aborts its Blender process and withdraws a queued live request best effort. Completed/failed jobs are rejected. |

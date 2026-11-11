@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getBlenderBridgeDir } from "../config.js";
 
-export type DeferredJobState = "running" | "completed" | "failed";
+export type DeferredJobState = "running" | "completed" | "failed" | "cancelled";
 
 export interface DeferredJobRecord {
 	id: string;
@@ -13,6 +13,8 @@ export interface DeferredJobRecord {
 	updatedAt: string;
 	result?: unknown;
 	error?: string;
+	/** Why a cancelled job was cancelled, kept alongside its final state. */
+	cancelReason?: string;
 	metadata?: Record<string, unknown>;
 }
 
@@ -123,6 +125,48 @@ export async function listJobs(): Promise<DeferredJobRecord[]> {
 	}
 }
 
+/** Abort handles for jobs this process dispatched; a job from an earlier process has none. */
+const inFlight = new Map<string, AbortController>();
+
+/**
+ * Mark a running job cancelled and abort its worker.
+ *
+ * The state is written before the abort so the worker's rejection cannot land
+ * as "failed" on a job the user just cancelled. A worker that had already
+ * finished goes through `finishJob`, which leaves a cancelled record alone.
+ */
+export async function cancelJob(
+	id: string,
+	reason = "cancelled by request",
+): Promise<DeferredJobRecord> {
+	const job = await getJob(id);
+	if (!job) {
+		throw new Error(`Job "${id}" not found in job registry.`);
+	}
+	if (job.state === "cancelled") return job;
+	if (job.state !== "running") {
+		throw new Error(`Job "${id}" is already ${job.state}.`);
+	}
+	// Write the decision BEFORE aborting: the abort rejects the worker
+	// synchronously, and its catch would otherwise race this write and land as
+	// "failed" on a job the user just cancelled.
+	await updateJob(id, { state: "cancelled", cancelReason: reason });
+	inFlight.get(id)?.abort(new Error(reason));
+	inFlight.delete(id);
+	const settled = (await getJob(id)) as DeferredJobRecord;
+	if (settled.state === "cancelled") return settled;
+	// A worker outcome read before this write can land after it; the decision wins.
+	return (await updateJob(id, { state: "cancelled", cancelReason: reason })) as DeferredJobRecord;
+}
+
+async function finishJob(id: string, updates: Partial<DeferredJobRecord>): Promise<void> {
+	const current = await getJob(id);
+	// A cancelled job is a decision, not a missing update: its worker may
+	// finish a fraction of a second later while the process is dying.
+	if (current?.state === "cancelled") return;
+	await updateJob(id, updates);
+}
+
 export async function listInFlightJobs(): Promise<DeferredJobRecord[]> {
 	const all = await listJobs();
 	return all.filter((job) => job.state === "running");
@@ -130,23 +174,25 @@ export async function listInFlightJobs(): Promise<DeferredJobRecord[]> {
 
 export function dispatchDeferredJob<T>(
 	type: string,
-	worker: () => Promise<T>,
+	worker: (signal: AbortSignal) => Promise<T>,
 	metadata?: Record<string, unknown>,
 ): Promise<DeferredJobHandle> {
 	return createJob(type, metadata).then((job) => {
+		const controller = new AbortController();
+		inFlight.set(job.id, controller);
 		Promise.resolve()
-			.then(worker)
-			.then((result) => {
-				return updateJob(job.id, {
-					state: "completed",
-					result,
-				});
+			.then(() => worker(controller.signal))
+			.then(async (result) => {
+				await finishJob(job.id, { state: "completed", result });
 			})
-			.catch((error) => {
-				return updateJob(job.id, {
+			.catch(async (error) => {
+				await finishJob(job.id, {
 					state: "failed",
 					error: error instanceof Error ? error.message : String(error),
 				});
+			})
+			.finally(() => {
+				inFlight.delete(job.id);
 			});
 
 		return {

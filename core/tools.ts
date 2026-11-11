@@ -23,6 +23,7 @@ import {
 	blenderImportAsset,
 	blenderIterationState,
 	blenderJobStatus,
+	cancelJob,
 	blenderLogCritique,
 	blenderModuleRevert,
 	blenderModuleRun,
@@ -2078,7 +2079,7 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Check the state, execution progress, and result of a deferred background Blender job (such as a long render, montage, or compare dispatched with async: true). Reports state ('running', 'completed', or 'failed') along with timestamps and full result payload or failure error.",
+	"Check the state, execution progress, and result of a deferred background Blender job (such as a long render, montage, or compare dispatched with async: true). Reports state ('running', 'completed', 'failed' or 'cancelled') along with timestamps and full result payload, failure error or cancellation reason.",
 	parameters: Type.Object({
 	jobId: Type.String({
 		description: "The unique job identifier returned when the deferred job was dispatched.",
@@ -2131,6 +2132,36 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 	},
 };
 
+export const blenderJobCancelTool: CoreToolDefinition = {
+	name: "blender_job_cancel",
+	label: "Blender Job Cancel",
+	annotations: {
+		readOnlyHint: false,
+		destructiveHint: true,
+		idempotentHint: true,
+		openWorldHint: false,
+	},
+	description:
+	"Cancel a deferred Blender job that is still running (render, montage or compare dispatched with async: true). The job is recorded as cancelled with the reason and its work is aborted when this process started it: a local process is stopped, and a queued live-viewport request is withdrawn best effort. A request the live UI already picked up cannot be interrupted. A completed or failed job is reported as such; cancelling an already-cancelled job returns its record.",
+	parameters: Type.Object({
+	jobId: Type.String({
+		description: "The unique job identifier returned when the deferred job was dispatched.",
+	}),
+	reason: Type.Optional(
+		Type.String({
+			description: "Why the job is being cancelled, stored on the record so a later reader knows this was a decision, not a crash.",
+		}),
+	),
+}),
+	execute: async (params): Promise<CoreToolResult> => {
+	const result = await cancelJob(params.jobId, params.reason);
+	return {
+		content: [{ type: "text", text: formatJsonResult(result) }],
+		details: result,
+	};
+	},
+};
+
 export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderWorkspaceInitTool,
 	blenderWorkspacePruneTool,
@@ -2165,6 +2196,7 @@ export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderSwitchWorkspaceTool,
 	blenderFocusViewTool,
 	blenderJobStatusTool,
+	blenderJobCancelTool,
 	blenderUsageGuessTool,
 ];
 
