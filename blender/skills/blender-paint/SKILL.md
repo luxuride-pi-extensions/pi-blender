@@ -11,12 +11,12 @@ Core idea: Blender's paint strokes are interactive UI actions and cannot be driv
 
 Workflow:
 1. Initialize or reopen the workspace with `blender_workspace_init` and keep `workspace` explicit in every call.
-2. Enable delegation once with `subagents_enable` (no arguments), then inspect first with `blender_scene_info` using the relevant categories:
+2. Inspect first with `blender_scene_info` using the relevant categories:
    - `uv` — per-mesh UV layers (name, active, sync, hasData), vertex groups, color attributes.
    - `textures` — every material image node with image name, file path, size, and whether it holds pixel data.
    - `armatures` — bone hierarchy with head/tail positions and `useDeform` flags.
    - `paintSettings` — active object, current mode, active material, its image texture nodes, and color attributes.
-3. You are the MANAGER. You do not write bpy code and you do not call `blender_set_mode`. The session's write/edit gate blocks direct authoring by design, so a direct approach is a dead end — delegate first, without waiting to be asked. You keep the step 2 readouts so the brief carries real layer, group, and bone names instead of guesses.
+3. You are the MANAGER. You do not write bpy code and you do not call `blender_set_mode`. The session's write/edit gate blocks direct authoring by design, so a direct approach is a dead end — delegate first, without waiting to be asked. If `subagent` is not in your tool list, call `subagents_enable` (no arguments) once before the first spawn. You keep the step 2 readouts so the brief carries real layer, group, and bone names instead of guesses.
 4. Spawn a `blender-worker` for the paint module. It owns `modules/<name>/script.py` and runs it with `blender_module_run`, which saves after execution. Hand it the category readouts above, the target object, the mode, and the measured intent.
 5. The worker creates the missing paint data in its module script:
    - **Texture paint**: ensure the material's Image Texture node references a `bpy.data.images.new(...)` image with known `size`; write pixels via `image.pixels` (RGBA, row-major, bottom-to-top) or load/`filepath_raw` + `image.reload()`.

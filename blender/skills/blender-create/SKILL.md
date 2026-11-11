@@ -9,7 +9,7 @@ Use this skill when the user wants a brand-new Blender scene or object.
 
 Workflow:
 1. Call `blender_workspace_init` first with an explicit `workspace` when the user provides one, otherwise create a new workspace. The default `studio` template gives you a camera, a three-point light rig, and EEVEE at 1200x900, so a worker can model immediately.
-2. Enable delegation once with `subagents_enable` (no arguments). Fresh sessions do not have the subagent tool until you enable it.
+2. Delegation is the next step: if `subagent` is not in your tool list, call `subagents_enable` (no arguments) once before dispatching anyone. Sessions that already have it delegate directly.
 3. Inspect requirements before dispatching anyone. If references are attached, combine this with `blender-with-reference` and incorporate them into planning. If the user refers to "it", "this", the selected object, or the current view, follow the `blender-live-state` skill before choosing a target.
 4. Check the subject exists before dispatching a judge: `blender_scene_info` with `categories: ["objects"]`. A reference may depict an object the scene has never had — that is a missing subject, not a modelling bug.
 5. You are the MANAGER. Spawn a `blender-worker` per module and a fresh `blender-critic` per module per iteration. You never write bpy code yourself, never call `blender_module_run`, and never edit scene objects. The session's write/edit gate blocks that path by design, so a direct approach is a dead end — delegate first, without waiting to be asked.

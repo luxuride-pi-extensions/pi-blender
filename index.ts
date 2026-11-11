@@ -178,6 +178,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// belong to pi-subagents, not to an index.ts, so a deny-by-default gate has
 	// to name them here.
 	"subagent",
+	// The loader stays listed even when `subagent` is already active: on models
+	// that add tools mid-conversation it is the only way in, and a gate that
+	// does not name a tool refuses the call.
 	"subagents_enable",
 	"bg_wait",
 	"subagent_supervisor",
