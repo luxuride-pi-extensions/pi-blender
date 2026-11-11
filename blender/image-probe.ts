@@ -106,18 +106,23 @@ export async function blenderImageProbe(options: ImageProbeOptions): Promise<Ima
 	};
 
 	const { exposure } = result;
+	// A single saturated channel is a coloured highlight, not a blown one:
+	// only all three channels pinned at the same end hide material detail.
+	const clippedHigh = round(exposure.clippedHigh.all * 100, 1);
+	const clippedLow = round(exposure.clippedLow.all * 100, 1);
+	const overClipped = round((clippedHigh + clippedLow) / 100, 4);
 	const range = exposure.lumaPercentiles.p99 - exposure.lumaPercentiles.p1;
-	if (exposure.sampleCount > 0 && range < 0.05) {
+	// A uniformly white (or black) subject is flat because it is clipped, and
+	// the clipped warning below says so. Calling that flat LIGHTING would tell
+	// a critic to relight a legitimately white object.
+	if (exposure.sampleCount > 0 && range < 0.05 && overClipped <= 0.02) {
 		warnings.push(
 			`The subject's luma spans only ${round(range, 3)} from p1 to p99. If the subject is not a single flat material, this is a flat-light render: a shadow, a highlight and a material change are all nearly the same value, so a critic cannot judge shape or material until the lighting changes.`,
 		);
 	}
-	// A single saturated channel is a coloured highlight, not a blown one:
-	// only all three channels pinned at the same end hide material detail.
-	const overClipped = exposure.clippedHigh.all + exposure.clippedLow.all;
 	if (exposure.sampleCount > 0 && overClipped > 0.02) {
 		warnings.push(
-			`${round(overClipped * 100, 1)}% of the ${exposure.sampleCount} sampled subject pixels are clipped (${round(exposure.clippedHigh.all * 100, 1)}% white on all channels, ${round(exposure.clippedLow.all * 100, 1)}% black). If the subject is not itself pure white or black, this is an exposure or lighting problem and detail there cannot be judged from this render.`,
+			`${round(overClipped * 100, 1)}% of the ${exposure.sampleCount} sampled subject pixels are clipped (${clippedHigh}% white on all channels, ${clippedLow}% black). If the subject is not itself pure white or black, this is an exposure or lighting problem and detail there cannot be judged from this render.`,
 		);
 	}
 

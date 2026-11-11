@@ -391,6 +391,32 @@ test("exposure: reports clipped fractions and luma percentiles over the subject"
 	assert.ok(result.warnings.some((warning) => /clipped/.test(warning)));
 });
 
+test("exposure: a clipped-flat subject is an exposure finding, not a flat-light one", async (t) => {
+	const boxes = sandboxes();
+	t.after(() => boxes.cleanup());
+	const dir = boxes.create();
+	const pixels = solid(8, 8, 0, 0, 0);
+	for (let y = 2; y < 6; y++) {
+		for (let x = 2; x < 6; x++) {
+			const at = (y * 8 + x) * 4;
+			pixels[at] = 255;
+			pixels[at + 1] = 255;
+			pixels[at + 2] = 255;
+		}
+	}
+	writeFileSync(join(dir, "white.png"), encodePng(8, 8, pixels));
+
+	const result = await withManifest(dir, () => blenderImageProbe({ cwd: dir, workspace: dir, path: "white.png" }));
+
+	assert.equal(result.exposure.clippedHigh.all, 1);
+	assert.equal(result.exposure.lumaPercentiles.p1, result.exposure.lumaPercentiles.p99);
+	assert.ok(result.warnings.some((warning) => /clipped/.test(warning)));
+	assert.ok(
+		!result.warnings.some((warning) => /flat-light/.test(warning)),
+		"a clipped-flat subject must not be reported as flat lighting",
+	);
+});
+
 test("exposure: flat lighting warns even when nothing is clipped", async (t) => {
 	const boxes = sandboxes();
 	t.after(() => boxes.cleanup());
