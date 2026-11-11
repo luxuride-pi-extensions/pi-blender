@@ -144,10 +144,11 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly four files
-      # and 26 tests survive:
+      # not exist -- which is the state this step creates. Exactly five files
+      # and 28 tests survive:
       #
       #   concurrency-budget.test.mjs   11
+      #   headless-changed.test.mjs      2
       #   module-paths.test.mjs          7
       #   tool-params.test.mjs           3
       #   windowless-tools.test.mjs      5
@@ -161,7 +162,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the four core-free suites
+      - name: typecheck and the five core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -171,6 +172,7 @@ jobs:
           npm run typecheck
           node --test \
             test/concurrency-budget.test.mjs \
+            test/headless-changed.test.mjs \
             test/module-paths.test.mjs \
             test/tool-params.test.mjs \
             test/windowless-tools.test.mjs
@@ -324,8 +326,9 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "26 tests ran, in 4 files: concurrency-budget,"
-            echo "module-paths, tool-params and windowless-tools."
+            echo "28 tests ran, in 5 files: concurrency-budget,"
+            echo "headless-changed, module-paths, tool-params and"
+            echo "windowless-tools."
             echo "Those are the only files measured to pass without a"
             echo "pi-manager-core checkout."
             echo
@@ -360,8 +363,8 @@ jobs:
   #                   case the detect step above cannot see.
   #
   # Why "absent" is a failure rather than a skip: this repository's suite is
-  # 231 tests in 26 files, and 205 of them cannot run without a core
-  # checkout -- 4 files and 26 tests do, measured from a `git archive` export
+  # 233 tests in 27 files, and 205 of them cannot run without a core
+  # checkout -- 5 files and 28 tests do, measured from a `git archive` export
   # with PI_MANAGER_CORE_DIR pointed at a directory that does not exist, and
   # the two staging suites measured separately with the core present (21
   # pass). A run that quietly verified 26 of 231 while reporting success is

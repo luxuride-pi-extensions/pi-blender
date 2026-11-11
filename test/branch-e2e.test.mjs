@@ -691,6 +691,77 @@ test("an unchanged iteration is reported as unchanged, without a render", { skip
 	}
 });
 
+test("a run that changed nothing reports changed:false, even after framing", { skip }, async () => {
+	// applyObjects carries the camera and its target that framing adds, so
+	// "did anything get applied" is always true for a framing run. changed has
+	// to answer "did the SCRIPT change content", which is the question the
+	// unchangedSinceLastRun flag and the critic budget depend on.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "arm", replaceBox("Arm", 2.0, 0.2, 0.2, 0, 0, 0));
+		const first = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(first.changed, true, "the first build changes content");
+		assert.ok(first.applyObjects.includes("armCam"), "framing still contributes to the apply set");
+
+		const repeat = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "arm",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(repeat.changed, false, "re-running the same script changes no content");
+		assert.equal(repeat.unchangedSinceLastRun, true, "and the digest must agree");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a material-only edit reports changed:true", { skip }, async () => {
+	// A paint module moves no object, so an object-movement definition of
+	// "changed" reports a real edit as nothing happened. It is the same content
+	// fingerprint the live bridge reports; materials are in it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "base", ADD_CUBE);
+		await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "base",
+			render: false,
+			timeoutSeconds: 300,
+		});
+
+		writeScript(ws.workspacePath, "glaze", `
+import bpy
+obj = bpy.data.objects.get("Mug")
+material = bpy.data.materials.new("Glaze")
+material.use_nodes = True
+bsdf = material.node_tree.nodes.get("Principled BSDF")
+bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
+obj.data.materials.append(material)
+`);
+		const painted = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "glaze",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.deepEqual(painted.touchedObjects, [], "a paint module moves no object");
+		assert.ok(painted.touchedMaterials.includes("Glaze"));
+		assert.equal(painted.changed, true, "a material-only edit is still a change");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a failed branch run leaves model.blend untouched and reports the traceback", { skip }, async () => {
 	const ws = await makeWorkspace();
 	try {
