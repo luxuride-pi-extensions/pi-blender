@@ -1330,6 +1330,9 @@ export interface BlenderRunResult {
 	label?: string;
 }
 
+/** One timeout for both module paths; the schema default must not drift from it. */
+export const DEFAULT_MODULE_TIMEOUT_SECONDS = 300;
+
 export interface ModuleRunOptions {
 	cwd: string;
 	workspace: string;
@@ -1337,9 +1340,6 @@ export interface ModuleRunOptions {
 	render?: boolean;
 	view?: string;
 	timeoutSeconds?: number;
-	/** Render-quality parity with blender_render (module renders used to be hard-coded). */
-	viewportShading?: BlenderViewportShading;
-	renderEngine?: BlenderRenderEngine;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
 	signal?: AbortSignal;

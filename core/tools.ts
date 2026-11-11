@@ -6,6 +6,7 @@
  */
 
 import { Type } from "typebox";
+import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
 import type { AssetExportOptions, ImportFormat } from "../blender/types.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
@@ -655,19 +656,6 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
 		}),
 	),
-	viewportShading: Type.Optional(
-		Type.Union(
-			[
-				Type.Literal("wireframe"),
-				Type.Literal("solid"),
-				Type.Literal("material-preview"),
-				Type.Literal("rendered"),
-			],
-			{
-				description: "Viewport shading for the module render. Defaults to material-preview.",
-			},
-		),
-	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -683,7 +671,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	timeoutSeconds: Type.Optional(
 		Type.Number({
 			description: "Execution timeout in seconds.",
-			default: 120,
+			default: DEFAULT_MODULE_TIMEOUT_SECONDS,
 		}),
 	),
 }),
@@ -694,7 +682,6 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		moduleName: params.moduleName,
 		render: params.render,
 		view: params.view,
-		viewportShading: params.viewportShading,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,

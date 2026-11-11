@@ -4,6 +4,7 @@ import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
 import { collectModuleOwnership, isComparableStateDigest, previousModuleGeneration } from "./generations.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
+import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "./types.js";
 import type {
 	BlenderModuleRunRecord,
 	BlenderWorkspaceManifest,
@@ -280,7 +281,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 		ownedObjects: ownership.objects,
 		ownedMaterials: ownership.materials,
 		label: `module:${moduleName}`,
-		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
+		timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 		signal: options.signal,
 	});
 	if (result.exitCode !== 0) {
@@ -315,7 +316,9 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 			cameraName,
 			outputPath: renderPath,
 			viewSource: "camera",
-			viewportShading: options.viewportShading ?? "material-preview",
+			// A live module render is the material-preview the tool promises;
+			// the headless path cannot honour viewport shading and does not accept it.
+			viewportShading: "material-preview",
 			resolution: options.resolution ?? DEFAULT_MODULE_RENDER_RESOLUTION,
 			samples: options.samples,
 			signal: options.signal,
