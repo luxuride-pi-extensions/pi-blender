@@ -368,7 +368,8 @@ jobs:
   #
   # A portable Linux build, cached by exact version: flatpak is not available
   # on hosted runners, and the download dominates the job when the cache misses.
-  # Six suites must report zero skips; the window-only ones stay skipped
+  # Seven suites must report zero skips; window-only and the two long e2e
+  # suites stay skipped by design
   # everywhere because there is no X server. branch-e2e and headless-bridge-e2e
   # are headless but deliberately excluded for runtime (dozens of launches).
   # Five of the six import config.ts, so the job checks out pi-manager-core
@@ -447,10 +448,14 @@ jobs:
       # The probe suites skip themselves when detectBlender() finds nothing.
       # A skip here is the exact failure this job exists to prevent, so it is
       # turned into a failed step with the reason, not left as an annotation.
-      # All six suites import config.ts (five of them transitively), so they
-      # need the sibling core AND a real Blender. One invocation and one
-      # guard: a split would let one step go green while the other skipped.
-      - name: probes, object detail, scene and import paths must not skip
+      # Every suite here imports config.ts (some transitively), so they need
+      # the sibling core AND a real Blender. usage-guess is fully headless and
+      # had been skipping unnoticed; it is included for the same reason.
+      # Deliberately not included: window-layout (needs a UI), branch-e2e and
+      # headless-bridge-e2e (long-running, each launches many Blender
+      # processes). One invocation and one guard: a split would let one step
+      # go green while the other skipped.
+      - name: probes, object detail, scene, import and usage paths must not skip
         if: ${{ steps.token.outputs.has_token == '1' }}
         env:
           PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
@@ -462,14 +467,15 @@ jobs:
             test/compare-baseline.test.mjs \
             test/import-asset.test.mjs \
             test/scene-health.test.mjs \
-            test/scene-stats.test.mjs 2>&1)"; then
+            test/scene-stats.test.mjs \
+            test/usage-guess.test.mjs 2>&1)"; then
             printf '%s\n' "$out"
             exit 1
           fi
           printf '%s\n' "$out"
           if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
             echo "::error title=Blender tests skipped despite a real Blender::At" \
-              "least one of the six suites skipped. detectBlender() did not" \
+              "least one of the seven suites skipped. detectBlender() did not" \
               "find the unpacked build, or one suite looked on the wrong" \
               "channel, and this job verified less than it claims."
             exit 1
