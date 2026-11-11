@@ -154,7 +154,7 @@ most of it, and all are cheaper than being re-briefed:
   door to floor. `separated` is wrong, and `interpenetrating` is wrong beyond a
   sliver: a join you meant is a few millimetres of overlap, not half the part.
 
-Self-intersections inside one object need `checks: ["sculpt"]`, which is the
+Connected components inside one object need `checks: ["topology"]`, which is the
 expensive one. Use it on the shell, where a bad wall costs everything. Its
 `connectedComponents` is the other number a render cannot show: a mesh that has
 drifted into two or more pieces reads as `nonManifoldEdges: 0` and
@@ -175,6 +175,14 @@ laid 25 mm apart read 100% floating, a shoji frame built from touching pieces
 reads 1.8%. If a part is meant to be continuous with its neighbour, overlap them
 so they share surface; if it is meant to stand free, that is a separate object,
 not a component of this one.
+
+Self-intersections inside one shell need `checks: ["sculpt"]`, which is the
+heaviest check and is never run unless you name it. Read
+`selfIntersections.pairs` first: a fold or a wall passing through the floor
+shows there and nowhere in a render. `minWallThickness.distance` is `null` when
+the surface is open, so a `null` means the wall was never measured, not that it
+is thick enough. `symmetry.rms` compares the shell to its own mirror, and
+`density.withinBudget` is `null` unless you passed `densityCap`.
 
 A part you intend to be CONTINUOUS with another — a pipe running into a pipe, a
 post into its foot, a collar onto a shaft — is better modelled as one mesh than

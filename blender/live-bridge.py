@@ -3717,7 +3717,11 @@ def handle_geometry_probe(request):
     session and an unopened file measures nothing at all.
     """
     ensure_requested_blend_open(request)
-    requested = request.get("checks") or list(GEOMETRY_PROBE_CHECKS)
+    # Sculpt's self-overlap is the one check that cannot be bounded before it
+    # runs, so it stays opt-in even when the caller omits `checks`.
+    requested = request.get("checks") or [
+        check for check in GEOMETRY_PROBE_CHECKS if check != "sculpt"
+    ]
     unknown = [check for check in requested if check not in GEOMETRY_PROBE_CHECKS]
     if unknown:
         raise RuntimeError(
@@ -3742,6 +3746,9 @@ def handle_geometry_probe(request):
         requested = list(requested) + ["path"]
     if request.get("densityCap") is not None and "sculpt" not in requested:
         # A cap with no check is a measurement the caller believes happened.
+        requested = list(requested) + ["sculpt"]
+    if request.get("symmetryAxis") is not None and "sculpt" not in requested:
+        # An axis that is silently ignored reads as a symmetry result.
         requested = list(requested) + ["sculpt"]
     expected_axis = request.get("expectedAxis") or "Z"
     axis_vector = Vector(

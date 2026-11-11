@@ -103,6 +103,8 @@ response = bridge.handle_geometry_probe(request)
 check("sculpt" in response["objects"][reachable.name], "checks:['sculpt'] returns a sculpt block")
 response = bridge.handle_geometry_probe({**request, "checks": ["transform"], "densityCap": 50000})
 check("sculpt" in response["objects"][reachable.name], "a densityCap alone runs the sculpt check")
+response = bridge.handle_geometry_probe({**request, "checks": ["transform"], "symmetryAxis": "y"})
+check("sculpt" in response["objects"][reachable.name], "a symmetryAxis alone runs the sculpt check")
 
 if failures:
     print("FAIL: sculpt probe")
