@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { loadTs } from "./paths.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
-const { formatTimings } = await loadTs("../core/tools.ts");
+const { formatTimings } = await loadTs("../blender/timings.ts");
 
 test("the branch script measures launch, import, exec, save and render", async () => {
 	const source = await readFile(join(root, "blender/branch.ts"), "utf8");
