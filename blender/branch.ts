@@ -189,6 +189,7 @@ touched_materials = delta["touchedMaterials"]
 # Images are content too: a paint module can change only pixels. Only images a
 # touched material actually references are merged, so an unrelated scratch image
 # does not travel with the branch.
+touched_images = set(delta.get("touchedImages") or [])
 apply_images = set()
 for material_name in touched_materials:
     material = bpy.data.materials.get(material_name)
@@ -197,7 +198,7 @@ for material_name in touched_materials:
         continue
     for node in tree.nodes:
         image = getattr(node, "image", None)
-        if image is not None and image.name in set(delta["touchedImages"]):
+        if image is not None and image.name in touched_images:
             apply_images.add(image.name)
 apply_images = sorted(apply_images)
 
@@ -828,15 +829,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// The picture an unchanged run may reuse. Only an applied generation has a
 	// picture the critic can be pointed at; a staged branch's render was never
 	// merged, so reusing it would show work that is not in model.blend.
-	const previousRenderRun = [...(manifest.branchRuns ?? [])]
-		.filter(
-			(run) =>
-				run.module === moduleName &&
-				run.status === "applied" &&
-				run.renderOutputPath &&
-				existsSync(run.renderOutputPath),
-		)
+	const newestRendered = [...(manifest.branchRuns ?? [])]
+		.filter((run) => run.module === moduleName && run.renderOutputPath && existsSync(run.renderOutputPath))
 		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0];
+	const previousRenderRun =
+		newestRendered && (newestRendered.status === "applied" || newestRendered.status === "unchanged")
+			? newestRendered
+			: undefined;
 	// A picture of model.blend is only reusable if no OTHER module has landed
 	// since it was taken. This module's own apply advances the sequence and the
 	// file identically, so counting it would force a render on every re-run.
@@ -1220,6 +1219,8 @@ def apply_branch(branch):
             removed_existing.append(name)
         bpy.data.objects.remove(obj, do_unlink=True)
 
+    before_material_names = set(bpy.data.materials.keys())
+    before_image_names = set(bpy.data.images.keys())
     # Membership is tested through an INDEX over the library's name list, not by
     # subscripting data_from.objects: those are plain lists in Blender 5.2.
     with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
@@ -1229,6 +1230,24 @@ def apply_branch(branch):
         data_to.objects = [data_from.objects[object_index[n]] for n in apply_objects]
         data_to.materials = [data_from.materials[material_index[m]] for m in apply_materials]
         data_to.images = [data_from.images[image_index[n]] for n in apply_images]
+    # An appended datablock whose name is still taken gets a .001 suffix and is
+    # dropped by the save below, leaving the old pixels in model.blend while the
+    # apply reports success. Point the existing users at the appended copy, then
+    # take the original name back.
+    def reconcile(collection, names, before_names):
+        for name in names:
+            old = collection.get(name)
+            for candidate in collection:
+                if candidate.name in before_names or not candidate.name.startswith(name + "."):
+                    continue
+                if old is not None and old != candidate:
+                    old.user_remap(candidate)
+                    collection.remove(old)
+                candidate.name = name
+                break
+
+    reconcile(bpy.data.materials, apply_materials, before_material_names)
+    reconcile(bpy.data.images, apply_images, before_image_names)
 
     # Link every appended object into the scene. Without this the append is
     # undone by the save below, silently: Blender only writes datablocks that

@@ -104,9 +104,17 @@ def _rna_state(idblock):
             continue
         if isinstance(value, (bool, int, float, str)):
             parts.append(f"{prop.identifier}={value}")
+        elif hasattr(value, "__len__") and not isinstance(value, str):
+            try:
+                parts.append(f"{prop.identifier}=" + ",".join(f"{float(item):.6f}" for item in value))
+            except (TypeError, ValueError):
+                continue
     pointer = getattr(idblock, "object", None)
     if pointer is not None:
         parts.append(f"object={pointer.name}")
+    target = getattr(idblock, "target", None)
+    if target is not None:
+        parts.append(f"target={target.name}")
     return "|".join(parts)
 
 
@@ -135,6 +143,9 @@ def fingerprint_object(obj):
     parts.append("|".join(f"{mod.type}:{_rna_state(mod)}" for mod in obj.modifiers))
     parts.append("|".join(f"{cons.type}:{_rna_state(cons)}" for cons in obj.constraints))
     parts.append("anim=" + _animation_state(obj))
+    if obj.type in {"LIGHT", "CAMERA"}:
+        parts.append("data=" + _rna_state(obj.data))
+        parts.append("animData=" + _animation_state(obj.data))
     parts.append(";".join(f"{group.index:.6f}" for group in obj.vertex_groups))
     parts.append("weights=" + _vertex_groups(obj))
     parts.append("pose=" + _pose(obj))

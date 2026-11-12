@@ -1418,3 +1418,49 @@ test("an unchanged branch is reported and not applied", { skip }, async () => {
 	const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
 	assert.equal(manifest.branchRuns.find((run) => run.module === "base" && run.sequence === again.sequence).status, "unchanged");
 });
+
+test("a painted image on an existing material reaches model.blend", { skip }, async () => {
+	const ws = await makeWorkspace();
+	const setup = (green) => `
+import bpy
+obj = bpy.data.objects.get("PaintBox")
+if obj is None:
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.object
+    obj.name = "PaintBox"
+material = bpy.data.materials.get("ImgMat") or bpy.data.materials.new("ImgMat")
+material.use_nodes = True
+if not any(slot.material == material for slot in obj.material_slots):
+    obj.data.materials.append(material)
+image = bpy.data.images.get("PaintTex")
+if image is None:
+    image = bpy.data.images.new("PaintTex", width=4, height=4)
+image.pixels[:] = [0.0, 1.0 if ${green ? "True" : "False"} else 0.0, 0.0, 1.0] * 16
+image.pack()
+tree = material.node_tree
+node = tree.nodes.get("Tex")
+if node is None:
+    node = tree.nodes.new("ShaderNodeTexImage")
+    node.name = "Tex"
+node.image = image
+bsdf = tree.nodes.get("Principled BSDF")
+tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+`;
+	writeScript(ws.workspacePath, "paint", setup(false));
+	const first = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "paint", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["paint"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "paint", setup(true));
+	const painted = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "paint", timeoutSeconds: 300 });
+	assert.equal(painted.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["paint"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "check", `
+import bpy
+image = bpy.data.images["PaintTex"]
+green = image.pixels[1]
+if green < 0.5:
+    raise RuntimeError(f"model.blend kept the old pixels: green={green}")
+`);
+	const check = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "check", timeoutSeconds: 300 });
+	assert.equal(check.changed, false);
+});
