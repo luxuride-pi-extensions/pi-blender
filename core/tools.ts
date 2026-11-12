@@ -713,6 +713,13 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	forceRender: Type.Optional(
+		Type.Boolean({
+			description:
+				"Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.",
+			default: false,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -745,6 +752,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		frameSubject: params.frameSubject as "module" | "apply" | undefined,
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
+		forceRender: params.forceRender,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -844,6 +852,13 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	forceRender: Type.Optional(
+		Type.Boolean({
+			description:
+				"Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.",
+			default: false,
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -876,6 +891,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		frameSubject: params.frameSubject as "module" | "apply" | undefined,
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
+		forceRender: params.forceRender,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,

@@ -39,6 +39,9 @@ print(json.dumps({
 		touchedMaterials: ["Glaze"],
 		addedObjects: [],
 		removedObjects: [],
+		touchedImages: [],
+		touchedWorlds: [],
+		sceneChanged: false,
 	});
 	assert.equal(outcome.changed, true, "a paint module changed the file even though no object moved");
 });

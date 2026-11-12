@@ -27,6 +27,10 @@ def diff_snapshots(before, after):
     after_objects = after.get("objects", {})
     before_materials = before.get("materials", {})
     after_materials = after.get("materials", {})
+    before_images = before.get("images", {})
+    after_images = after.get("images", {})
+    before_worlds = before.get("worlds", {})
+    after_worlds = after.get("worlds", {})
 
     return {
         "touchedObjects": sorted(
@@ -39,6 +43,17 @@ def diff_snapshots(before, after):
             for name in (set(before_materials) | set(after_materials))
             if before_materials.get(name) != after_materials.get(name)
         ),
+        "touchedImages": sorted(
+            name
+            for name in (set(before_images) | set(after_images))
+            if before_images.get(name) != after_images.get(name)
+        ),
+        "touchedWorlds": sorted(
+            name
+            for name in (set(before_worlds) | set(after_worlds))
+            if before_worlds.get(name) != after_worlds.get(name)
+        ),
+        "sceneChanged": before.get("scene") != after.get("scene"),
         "addedObjects": sorted(set(after_objects) - set(before_objects)),
         "removedObjects": sorted(set(before_objects) - set(after_objects)),
     }

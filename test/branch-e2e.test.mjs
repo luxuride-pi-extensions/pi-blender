@@ -1176,7 +1176,9 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
 		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
 		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
-		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
+		const record = (manifest.branchRuns ?? []).find(
+			(run) => run.module === "glaze" && run.changed,
+		);
 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
 		assert.deepEqual(record?.touchedMaterials, ["Glaze"], "the only change is the material's content");
 		assert.equal(painted.changed, true, "a material-only edit is still a change");
@@ -1345,6 +1347,148 @@ test("a comparison with only one run is refused rather than self-compared", { sk
 				}),
 			/no previous generation to compare against/i,
 			"one run has nothing to regress from, and a self-comparison would read as proof of stability",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an unchanged rebuild reuses the picture instead of rendering it", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "static", replaceBox("StaticPart", 2, 2, 2));
+	const first = await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	assert.equal(first.reused, false);
+	const before = readFileSync(first.renderOutputPath);
+	const second = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	assert.equal(second.changed, false);
+	assert.equal(second.reused, true);
+	assert.equal(second.renderOutputPath, first.renderOutputPath);
+	assert.deepEqual(readFileSync(second.renderOutputPath), before);
+});
+
+test("a modifier setting is content, not a type name", { skip }, async () => {
+	const ws = await makeWorkspace();
+	const source = (width) => `
+import bpy
+obj = bpy.data.objects.get("BevelPart")
+if obj is None:
+    bpy.ops.mesh.primitive_cube_add(size=2.0)
+    obj = bpy.context.object
+    obj.name = "BevelPart"
+modifier = obj.modifiers.get("Bevel") or obj.modifiers.new("Bevel", "BEVEL")
+modifier.width = ${width}
+`;
+	writeScript(ws.workspacePath, "bevel", source("0.1"));
+	const first = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["bevel"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "bevel", source("0.1"));
+	const repeat = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(repeat.changed, false);
+	writeScript(ws.workspacePath, "bevel", source("0.3"));
+	const resized = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "bevel", timeoutSeconds: 300 });
+	assert.equal(resized.changed, true);
+});
+
+test("a changed picture option forces a render even when the content did not change", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "static", replaceBox("StaticPart", 2, 2, 2));
+	const first = await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "static", timeoutSeconds: 300 });
+	const before = readFileSync(first.renderOutputPath);
+	const second = await branch.blenderBranchRun({
+		cwd: ws.root, workspace: ws.workspacePath, moduleName: "static",
+		resolution: { x: 320, y: 240 }, timeoutSeconds: 300,
+	});
+	assert.equal(second.changed, false);
+	assert.equal(second.reused, false);
+	assert.notDeepEqual(readFileSync(second.renderOutputPath), before);
+});
+
+test("an unchanged branch is reported and not applied", { skip }, async () => {
+	const ws = await makeWorkspace();
+	writeScript(ws.workspacePath, "base", replaceBox("BasePart", 1, 1, 1));
+	writeScript(ws.workspacePath, "extra", replaceBox("ExtraPart", 1, 1, 1, 3, 0, 0));
+	await module.blenderModuleRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", timeoutSeconds: 300 });
+	const extra = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "extra", timeoutSeconds: 300 });
+	assert.equal(extra.changed, true);
+	const again = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "base", timeoutSeconds: 300 });
+	assert.equal(again.changed, false);
+	const applied = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["base", "extra"], timeoutSeconds: 300 });
+	assert.deepEqual(applied.applied.map((entry) => entry.module), ["extra"]);
+	assert.ok(applied.skipped.some((entry) => entry.module === "base" && entry.reason === "unchanged"));
+	const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+	assert.equal(manifest.branchRuns.find((run) => run.module === "base" && run.sequence === again.sequence).status, "unchanged");
+});
+
+test("a painted image on an existing material reaches model.blend", { skip }, async () => {
+	const ws = await makeWorkspace();
+	const setup = (green) => `
+import bpy
+obj = bpy.data.objects.get("PaintBox")
+if obj is None:
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.object
+    obj.name = "PaintBox"
+material = bpy.data.materials.get("ImgMat") or bpy.data.materials.new("ImgMat")
+material.use_nodes = True
+if not any(slot.material == material for slot in obj.material_slots):
+    obj.data.materials.append(material)
+image = bpy.data.images.get("PaintTex")
+if image is None:
+    image = bpy.data.images.new("PaintTex", width=4, height=4)
+image.pixels[:] = [0.0, 1.0 if ${green ? "True" : "False"} else 0.0, 0.0, 1.0] * 16
+image.pack()
+tree = material.node_tree
+node = tree.nodes.get("Tex")
+if node is None:
+    node = tree.nodes.new("ShaderNodeTexImage")
+    node.name = "Tex"
+node.image = image
+bsdf = tree.nodes.get("Principled BSDF")
+tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+`;
+	writeScript(ws.workspacePath, "paint", setup(false));
+	const first = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "paint", timeoutSeconds: 300 });
+	assert.equal(first.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["paint"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "paint", setup(true));
+	const painted = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "paint", timeoutSeconds: 300 });
+	assert.equal(painted.changed, true);
+	await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["paint"], timeoutSeconds: 300 });
+	writeScript(ws.workspacePath, "check", `
+import bpy
+image = bpy.data.images["PaintTex"]
+green = image.pixels[1]
+if green < 0.5:
+    raise RuntimeError(f"model.blend kept the old pixels: green={green}")
+`);
+	const check = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "check", timeoutSeconds: 300 });
+	assert.equal(check.changed, false);
+});
+
+test("a world edit is reported as unmergeable rather than unchanged", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "light", `
+import bpy
+world = bpy.context.scene.world
+world.use_nodes = True
+background = world.node_tree.nodes["Background"]
+background.inputs["Strength"].default_value = 2.5
+`);
+		const run = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "light",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(run.changed, true, "a world edit is content");
+		assert.match(
+			(run.warnings ?? []).join("\n"),
+			/world settings.*headless apply/,
+			"and the result says the headless apply cannot carry it",
 		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });

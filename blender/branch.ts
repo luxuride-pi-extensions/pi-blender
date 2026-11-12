@@ -188,6 +188,21 @@ changed = content_changed(before, after)
 
 touched_objects = delta["touchedObjects"]
 touched_materials = delta["touchedMaterials"]
+# Images are content too: a paint module can change only pixels. Only images a
+# touched material actually references are merged, so an unrelated scratch image
+# does not travel with the branch.
+touched_images = set(delta.get("touchedImages") or [])
+apply_images = set()
+for material_name in touched_materials:
+    material = bpy.data.materials.get(material_name)
+    tree = getattr(material, "node_tree", None) if material is not None else None
+    if tree is None:
+        continue
+    for node in tree.nodes:
+        image = getattr(node, "image", None)
+        if image is not None and image.name in touched_images:
+            apply_images.add(image.name)
+apply_images = sorted(apply_images)
 
 # The APPLY set is wider than the touched set, because a datablock that travels
 # alone is invalid: a parented object without its parent is not a usable object,
@@ -627,7 +642,12 @@ state_digest = compute_state_digest(after, owned_objects, owned_materials)
 render_result = None
 render_error = None
 render_request = payload.get("render")
-if exit_code == 0 and render_request:
+# An unchanged rebuild produced the same bytes the previous render already shows.
+# Rendering again would spend a picture, a critic image budget slot and the time
+# to decode it on a question the fingerprint already answered. forceRender is the
+# caller's way to say the PICTURE inputs changed (view, resolution, engine), which
+# the content fingerprint deliberately does not cover.
+if exit_code == 0 and render_request and (changed or payload.get("forceRender")):
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
     # A render failure must not discard the run: the geometry is already saved in
@@ -664,6 +684,9 @@ print(json.dumps({
     "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
+    "touchedWorlds": delta.get("touchedWorlds") or [],
+    "sceneChanged": bool(delta.get("sceneChanged")),
+    "applyImages": apply_images,
     "addedObjects": delta["addedObjects"],
     "removedObjects": removed_objects,
     "applyObjects": sorted(apply_objects),
@@ -689,6 +712,9 @@ interface BranchRunPayload {
 	changed: boolean;
 	touchedObjects: string[];
 	touchedMaterials: string[];
+	touchedWorlds: string[];
+	sceneChanged: boolean;
+	applyImages: string[];
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
@@ -834,6 +860,47 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		previousPlan,
 	);
 
+	// The picture an unchanged run may reuse. Only an applied generation has a
+	// picture the critic can be pointed at; a staged branch's render was never
+	// merged, so reusing it would show work that is not in model.blend.
+	const newestRendered = [...(manifest.branchRuns ?? [])]
+		.filter((run) => run.module === moduleName && run.renderOutputPath && existsSync(run.renderOutputPath))
+		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0];
+	const previousRenderRun =
+		newestRendered && (newestRendered.status === "applied" || newestRendered.status === "unchanged")
+			? newestRendered
+			: undefined;
+	// A picture of model.blend is only reusable if no OTHER module has landed
+	// since it was taken. This module's own apply advances the sequence and the
+	// file identically, so counting it would force a render on every re-run.
+	const appliedWatermark = Math.max(
+		0,
+		...(manifest.branchRuns ?? [])
+			.filter((run) => run.status === "applied" && run.module !== moduleName)
+			.map((run) => run.sequence),
+		...(manifest.moduleRuns ?? [])
+			.filter((run) => run.status === "ok" && run.name !== moduleName)
+			.map((run) => run.sequence),
+	);
+	// Only the fields a picture depends on. The resolved plan carries framing
+	// numbers that are recomputed per run; comparing them would force a render
+	// every time and defeat the fast path the key exists for.
+	const renderKey = JSON.stringify({
+		profile: cameraPlan.profile,
+		frontAxis: cameraPlan.frontAxis,
+		shots: cameraPlan.shots,
+		frameSubject: cameraPlan.frameSubject ?? null,
+		distance: cameraPlan.distance ?? null,
+		view: requestedCameraName ?? options.view ?? null,
+		resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
+		samples: options.samples ?? null,
+		renderEngine: options.renderEngine ?? null,
+		reviewSheet: options.reviewSheet === true,
+		scene: appliedWatermark,
+	});
+	const forceRender =
+		options.forceRender === true || !previousRenderRun || previousRenderRun.renderKey !== renderKey;
+
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.
 	const priorOwnership = collectModuleOwnership(manifest, moduleName);
@@ -864,6 +931,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				ownedObjects: priorOwnership.objects,
 				ownedMaterials: priorOwnership.materials,
 				cameraPlan,
+				forceRender,
 				reviewSheet: options.reviewSheet === true,
 				render: renderRequested
 					? {
@@ -915,9 +983,26 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// The render already happened in the run process, against the branch blend
 	// this record describes. An explicit view names itself; otherwise the label
 	// is the module's own framed camera, which is what the run actually used.
-	const renderOutputPath = payload.render?.outputPath ?? null;
+	const renderSkipped =
+		renderRequested && !payload.render && !forceRender && !payload.changed && !payload.renderError;
+	const renderOutputPath = renderSkipped
+		? (previousRenderRun?.renderOutputPath ?? null)
+		: (payload.render?.outputPath ?? null);
+	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
+	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
-	if (renderRequested && !renderOutputPath) {
+	const warnings: string[] = [];
+	if (payload.touchedWorlds.length > 0) {
+		warnings.push(
+			`this run changed world settings (${payload.touchedWorlds.join(", ")}); the headless apply merges objects, materials and images only. Use a live session to keep them.`,
+		);
+	}
+	if (payload.sceneChanged) {
+		warnings.push(
+			"this run changed scene render settings; the headless apply does not merge them. Use a live session to keep them.",
+		);
+	}
+	if (renderRequested && !renderOutputPath && !renderSkipped) {
 		// The path is stable per module, so a failed render would otherwise leave
 		// the PREVIOUS iteration's picture where a critic expects this one.
 		await rm(join(moduleDir, RENDER_FILE), { force: true }).catch(() => undefined);
@@ -939,6 +1024,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		at: nowIso(),
 		touchedObjects: payload.touchedObjects,
 		touchedMaterials: payload.touchedMaterials,
+		applyImages: payload.applyImages,
 		addedObjects: payload.addedObjects,
 		removedObjects: payload.removedObjects,
 		applyObjects: payload.applyObjects,
@@ -948,9 +1034,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		preflight: payload.preflight ?? undefined,
 		status: "staged",
 		renderOutputPath,
+		changed: payload.changed,
+		reused: renderSkipped,
+		renderKey,
+		resolvedEngine: payload.render?.resolvedEngine ?? (renderSkipped ? previousRenderRun?.resolvedEngine : undefined),
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
-		reviewSheet: payload.reviewSheet ?? undefined,
+		reviewSheet,
 	};
 
 	await updateManifest(
@@ -962,8 +1052,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 					path: renderOutputPath,
 					view: viewLabel,
 					iteration,
-					createdAt: nowIso(),
+					createdAt: renderSkipped && previousRenderRun?.appliedAt ? previousRenderRun.appliedAt : nowIso(),
 					module: moduleName,
+					reusedFrom: renderSkipped ? previousRenderRun?.iteration : undefined,
+					resolvedEngine: renderSkipped ? previousRenderRun?.resolvedEngine : payload.render?.resolvedEngine,
 				});
 			}
 		},
@@ -983,6 +1075,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		checkpointPath,
 		exitCode: payload.exitCode,
 		changed: payload.changed,
+		reused: renderSkipped,
 		stdout: payload.stdout.trim(),
 		stderr: payload.stderr.trim(),
 		touchedObjects: payload.touchedObjects,
@@ -1001,6 +1094,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		reviewSheet: payload.reviewSheet ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
+		warnings,
 		status: "staged",
 	};
 }
@@ -1132,8 +1226,10 @@ def probe(branch):
         with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
             object_index = {name: index for index, name in enumerate(data_from.objects)}
             material_index = {name: index for index, name in enumerate(data_from.materials)}
+            image_index = {name: index for index, name in enumerate(data_from.images)}
             missing.extend(name for name in branch["applyObjects"] if name not in object_index)
             missing.extend(name for name in branch["applyMaterials"] if name not in material_index)
+            missing.extend(name for name in branch.get("applyImages") or [] if name not in image_index)
     except Exception as exc:
         # The pre-flight check runs without the apply lock, so a branch can be
         # replaced or truncated between that check and this load. Report it as a
@@ -1145,6 +1241,7 @@ def probe(branch):
 def apply_branch(branch):
     apply_objects = branch["applyObjects"]
     apply_materials = branch["applyMaterials"]
+    apply_images = branch.get("applyImages") or []
     remove_objects = branch["removeObjects"]
 
     # Materials first: an object removed below may be the last user of a material
@@ -1153,6 +1250,10 @@ def apply_branch(branch):
         existing = bpy.data.materials.get(name)
         if existing is not None and existing.users == 0:
             bpy.data.materials.remove(existing)
+    for name in apply_images:
+        existing = bpy.data.images.get(name)
+        if existing is not None and existing.users == 0:
+            bpy.data.images.remove(existing)
 
     replaced = []
     removed_existing = []
@@ -1166,13 +1267,35 @@ def apply_branch(branch):
             removed_existing.append(name)
         bpy.data.objects.remove(obj, do_unlink=True)
 
+    before_material_names = set(bpy.data.materials.keys())
+    before_image_names = set(bpy.data.images.keys())
     # Membership is tested through an INDEX over the library's name list, not by
     # subscripting data_from.objects: those are plain lists in Blender 5.2.
     with bpy.data.libraries.load(branch["branchPath"], link=False) as (data_from, data_to):
         object_index = {name: index for index, name in enumerate(data_from.objects)}
         material_index = {name: index for index, name in enumerate(data_from.materials)}
+        image_index = {name: index for index, name in enumerate(data_from.images)}
         data_to.objects = [data_from.objects[object_index[n]] for n in apply_objects]
         data_to.materials = [data_from.materials[material_index[m]] for m in apply_materials]
+        data_to.images = [data_from.images[image_index[n]] for n in apply_images]
+    # An appended datablock whose name is still taken gets a .001 suffix and is
+    # dropped by the save below, leaving the old pixels in model.blend while the
+    # apply reports success. Point the existing users at the appended copy, then
+    # take the original name back.
+    def reconcile(collection, names, before_names):
+        for name in names:
+            old = collection.get(name)
+            for candidate in collection:
+                if candidate.name in before_names or not candidate.name.startswith(name + "."):
+                    continue
+                if old is not None and old != candidate:
+                    old.user_remap(candidate)
+                    collection.remove(old)
+                candidate.name = name
+                break
+
+    reconcile(bpy.data.materials, apply_materials, before_material_names)
+    reconcile(bpy.data.images, apply_images, before_image_names)
 
     # Link every appended object into the scene. Without this the append is
     # undone by the save below, silently: Blender only writes datablocks that
@@ -1188,6 +1311,7 @@ def apply_branch(branch):
         "removedExisting": removed_existing,
         "appended": sorted(obj.name for obj in bpy.data.objects if obj.name in set(apply_objects)),
         "appendedMaterials": sorted(m.name for m in bpy.data.materials if m.name in set(apply_materials)),
+        "appendedImages": sorted(i.name for i in bpy.data.images if i.name in set(apply_images)),
     }
 
 
@@ -1249,6 +1373,7 @@ interface BranchApplyOutcome {
 	removedExisting: string[];
 	appended: string[];
 	appendedMaterials: string[];
+	appendedImages?: string[];
 	missing: string[];
 }
 
@@ -1385,6 +1510,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	const skipped: BranchApplyResult["skipped"] = [];
 	const missing: string[] = [];
 	const contested: Array<{ record: BlenderBranchRunRecord; conflicts: BranchConflict[] }> = [];
+	const unchanged: BlenderBranchRunRecord[] = [];
 	const absent: BlenderBranchRunRecord[] = [];
 	const eligible: BlenderBranchRunRecord[] = [];
 
@@ -1396,6 +1522,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		if (conflicts.length > 0) {
 			contested.push({ record, conflicts });
 			skipped.push({ module: record.module, conflicts });
+			continue;
+		}
+		// The script ran and the fingerprint says the branch has the same content
+		// it copied. Applying it would write a "new" generation that is byte-for-byte
+		// the old one, and spend a save on it. It is not staged any more either, so
+		// it cannot contest the next run.
+		if (record.changed === false) {
+			unchanged.push(record);
+			skipped.push({ module: record.module, conflicts: [], reason: "unchanged" });
 			continue;
 		}
 		if (!(await fileExists(record.branchPath))) {
@@ -1424,6 +1559,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 						branchPath: record.branchPath,
 						applyObjects: record.applyObjects,
 						applyMaterials: record.touchedMaterials,
+						applyImages: record.applyImages ?? [],
 						removeObjects: record.removedObjects,
 					})),
 				},
@@ -1476,6 +1612,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			return target;
 		};
 
+		for (const record of unchanged) mark(record.sequence, "unchanged");
 		for (const { record, conflicts } of contested) mark(record.sequence, "conflict", conflicts);
 		for (const record of absent) {
 			mark(record.sequence, "failed", [
@@ -1558,7 +1695,7 @@ export function contestableStagedRuns(
 	for (const run of manifest.branchRuns ?? []) {
 		// A failed or conflicted attempt proved nothing about the module's state,
 		// so it does not supersede a branch that is still waiting to be applied.
-		if (run.status !== "staged" && run.status !== "applied") continue;
+		if (run.status !== "staged" && run.status !== "applied" && run.status !== "unchanged") continue;
 		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
 	}
 	for (const run of manifest.moduleRuns ?? []) {

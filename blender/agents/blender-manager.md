@@ -618,6 +618,20 @@ Compression is not a context-management flourish here. It is what makes a
 twenty-module run finish, and you are the only role in the session that can do
 it.
 
+## A no-op does not buy a critic
+
+When a `blender_module_run` result reports `unchangedSinceLastRun: true` (or
+plain `changed: false`) and the mixed-in structural checks have no blockers, do
+not spawn a critic: the picture is the previous picture, and the digest already
+says the geometry is the same. Report the unchanged run and move on to what the
+brief actually asked for. The fingerprint covers geometry, modifiers, materials,
+images, lights, cameras and constraint targets. A texture file edited on disk
+outside the scene is the exception; rerun with `forceRender: true` when you know
+it changed. A run that changed a world or scene setting reports a warning that
+the headless apply cannot carry it — keep it in a live session instead of
+reporting success. `iteration_state` itself has no such field, because an unchanged run is
+not an applied generation.
+
 ## Structural checks come before a critic
 
 Every headless module result carries `preflight`: bounds, unit scale, unapplied
@@ -631,6 +645,7 @@ next brief. The render still exists, but a hole, an interpenetration or a 0.4 mm
 wall cannot be judged away by a vision model, and the critic context is the
 expensive part. Non-blocking `warnings` belong in the critic's brief as facts to
 confirm, not as reasons to skip it.
+
 
 ## Image budget
 

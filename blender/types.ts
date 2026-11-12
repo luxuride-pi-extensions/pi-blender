@@ -125,6 +125,10 @@ export interface BlenderRenderOutput {
 	createdAt: string;
 	/** Set when the render came from blender_module_run rather than blender_render. */
 	module?: string;
+	/** Iteration whose picture this entry reuses, when nothing was rendered. */
+	reusedFrom?: number;
+	/** Engine that produced the bytes, so a reused entry does not report none. */
+	resolvedEngine?: string;
 }
 
 /**
@@ -160,7 +164,7 @@ export interface BlenderModuleRunRecord {
 }
 
 /** Where a staged branch run is in its life. */
-export type BranchRunStatus = "staged" | "applied" | "conflict" | "failed";
+export type BranchRunStatus = "staged" | "applied" | "unchanged" | "conflict" | "failed";
 
 /** One object's contested by two or more staged branches. */
 export interface BranchConflict {
@@ -200,6 +204,8 @@ export interface BlenderBranchRunRecord {
 	 * touched nothing and drop its work at apply time.
 	 */
 	touchedMaterials: string[];
+	/** Images whose pixels changed, for materials this run touched. */
+	applyImages?: string[];
 	addedObjects: string[];
 	removedObjects: string[];
 	/** Everything the apply brings back: touched plus required relatives. */
@@ -224,6 +230,14 @@ export interface BlenderBranchRunRecord {
 	appliedAt?: string;
 	conflicts?: BranchConflict[];
 	renderOutputPath?: string | null;
+	/** Content fingerprint result; false means the branch is the base it copied. */
+	changed?: boolean;
+	/** Identity of the render inputs, so an unchanged run can reuse the picture. */
+	renderKey?: string;
+	/** True when this run reused a previous generation's render. */
+	reused?: boolean;
+	/** The engine the picture was rendered with, carried through a reuse. */
+	resolvedEngine?: string;
 	/** Framing this run solved for the module's camera. Empty when it produced no mesh. */
 	cameras?: BranchCameraFraming[];
 	/** The resolved plan this run's framing came from. */
@@ -242,6 +256,8 @@ export interface BranchRunOptions {
 	render?: boolean;
 	/** Also render the plan's other shots into one review sheet. Implies render. */
 	reviewSheet?: boolean;
+	/** Render even when the content fingerprint says nothing changed. */
+	forceRender?: boolean;
 	view?: string;
 	resolution?: { x: number; y: number; percentage?: number };
 	samples?: number;
@@ -340,6 +356,8 @@ export interface BranchRunResult {
 	/** Materials this module owns after this run; carried into the next run. */
 	ownedMaterials: string[];
 	renderOutputPath: string | null;
+	/** True when the render was skipped and a previous generation's picture reused. */
+	reused: boolean;
 	status: BranchRunStatus;
 	/** Engine the branch render actually used; absent when rendering was disabled. */
 	resolvedEngine?: string;
@@ -355,6 +373,8 @@ export interface BranchRunResult {
 	reviewSheet?: ReviewSheetResult;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
+	/** Content the headless apply does not carry, such as world or scene settings. */
+	warnings?: string[];
 	/** Structural checks measured before the render. */
 	preflight?: PreflightResult;
 }
@@ -373,7 +393,7 @@ export interface BranchApplyResult {
 	blendPath: string;
 	applied: Array<{ module: string; iteration: number; appended: string[]; removed: string[]; cameras: BranchCameraFraming[] }>;
 	/** Conflicted modules, with the object that stopped each. Their branch blends are untouched. */
-	skipped: Array<{ module: string; conflicts: BranchConflict[] }>;
+	skipped: Array<{ module: string; conflicts: BranchConflict[]; reason?: string }>;
 	/** Modules whose branch blend had vanished from disk before the apply. */
 	missing: string[];
 	liveBlenderMessage: string;
@@ -1515,6 +1535,8 @@ export interface ModuleRunOptions {
 	render?: boolean;
 	/** Also render the plan's other shots into one review sheet. Implies render. */
 	reviewSheet?: boolean;
+	/** Render even when the content fingerprint says nothing changed. */
+	forceRender?: boolean;
 	view?: string;
 	timeoutSeconds?: number;
 	resolution?: { x: number; y: number; percentage?: number };
@@ -1541,6 +1563,8 @@ export interface ModuleRunResult {
 	stdout: string;
 	exitCode: number;
 	renderOutputPath: string | null;
+	/** True when the render was skipped and a previous generation's picture reused. */
+	reused?: boolean;
 	/** Engine the headless render actually used; absent when rendering was disabled. */
 	resolvedEngine?: string;
 	/** Why the render failed, when the module run itself succeeded. */

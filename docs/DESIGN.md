@@ -168,7 +168,17 @@ Start pi in any project dir. The extension:
   session never has more than one. Every authoring path is headless and does
   not need a window — `blender_module_run` runs a module against a branch copy
   and merges the result, `blender_render` falls back to the background engine,
-  and `blender_session_context` reads the blend on disk
+  and an unchanged rebuild keeps its previous render and is not merged again
+  (`changed: false`, `reused: true`; the apply marks the branch `unchanged`
+  instead of rewriting identical bytes). The render key covers the picture
+  inputs the content fingerprint cannot see — view, resolution, samples, engine,
+  review sheet and camera plan — and a change to any of them renders again
+  automatically. `forceRender` is only for content the fingerprint cannot see
+  from the branch copy, such as a texture file edited on disk. World and scene
+  render settings are fingerprinted, but the headless apply carries only
+  objects, materials and images, so such a run reports a warning instead of
+  claiming the settings were merged.
+  `blender_session_context` reads the blend on disk.
 - registers the `/blender` slash command — everything after `/blender`
   becomes the Blender task and engages the extension. The session it engages
   IS the manager: there is no manager subagent and no router hop, so the

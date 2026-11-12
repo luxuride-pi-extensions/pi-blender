@@ -198,8 +198,8 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
         )
         component_points = [vertex for index in indices for vertex in corners_world[index]]
         if component_points:
-            minimum = Vector((min(point[i] for point in component_points) for i in range(3)))
-            maximum = Vector((max(point[i] for point in component_points) for i in range(3)))
+            minimum = Vector(min(point[i] for point in component_points) for i in range(3))
+            maximum = Vector(max(point[i] for point in component_points) for i in range(3))
             component_extent[component] = max((maximum - minimum).length, 1e-6)
         else:
             component_extent[component] = 1.0
@@ -287,7 +287,7 @@ def _wall_thickness(bpy, meshes, depsgraph):
             extent = max((obj.matrix_world @ vertex.co).length for vertex in mesh.vertices) if mesh.vertices else 1.0
             parent = list(range(len(bm.faces)))
 
-            def root(index):
+            def root(index, parent=parent):
                 while parent[index] != index:
                     parent[index] = parent[parent[index]]
                     index = parent[index]
