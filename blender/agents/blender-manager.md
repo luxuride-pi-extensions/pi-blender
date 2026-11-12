@@ -624,10 +624,12 @@ When a `blender_module_run` result reports `unchangedSinceLastRun: true` (or
 plain `changed: false`) and the mixed-in structural checks have no blockers, do
 not spawn a critic: the picture is the previous picture, and the digest already
 says the geometry is the same. Report the unchanged run and move on to what the
-brief actually asked for. A change the fingerprint cannot see — a texture file
-outside the scene, or a paint edit the object hash does not cover — is the
-exception; rerun with `forceRender: true` when you know the picture inputs
-changed. `iteration_state` itself has no such field, because an unchanged run is
+brief actually asked for. The fingerprint covers geometry, modifiers, materials,
+images, lights, cameras and constraint targets. A texture file edited on disk
+outside the scene is the exception; rerun with `forceRender: true` when you know
+it changed. A run that changed a world or scene setting reports a warning that
+the headless apply cannot carry it — keep it in a live session instead of
+reporting success. `iteration_state` itself has no such field, because an unchanged run is
 not an applied generation.
 
 ## Image budget
