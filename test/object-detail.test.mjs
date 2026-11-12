@@ -20,12 +20,11 @@ const launch = await load("launch.ts");
 const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf8");
 
 test("blender_object_detail description states it reads the saved blend", () => {
-	const toolStart = toolsSource.indexOf('name: "blender_object_detail"');
-	assert.notEqual(toolStart, -1, "blender_object_detail is not registered in index.ts");
-
-	const descStart = toolsSource.indexOf("description:", toolStart);
-	const descEnd = toolsSource.indexOf('",', descStart);
-	const description = toolsSource.slice(descStart, descEnd);
+	const skill = readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf8");
+	const toolStart = skill.indexOf("### blender_object_detail");
+	assert.notEqual(toolStart, -1, "blender_object_detail is not documented in blender-analyze");
+	const descEnd = skill.indexOf("\n### ", toolStart + 4);
+	const description = skill.slice(toolStart, descEnd === -1 ? undefined : descEnd);
 
 	assert.match(
 		description,

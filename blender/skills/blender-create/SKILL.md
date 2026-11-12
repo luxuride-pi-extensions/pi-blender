@@ -32,3 +32,54 @@ Rules:
 - If the user specifies a render view or camera, treat it as locked unless the user explicitly asks to change it.
 - One module at a time: modules share `model.blend` and one live Blender UI, so a parallel spawn queues behind the first and then times out.
 - Mention the workspace path in your response so follow-up turns can keep using it.
+
+## Tool semantics moved out of the schemas
+
+The tool and parameter descriptions below are the full text that used to live in
+`core/tools.ts`. The schema keeps each first sentence for tool selection; load
+this skill when you need the precedence rules, failure modes and definitions.
+
+### blender_export_asset
+
+Export the workspace blend to an interchange format: glb or gltf (materials, scene graph, modifiers applied) or obj (geometry, UVs, materials) or stl. This is what makes the asset leave Blender at all -- .blend is not an interchange format and no training pipeline reads it. Works headlessly. Pass `objects` to export a named subset, which is how you keep the studio rig out of a dataset. Read-only with respect to model.blend: the exporter writes a new file and never saves back.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **format** — glb (default, single file), gltf (separate .bin and textures), obj, or stl. USD is not offered because no exporter is guaranteed present in a stock Blender build.
+- **objects** — Names to export, when given. Omit for the whole blend. Naming the asset's own objects is how a studio camera and three lights stay out of the dataset.
+- **outputDir** — Directory for the exported file. Defaults to the blend's own directory.
+- **name** — Base filename, without extension. Defaults to the blend's name. Sanitised, since it usually comes from a prompt.
+- **animations** — Include animation data (glTF only). Default false.
+- **allowUnfinalized** — Export a build that has not reached finalized. The build contract refuses an earlier export otherwise, because an intermediate state is not the asset.
+- **validationProfile** — Validation to run on the written file. gltf (default) checks nodes, meshes, accessors and images; print checks manifold edges, self-intersection, winding and unit scale; engine checks texture size and material count; none skips it.
+
+### blender_import_asset
+
+Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Checkpoints the workspace blend before importing so partial imports are cleanly revertible. Guards against path traversal and sanitizes asset names. Probes format and add-on support (e.g. FBX), reporting missing capabilities as explicit results rather than tracebacks. Returns a post-import report detailing imported objects, non-uniform scale checks, and principal axes.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **path** — Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx).
+- **format** — Format of the asset: obj, stl, gltf, glb, or fbx. If omitted, inferred from file extension.
+- **name** — Optional asset name or object name prefix. Sanitized against invalid characters.
+- **allowedPaths** — Allowed directories or file paths for source assets to guard against traversal. Defaults to the workspace directory and current working directory.
+
+### blender_add_reference
+
+Register a reference image with a workspace. Copies the image into <workspace>/references/ and records it in the manifest so it can be listed, addressed by a stable id in briefs, and handed to a critic that cannot read images. The `caption` is required and is the only description of the image available to the worker and critic, because the manager is blocked from reading image files.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **path** — Path to an existing image file on disk. It is COPIED into the workspace references/ directory, so later moves or deletions of the original do not break pending work. Supported: .png .jpg .jpeg .gif .webp .bmp
+- **url** — HTTPS image URL on a CC0 host (cdn.polyhaven.com or dl.polyhaven.org), downloaded once and then copied in. Use blender_reference_search to find one. Pass either path or url, not both.
+- **license** — Licence stated by the source, e.g. CC0-1.0. Recorded in the manifest.
+- **credit** — Credit line required or recommended by the source. Recorded in the manifest.
+- **caption** — What this image depicts, in one or two sentences: the subject, the angle it is shot from, and anything a worker or critic would need to judge against it. Required — you cannot read the image yourself, so this text is the only thing that will convey its contents.
+- **id** — Stable id to address this reference by in briefs, e.g. 'front' or 'three-quarter'. Defaults to the file's name without its extension. Adding a reference whose id is taken stores it as <id>-2 rather than overwriting, so earlier verdicts stay reproducible.
+- **suggestedView** — Optional saved view or camera name you believe this reference should be compared against. The pairing is a hypothesis: a critic will report whether the two images are actually comparable, and name the view it would prefer if not.
+
+### blender_reference_search
+
+Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata, licence, credit and a preview URL. It does not download anything: choose a candidate and pass its preview URL to blender_add_reference, which fetches it once, records provenance and copies it into the workspace.
+
+- **query** — Words to match against the asset name, id and tags.
+- **source** — Catalogue to search. Default polyhaven.
+- **kind** — Poly Haven asset type. Default model.
+- **limit** — Maximum candidates (1–24, default 8).

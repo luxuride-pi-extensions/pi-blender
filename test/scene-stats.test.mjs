@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { after, describe } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -52,7 +52,7 @@ function scratchRoot() {
 }
 
 test("index.ts declares scene_stats as a blender_scene_info category without registering a new tool", () => {
-	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8");
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8");
 
 	// Acceptance criteria: No new top-level tool registered for scene stats
 	assert.equal(
