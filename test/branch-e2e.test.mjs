@@ -1645,7 +1645,7 @@ test("a direct run refuses a datablock a staged sibling owns", { skip, timeout: 
 				direct: true,
 				timeoutSeconds: 120,
 			}),
-			/rolled back/,
+			/rolled back; apply or discard/,
 		);
 		const names = await objectNames(ws.root, ws.blendPath);
 		assert.equal(names.includes("Mug"), false, "the conflicting direct save was rolled back");

@@ -566,9 +566,9 @@ Start pi in any project dir. The extension:
   `model.blend` in place: one Blender process instead of a branch write, a run,
   and a separate merge pass. It takes the apply lock for the whole run, refuses
   a datablock a staged sibling owns by rolling back to the checkpoint, and
-  writes the same revert checkpoint and manifest records, so
-  `blender_module_revert` behaves identically. A failure after the script saved
-  also rolls back.
+  writes the same revert checkpoint and a branch record with a companion module
+  run, so `blender_module_revert` finds the same history. A failure after the
+  script saved also rolls back.
 - `blender_rank_assets` reads a workspace's `critique.log` and keeps the best
   slice of a batch by score — an absolute verdict can say "good enough" but only
   ranking over a batch can say "best of these fifty". `blender_export_asset`
