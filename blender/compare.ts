@@ -181,7 +181,7 @@ function storedPacketComparison(
 			missingSubjects: [],
 			usedItsOwnExtent: false,
 		},
-		note: "Composed from the stored review packets; no Blender process was spawned.",
+		note: "Composed from the stored review packets; no Blender process was spawned. Panels are ordered current, previous, then reference.",
 	};
 }
 

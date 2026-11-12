@@ -2107,10 +2107,12 @@ export const blenderCompareTool: CoreToolDefinition = {
 				type: "text",
 				text: [
 					`Comparison: ${result.montagePath}`,
-					`Baseline: ${result.labels.baseline} = ${result.baseline.blendPath}`,
+					result.baseline.blendPath
+						? `Baseline: ${result.labels.baseline} = ${result.baseline.blendPath}`
+						: `Baseline: ${result.labels.baseline}`,
 					`Current: ${result.labels.current}`,
 					`Views: ${result.views.join(", ")} (${result.layout.columns}x${result.layout.rows} of ${result.layout.panelWidth}x${result.layout.panelHeight})`,
-					`Framed: ${result.subject.join(", ")}`,
+					result.subject.length > 0 ? `Framed: ${result.subject.join(", ")}` : undefined,
 					missing.length > 0
 						? `Baseline is missing ${missing.join(", ")} — it predates those objects, so their absence in the ${result.labels.baseline} panels is not a render fault.`
 						: undefined,
