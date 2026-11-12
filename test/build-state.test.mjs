@@ -18,7 +18,8 @@ test("a critic may judge a staged generation and the apply may follow it", () =>
 	assert.doesNotThrow(() => assertBuildTransition("critiqued", "staged"), "a critique does not freeze the build");
 	assert.doesNotThrow(() => assertBuildTransition("finalized", "exported"));
 	assert.doesNotThrow(() => assertBuildTransition("exported", "exported"), "exporting twice is not a lost transition");
-	assert.throws(() => assertBuildTransition("exported", "finalized"), /cannot move/);
+	assert.doesNotThrow(() => assertBuildTransition("exported", "staged"), "a change after export demotes the build");
+	assert.doesNotThrow(() => assertBuildTransition("exported", "finalized"));
 });
 
 test("export is gated only once a build exists, and allowUnfinalized is explicit", () => {

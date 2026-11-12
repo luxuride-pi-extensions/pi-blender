@@ -558,9 +558,10 @@ Start pi in any project dir. The extension:
   applied as bpy data either way
 - Build stages are recorded so a finished export is distinguishably finished:
   `intake → planned → staged → applied → merged → critiqued → finalized →
-  exported`. Every working stage can be re-entered, because a direct save, a
-  second batch or a post-merge critique are normal loops; only export is
-  terminal. The actor that performs an operation records its stage
+  exported`. Every stage can be re-entered, because a direct save, a
+  second batch, a post-merge critique or a post-export change are normal
+  loops; an export does not close the build, it only records the gate. The
+  actor that performs an operation records its stage
   (`blender_branch_run` stages, `blender_branch_apply` merges, the critic logs
   `critiqued`, the finalizer advances `finalized`), and
   `blender_export_asset` refuses an export before `finalized` unless

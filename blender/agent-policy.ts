@@ -34,6 +34,7 @@ export const AGENT_TOOL_BUNDLES: Record<string, readonly string[]> = {
 		"blender_rank_assets",
 		"blender_iteration_state",
 		"blender_record_iteration_fact",
+		"blender_compare",
 		"blender_export_asset",
 		"blender_session_context",
 	],

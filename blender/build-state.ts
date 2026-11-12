@@ -34,14 +34,14 @@ export interface BuildState {
 /**
  * Which stages may follow the current one.
  *
- * Every working stage re-enters every other working stage: a direct save, a
- * second batch, or a critique after a merge are normal loops, and a graph that
- * refused them would throw after the work had already landed. Only export is
- * terminal; the finalize requirement is enforced by the export gate, not by
- * losing a permitted operation here.
+ * Every stage re-enters every stage: a direct save, a second batch, a critique
+ * after a merge, or a change requested after an export are normal loops, and a
+ * graph that refused them would throw after the work had already landed. The
+ * finalize requirement is enforced by the export gate, not by losing a
+ * permitted operation here.
  */
 const NEXT: Record<BuildStage, readonly BuildStage[]> = Object.fromEntries(
-	BUILD_STAGES.map((stage) => [stage, stage === "exported" ? ["exported"] : BUILD_STAGES]),
+	BUILD_STAGES.map((stage) => [stage, BUILD_STAGES]),
 ) as unknown as Record<BuildStage, readonly BuildStage[]>;
 
 export function readBuildState(manifest: Pick<BlenderWorkspaceManifest, "build">): BuildState {
@@ -55,7 +55,7 @@ export function readBuildState(manifest: Pick<BlenderWorkspaceManifest, "build">
 export function assertBuildTransition(current: BuildStage, next: BuildStage): void {
 	if (NEXT[current].includes(next)) return;
 	throw new Error(
-		`The build is at "${current}" and cannot move to "${next}". Allowed: ${NEXT[current].join(", ") || "nothing (it is exported)"}. Finish the missing stage instead of skipping it.`,
+		`The build is at "${current}" and cannot move to "${next}". Allowed: ${NEXT[current].join(", ")}.`,
 	);
 }
 

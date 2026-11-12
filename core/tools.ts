@@ -2373,11 +2373,11 @@ export const blenderBuildAdvanceTool: CoreToolDefinition = {
 	label: "Blender Build Advance",
 	annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 	description:
-		"Advance the build contract to a stage the extension cannot observe by itself, with evidence. The finalizer uses it to move a merged, critiqued build to finalized; intake/planned may be recorded by the manager. The transition graph refuses skipping, a second finalize or anything after export.",
+		"Advance the build contract to a stage the extension cannot observe by itself, with evidence. The finalizer uses it to move a merged, critiqued build to finalized; intake/planned may be recorded by the manager. A second finalize is a duplicate record rather than a second build; the export gate still refuses an unfinalized export.",
 	parameters: Type.Object({
 		workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
 		stage: Type.String({
-			enum: ["intake", "planned", "staged", "applied", "merged", "critiqued", "finalized", "exported"],
+			enum: ["intake", "planned", "finalized"],
 			description: "Stage to record. Normally finalized.",
 		}),
 		evidence: Type.String({ description: "What was checked or produced for this stage." }),
