@@ -81,9 +81,13 @@ test("downloads are limited to CC0 hosts and https", async () => {
 		const huge = async () =>
 			new Response(Buffer.alloc(4), { status: 200, headers: { "content-type": "image/png", "content-length": "999999999" } });
 		await assert.rejects(downloadReferenceImage("https://cdn.polyhaven.com/x.png", dir, { fetchImpl: huge }), /limit/);
-		const redirected = async () =>
-			new Response(null, { status: 302, headers: { location: "http://127.0.0.1/secret" } });
+		let redirectMode;
+		const redirected = async (_url, init) => {
+			redirectMode = init?.redirect;
+			return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/secret" } });
+		};
 		await assert.rejects(downloadReferenceImage("https://cdn.polyhaven.com/x.png", dir, { fetchImpl: redirected }), /redirects are not followed/);
+		assert.equal(redirectMode, "manual");
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

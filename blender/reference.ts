@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, rm, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import type {
 	AddReferenceOptions,
@@ -48,14 +48,21 @@ async function assertReadableImage(path: string): Promise<number> {
 		if (stats.size === 0) {
 			throw new Error("the file is empty");
 		}
-		const header = await readFile(path);
-		const magic = header.subarray(0, 12);
-		const isPng = magic.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-		const isJpeg = magic[0] === 0xff && magic[1] === 0xd8 && magic[2] === 0xff;
-		const isGif = magic.subarray(0, 4).toString("ascii") === "GIF8";
+		const handle = await open(path, "r");
+		const magic = Buffer.alloc(12);
+		let bytesRead = 0;
+		try {
+			({ bytesRead } = await handle.read(magic, 0, 12, 0));
+		} finally {
+			await handle.close();
+		}
+		const header = magic.subarray(0, bytesRead);
+		const isPng = header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+		const isGif = header.subarray(0, 4).toString("ascii") === "GIF8";
 		const isWebp =
-			magic.subarray(0, 4).toString("ascii") === "RIFF" && magic.subarray(8, 12).toString("ascii") === "WEBP";
-		const isBmp = magic.subarray(0, 2).toString("ascii") === "BM";
+			header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP";
+		const isBmp = header.subarray(0, 2).toString("ascii") === "BM";
 		if (!isPng && !isJpeg && !isGif && !isWebp && !isBmp) {
 			throw new Error("the bytes are not a PNG, JPEG, GIF, WebP or BMP image");
 		}
@@ -107,11 +114,7 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 			`Reference "${options.url ?? options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
 		);
 	}
-	try {
-		await assertReadableImage(sourcePath);
-	} catch (error) {
-		throw error;
-	}
+	await assertReadableImage(sourcePath);
 
 	const caption = options.caption.trim();
 	if (caption.length === 0) {
