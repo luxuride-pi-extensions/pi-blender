@@ -90,8 +90,12 @@ def main():
     bpy.context.view_layer.objects.active = first
     bpy.ops.object.join()
     verdict = validate(bpy, [first.name], profile="character")
+    wall = verdict["checks"]["wallThickness"]["value"]
     checks["a joined interpenetration is a fold"] = (
         verdict["checks"]["selfIntersections"]["value"]["pairs"] > 0
+        and wall["otherShellFaces"] > 0
+        and wall["distance"] is not None
+        and wall["distance"] > 0.01
         and "wallThickness" not in verdict["blockers"]
     )
 

@@ -272,6 +272,7 @@ def _wall_thickness(bpy, meshes, depsgraph):
     thinnest = None
     sampled_faces = 0
     open_faces = 0
+    other_shell_faces = 0
     for obj in meshes:
         bm = bmesh.new()
         try:
@@ -316,7 +317,7 @@ def _wall_thickness(bpy, meshes, depsgraph):
                 # nothing about this wall, and a crossing curve would otherwise
                 # measure ~0 and block the character profile.
                 if hit[2] is not None and face_component[hit[2]] != face_component[index]:
-                    open_faces += 1
+                    other_shell_faces += 1
                     continue
                 distance = hit[3]
                 if distance > 1e-7:
@@ -330,6 +331,7 @@ def _wall_thickness(bpy, meshes, depsgraph):
         "unitScale": _round(unit_scale, 4),
         "sampledFaces": sampled_faces,
         "openFaces": open_faces,
+        "otherShellFaces": other_shell_faces,
     }, None
 
 
@@ -465,7 +467,8 @@ def validate(bpy, objects, profile="prop", symmetry_axis="x"):
     if skipped or pairs is None:
         record("selfIntersections", _check("warn", None, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs", reason=skipped or "not measured"), False)
     else:
-        record("selfIntersections", _check("block" if pairs["pairs"] else "ok", pairs, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs"), "selfIntersections" in critical)
+        status = "block" if pairs["pairs"] else "warn" if pairs["truncated"] else "ok"
+        record("selfIntersections", _check(status, pairs, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs; testedPairs is capped at 50000"), "selfIntersections" in critical)
 
     wall_limit = MIN_WALL_METRES.get(profile)
     if wall_limit is None:
