@@ -34,32 +34,25 @@ export interface BuildState {
 /**
  * Which stages may follow the current one.
  *
- * This is deliberately a graph rather than a single next stage: a critic can
- * log before the batch apply (the branch render is what it judges), a merged
- * build may be critiqued again, and a direct live save skips staging entirely.
- * What it refuses is the ordering that loses work — export before finalize,
- * critique before anything was applied, a second finalize.
+ * Every working stage re-enters every other working stage: a direct save, a
+ * second batch, or a critique after a merge are normal loops, and a graph that
+ * refused them would throw after the work had already landed. Only export is
+ * terminal; the finalize requirement is enforced by the export gate, not by
+ * losing a permitted operation here.
  */
-const NEXT: Record<BuildStage, readonly BuildStage[]> = {
-	intake: ["planned", "staged", "applied"],
-	planned: ["staged", "applied"],
-	staged: ["staged", "applied", "critiqued"],
-	applied: ["applied", "staged", "merged", "critiqued"],
-	merged: ["merged", "critiqued", "finalized"],
-	critiqued: ["critiqued", "applied", "merged", "finalized", "exported"],
-	finalized: ["finalized", "exported"],
-	exported: [],
-};
+const NEXT: Record<BuildStage, readonly BuildStage[]> = Object.fromEntries(
+	BUILD_STAGES.map((stage) => [stage, stage === "exported" ? ["exported"] : BUILD_STAGES]),
+) as unknown as Record<BuildStage, readonly BuildStage[]>;
 
 export function readBuildState(manifest: Pick<BlenderWorkspaceManifest, "build">): BuildState {
-	return {
-		stage: manifest.build?.stage ?? "intake",
-		history: manifest.build?.history ?? [],
-	};
+	const stage = manifest.build?.stage ?? "intake";
+	if (!BUILD_STAGES.includes(stage)) {
+		throw new Error(`Unknown build stage "${stage}" in the manifest; expected one of ${BUILD_STAGES.join(", ")}.`);
+	}
+	return { stage, history: manifest.build?.history ?? [] };
 }
 
 export function assertBuildTransition(current: BuildStage, next: BuildStage): void {
-	if (current === next && next !== "finalized" && next !== "exported") return;
 	if (NEXT[current].includes(next)) return;
 	throw new Error(
 		`The build is at "${current}" and cannot move to "${next}". Allowed: ${NEXT[current].join(", ") || "nothing (it is exported)"}. Finish the missing stage instead of skipping it.`,
@@ -83,7 +76,8 @@ export async function recordBuildStage(
 				actor: options?.actor ?? "blender",
 				evidence,
 			};
-			const history = before.stage === stage && stage !== "finalized" ? before.history : [...before.history, entry];
+			const last = before.history.at(-1);
+			const history = last?.stage === stage && last.evidence === evidence ? before.history : [...before.history, entry];
 			manifest.build = { stage, history };
 			return manifest.build;
 		},
@@ -94,7 +88,7 @@ export async function recordBuildStage(
 export function buildExportGate(manifest: Pick<BlenderWorkspaceManifest, "build">, allowUnfinalized: boolean): string | null {
 	const state = readBuildState(manifest);
 	if (allowUnfinalized || state.stage === "finalized" || state.stage === "exported") return null;
-	if (!manifest.build) return null;
+	if (!manifest.build || state.stage === "intake" || state.stage === "planned") return null;
 	return `The build is at "${state.stage}", not "finalized". Run the finalizer first, or pass allowUnfinalized: true when exporting a deliberate intermediate state.`;
 }
 

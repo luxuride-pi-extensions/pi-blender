@@ -1,7 +1,7 @@
 ---
 name: blender-finalizer
 description: Blender asset finalizer — authors and runs one modules/finalize/script.py that applies transforms, fixes origins, sets shading, normalizes names, and clears the studio rig. Run once at the end of an asset build, not during modelling.
-tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_bridge_status, blender_session_context, contact_supervisor
+tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_bridge_status, blender_session_context, blender_build_status, blender_build_advance, blender_export_asset, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file

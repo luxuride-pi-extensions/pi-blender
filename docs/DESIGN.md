@@ -556,6 +556,18 @@ Start pi in any project dir. The extension:
   window open it reports `switched: false` and a reason rather than failing:
   the mode is a statement about a UI, and the paint underneath it is already
   applied as bpy data either way
+- Build stages are recorded so a finished export is distinguishably finished:
+  `intake → planned → staged → applied → merged → critiqued → finalized →
+  exported`. Every working stage can be re-entered, because a direct save, a
+  second batch or a post-merge critique are normal loops; only export is
+  terminal. The actor that performs an operation records its stage
+  (`blender_branch_run` stages, `blender_branch_apply` merges, the critic logs
+  `critiqued`, the finalizer advances `finalized`), and
+  `blender_export_asset` refuses an export before `finalized` unless
+  `allowUnfinalized: true` says the intermediate state is deliberate. Builds
+  with no recorded stage (plain `execute_python`, intake, planned) are not
+  gated. `blender_build_status` reports the stage and history;
+  `blender_build_advance` records a stage with evidence.
 - `blender_module_run` / `blender_module_revert` support modular multi-part
   builds. `blender_branch_run` / `blender_branch_apply` are the two halves of
   that exposed directly: run a module against a private `branch.blend`

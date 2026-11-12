@@ -8,7 +8,7 @@
  * headless there is no session holding the file open.
  */
 
-import { buildExportGate, recordBuildStage } from "./build-state.js";
+import { buildExportGate, readBuildState, recordBuildStage } from "./build-state.js";
 import { existsSync } from "node:fs";
 import { requestBridge } from "./bridge.js";
 import type { AssetExportOptions, AssetExportResult, ExportFormat } from "./types.js";
@@ -64,7 +64,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		);
 	}
 
-	if (manifest.build) {
+	if (manifest.build && readBuildState(manifest).stage !== "exported") {
 		await recordBuildStage(manifest.manifestPath, "exported", options.name ?? result.exportPath, {
 			actor: "blender-manager",
 			signal: options.signal,

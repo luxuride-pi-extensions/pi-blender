@@ -1305,11 +1305,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		`module ${moduleName} iteration ${iteration}`,
 		{ signal: options.signal },
 	);
-	if (direct) {
-		await recordBuildStage(manifest.manifestPath, "merged", `module ${moduleName} saved in place`, {
-			signal: options.signal,
-		});
-	}
 
 	return {
 		workspacePath: manifest.workspacePath,
@@ -1935,6 +1930,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an
 	// apply that already landed on disk.
+	if (applied.length > 0) {
+		await recordBuildStage(
+			manifest.manifestPath,
+			"merged",
+			`applied ${applied.map((entry) => entry.module).join(", ")}`,
+			{ signal: options.signal },
+		);
+	}
+
 	let liveBlenderMessage = "model.blend updated. No live Blender session is running, so nothing was reloaded.";
 	if (applied.length > 0 && isLiveBridgeAlive()) {
 		try {

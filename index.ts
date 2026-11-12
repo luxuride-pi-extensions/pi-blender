@@ -300,6 +300,9 @@ function registerBlenderCapabilityGate(pi: ExtensionAPI): void {
 		try {
 			agent = core.readActiveAgentName(ctx.getSystemPrompt());
 		} catch {
+			if (event.toolName.startsWith("blender_")) {
+				return { block: true, reason: "The active agent could not be identified, so Blender tools are refused. Report the prompt-parsing failure instead of bypassing the capability bundles." };
+			}
 			return;
 		}
 		const refusal = blenderToolRefusal(agent, event.toolName);

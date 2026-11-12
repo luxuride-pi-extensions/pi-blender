@@ -75,14 +75,19 @@ export const AGENT_TOOL_BUNDLES: Record<string, readonly string[]> = {
 		"blender_module_run",
 		"blender_geometry_probe",
 		"blender_execute_python",
-			"blender_session_context",
+		"blender_session_context",
+		"blender_build_status",
+		"blender_build_advance",
+		"blender_export_asset",
 	],
 	"blender-merger": [
 		...INSPECT,
 		"blender_module_run",
 		"blender_geometry_probe",
 		"blender_execute_python",
-			"blender_session_context",
+		"blender_session_context",
+		"blender_build_status",
+		"blender_build_advance",
 	],
 	"blender-script-runner": [
 		...INSPECT,
@@ -122,6 +127,9 @@ export function blenderToolRefusal(agentName: string | null, toolName: string): 
 	if (agentName === null || !toolName.startsWith("blender_")) return null;
 	const allowed = AGENT_TOOL_BUNDLES[agentName];
 	if (!allowed) {
+		// A user-defined agent may opt into a Blender tool in its own tools:
+		// line; only our own roles are guaranteed to have a bundle.
+		if (!agentName.startsWith("blender-")) return null;
 		return `Agent "${agentName}" has no Blender capability bundle, so ${toolName} is refused. Add the role and its tools to blender/agent-policy.ts and to the agent's own tools: line.`;
 	}
 	if (allowed.includes(toolName)) return null;
