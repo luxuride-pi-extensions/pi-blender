@@ -238,6 +238,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_bridge_status",
 	"blender_log_critique",
 	"blender_rank_assets",
+	// The manager composes the comparison sheet it hands a fresh critic, so it
+	// needs the same compare tool the critic has.
+	"blender_compare",
 	"blender_iteration_state",
 	// Writing a measured fact back is authoring the loop's memory, not the
 	// asset, so the manager may record what its own probes established.
