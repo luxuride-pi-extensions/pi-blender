@@ -32,6 +32,13 @@ test("the human table prints one row per axis", () => {
 	assert.match(output, /false-pass rate 0\.25/);
 });
 
+test("the synthetic fixture says so before printing numbers", () => {
+	const result = spawnSync(process.execPath, [script, fixture], { encoding: "utf8" });
+	assert.equal(result.status, 0);
+	assert.match(result.stderr, /synthetic format fixture/);
+	assert.match(result.stdout, /pass agreement/);
+});
+
 test("a missing report exits non-zero with a message", () => {
 	assert.throws(
 		() => execFileSync(process.execPath, [script], { encoding: "utf8", stdio: "pipe" }),

@@ -137,18 +137,19 @@ jobs:
       #   a sibling checkout of manager-core; a sibling checkout of
       #   pi-manager-core.
       #   ...
-      #   # tests 71
+      #   # tests 75
       #   # pass 26
-      #   # fail 45
+      #   # fail 49
       #
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly eleven files
-      # and 67 tests survive:
+      # not exist -- which is the state this step creates. Exactly thirteen files
+      # and 75 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
+      #   critic-calibration.test.mjs    4
       #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
       #   live-ownership.test.mjs        3
@@ -180,6 +181,7 @@ jobs:
           node --test \
             test/camera-plan.test.mjs \
             test/concurrency-budget.test.mjs \
+            test/critic-calibration.test.mjs \
             test/generations.test.mjs \
             test/headless-changed.test.mjs \
             test/live-ownership.test.mjs \
@@ -342,8 +344,8 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "67 tests ran, in 12 files: camera-plan, concurrency-budget,"
-            echo "generations, headless-changed, live-ownership, module-paths,"
+            echo "75 tests ran, in 13 files: camera-plan, concurrency-budget,"
+            echo "critic-calibration, headless-changed, live-ownership, module-paths,"
             echo "module-state, preflight, tool-params, tool-surface,"
             echo "unchanged-routing and windowless-tools."
             echo "Those are the only files measured to pass without a"
