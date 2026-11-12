@@ -133,6 +133,7 @@ docs/adr/                   architectural decision records (0001: do not rewrite
 | `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
 | `PI_BLENDER_NO_UI` | unset (set `1` to never auto-launch UI) |
 | `PI_BLENDER_MAX_PARALLEL_RUNS` | `16` — ceiling on concurrent **headless** Blender runs. A request, not a promise: the effective count is the smallest of this, the measured ceiling (4), the core count at 3 per run, and what free memory allows. The default is therefore normally clamped, and the clamp prints a warning naming the binding term. `blender_bridge_status` reports the resolved numbers **and how many headless Blenders are open right now**, counted across every process in the session tree, so a manager can see what its workers spent rather than only what the ceiling permits. The ceiling is session-wide: every pi process under the same bridge dir admits through one slot directory, and the narrowest active limit wins. A `/blender-watch` window is reported separately from that count: it is not one of these runs. |
+| `PI_BLENDER_WARM_POOL` | Off by default. When `1`, headless scripts run in long-lived Blender workers instead of a fresh process per job. A worker resets to factory settings before every job, chdirs to the job's cwd, restores `sys.path`/`sys.argv` and drops modules the job imported, then opens the scene that job names. Persistent handlers and timers a script leaves behind are not cleaned, so module scripts must not install them. A worker is recycled after `PI_BLENDER_WARM_JOBS` jobs (default 25), killed on timeout, and replaced after a crash. Idle workers hold no slot but remain resident until the session ends. The process ceiling and the session-wide slot still apply, so a pool cannot exceed the measured 4-way budget. Disable it to fall back to one process per job. |
 | `PI_HOME` | `~/.pi` — root of the pi installation |
 | `PI_AGENT_DIR` | `$PI_HOME/agent` — where extensions and agents are installed, and the base for every other path this table resolves against |
 
@@ -561,6 +562,13 @@ Start pi in any project dir. The extension:
   headlessly, with no bridge lock and no live session, then merge the staged
   branches back into `model.blend` in one serialized call that reports any
   contested datablock rather than auto-resolving it.
+  With `direct: true`, a module run that no sibling is waiting on saves
+  `model.blend` in place: one Blender process instead of a branch write, a run,
+  and a separate merge pass. It takes the apply lock for the whole run, refuses
+  a datablock a staged sibling owns by rolling back to the checkpoint, and
+  writes the same revert checkpoint and a branch record with a companion module
+  run, so `blender_module_revert` finds the same history. A failure after the
+  script saved also rolls back.
 - `blender_rank_assets` reads a workspace's `critique.log` and keeps the best
   slice of a batch by score — an absolute verdict can say "good enough" but only
   ranking over a batch can say "best of these fifty". `blender_export_asset`

@@ -864,15 +864,28 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// against the state it was briefed on is correct against that state even if
 	// a sibling has been applied since, which is what makes concurrent branches
 	// meaningful rather than a race.
-	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
+	const direct = options.direct === true;
+	const branchPath = direct ? manifest.blendPath : getBranchBlendPath(manifest.workspacePath, moduleName);
 	const capturedAt = new Date();
-	await copyFile(manifest.blendPath, branchPath);
+	if (!direct) await copyFile(manifest.blendPath, branchPath);
 
 	// The revert checkpoint must describe the state this run REPLACES. Copying
 	// the branch rather than re-reading model.blend makes it the SAME read: an
 	// apply landing between two reads would put a sibling's merged work into the
 	// checkpoint, and a revert would then silently keep work this run never saw.
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
+	// A direct run mutates model.blend for the whole run, so the lock must be held
+	// from BEFORE the checkpoint is read. Otherwise an apply can land between the
+	// copy and the lock, and a failed run would roll the checkpoint over it.
+	let releaseDirectLock: (() => Promise<void>) | undefined;
+	if (direct) {
+		try {
+			releaseDirectLock = await acquireApplyLock(manifest.manifestPath, { signal: options.signal });
+		} catch (error) {
+			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+			throw error;
+		}
+	}
 	try {
 		await copyFile(branchPath, checkpointPath);
 		// The checkpoint's mtime is the revert guard's clock, and copyFile stamps
@@ -882,12 +895,15 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		// refusals, never lose a sibling's work.
 		await utimes(checkpointPath, capturedAt, capturedAt);
 	} catch (error) {
-		await rm(branchPath, { force: true }).catch(() => undefined);
+		if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
 		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		await releaseDirectLock?.();
 		throw error;
 	}
 
+	let payload!: BranchRunPayload;
+	try {
 	const rawScript = await readFile(scriptPath, "utf-8");
 	let effectiveScriptPath = scriptPath;
 	if (!rawScript.includes(MODULE_PREAMBLE_MARKER)) {
@@ -987,7 +1003,18 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const reference = options.referenceId
 		? (manifest.references ?? []).find((entry) => entry.id === options.referenceId)
 		: undefined;
-	let payload: BranchRunPayload;
+	let directConflict: Error | undefined;
+	let rolledBack = false;
+	const restoreCheckpoint = async (): Promise<boolean> => {
+		try {
+			await copyFile(checkpointPath, manifest.blendPath);
+		} catch {
+			return false;
+		}
+		await utimes(manifest.blendPath, capturedAt, capturedAt).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		return true;
+	};
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
 			cwd: options.cwd,
@@ -1034,6 +1061,32 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 			signal: options.signal,
 			timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000 + (renderRequested ? RENDER_TIMEOUT_MS : 0),
 		});
+		if (payload.exitCode !== 0) {
+			let restored = true;
+			if (direct) {
+				restored = await restoreCheckpoint();
+				rolledBack = true;
+			} else {
+				await rm(branchPath, { force: true }).catch(() => undefined);
+				await rm(checkpointPath, { force: true }).catch(() => undefined);
+			}
+			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+			const outcome = direct
+				? restored
+					? "model.blend was rolled back to the pre-run checkpoint, so the failed run left no changes."
+					: `model.blend could NOT be restored; the checkpoint is kept at ${checkpointPath}.`
+				: `model.blend was NOT touched — this ran headlessly against ${branchPath}, which has been removed.`;
+			throw new Error(
+				formatBlenderFailure({
+					streams: { stdout: payload.stdout, stderr: payload.stderr },
+					subject:
+						`Module "${moduleName}" ${direct ? "direct run" : "branch run"} failed (exit ${payload.exitCode}). ` +
+						`${outcome} ` +
+						`Nothing to revert.\n` +
+						`Script that ran: ${effectiveScriptPath}\nSource: ${scriptPath}`,
+				}),
+			);
+		}
 	} catch (error) {
 		// A launch that never produced JSON leaves the branch in an unknown state
 		// UNLESS the run script marked it saved before rendering. Then the build is
@@ -1041,31 +1094,58 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
 		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
 		if (!branchSaved) {
-			await rm(branchPath, { force: true }).catch(() => undefined);
-			await rm(checkpointPath, { force: true }).catch(() => undefined);
+			if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
+			// Keep the checkpoint when a direct exit rollback could not restore it.
+			if (!(direct && rolledBack)) await rm(checkpointPath, { force: true }).catch(() => undefined);
 		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		if (branchSaved) {
+			if (direct) {
+				if (!rolledBack) {
+					const restored = await restoreCheckpoint();
+					rolledBack = true;
+					await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+					throw new Error(
+						`${(error as Error).message}\n` +
+							(restored
+								? "model.blend was rolled back to the pre-run checkpoint; the failed run left no changes."
+								: `model.blend could NOT be restored; the checkpoint is kept at ${checkpointPath}.`),
+					);
+				}
+				throw error;
+			}
 			throw new Error(
 				`${(error as Error).message}\nThe branch was saved before the render failed and is intact at ${branchPath}.`,
 			);
 		}
 		throw error;
+	} finally {
+		if (direct && payload && payload.exitCode === 0) {
+			// The run has already saved model.blend. The branch path checks a staged
+			// sibling before it runs; a direct run can only check after it, because
+			// the sibling may stage while the lock is held. The safe equivalent of
+			// that refusal is to roll back and say so.
+			// Re-read the manifest: a sibling may have staged while this run had the
+			// lock, and the pre-run snapshot would not know about it.
+			const current = await loadWorkspaceManifest(options.cwd, options.workspace).catch(() => manifest);
+			const mine = new Set([...payload.applyObjects, ...payload.touchedMaterials, ...payload.removedObjects]);
+			const others = contestableStagedRuns(current).filter((run) => run.module !== moduleName);
+			const clash = others.find((run) => recordOwnedDatablocks(run).some((name) => mine.has(name)));
+			if (clash) {
+				const restored = await restoreCheckpoint();
+				directConflict = new Error(
+					`Direct run for "${moduleName}" touched ${[...mine].filter((name) => recordOwnedDatablocks(clash).includes(name)).join(", ")}, ` +
+						`which staged module "${clash.module}" also owns. ` +
+						(restored
+							? "model.blend was rolled back; apply or discard that branch first."
+							: `model.blend could NOT be rolled back; the checkpoint is kept at ${checkpointPath}.`),
+				);
+			}
+		}
 	}
-
-	if (payload.exitCode !== 0) {
-		await rm(branchPath, { force: true }).catch(() => undefined);
-		await rm(checkpointPath, { force: true }).catch(() => undefined);
+	if (directConflict) {
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
-		throw new Error(
-			formatBlenderFailure({
-				streams: { stdout: payload.stdout, stderr: payload.stderr },
-				subject:
-					`Module "${moduleName}" branch run failed (exit ${payload.exitCode}). model.blend was NOT touched — this ran ` +
-					`headlessly against ${branchPath}, which has been removed. Nothing to revert.\n` +
-					`Script that ran: ${effectiveScriptPath}\nSource: ${scriptPath}`,
-			}),
-		);
+		throw directConflict;
 	}
 
 	// The render already happened in the run process, against the branch blend
@@ -1110,6 +1190,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		scriptPath,
 		checkpointPath,
 		at: nowIso(),
+		status: direct ? "applied" : "staged",
+		appliedAt: direct ? nowIso() : undefined,
 		touchedObjects: payload.touchedObjects,
 		touchedMaterials: payload.touchedMaterials,
 		applyImages: payload.applyImages,
@@ -1120,7 +1202,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
 		preflight: payload.preflight ?? undefined,
-		status: "staged",
 		renderOutputPath,
 		changed: payload.changed,
 		reused: renderSkipped,
@@ -1136,6 +1217,24 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		manifest.manifestPath,
 		(current) => {
 			current.branchRuns = appendBranchRun(current, record);
+			if (direct) {
+				current.moduleRuns = [
+					...(current.moduleRuns ?? []),
+					{
+						name: moduleName,
+						iteration,
+						checkpointPath,
+						at: record.at,
+						sequence,
+						exitCode: payload.exitCode,
+						status: "ok",
+						viaBranchApply: branchPath,
+						ownedObjects: payload.ownedObjects,
+						ownedMaterials: payload.ownedMaterials,
+						stateDigest: payload.stateDigest ?? undefined,
+					},
+				];
+			}
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,
@@ -1187,6 +1286,15 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		warnings,
 		status: "staged",
 	};
+	} catch (error) {
+		if (direct && !payload) {
+			await rm(checkpointPath, { force: true }).catch(() => undefined);
+			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		}
+		throw error;
+	} finally {
+		await releaseDirectLock?.();
+	}
 }
 
 /* ------------------------------------------------------------------ *

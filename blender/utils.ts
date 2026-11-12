@@ -7,6 +7,7 @@ import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
 import { execCommand } from "../core/exec.js";
 import { resolveBlenderArgv } from "../launch.js";
 import { ParallelRunGate, resolveRunBudget } from "./concurrency.js";
+import { runWarmJob, warmPoolEnabled } from "./warm-pool.js";
 import {
 	acquireHeadlessSlot,
 	acquireRunLease,
@@ -227,6 +228,30 @@ export async function runBlenderProcess(options: {
 	// actually admits the run across processes.
 	let leasedPid: number | null = null;
 	try {
+		if (warmPoolEnabled()) {
+			const result = await runWarmJob({
+				command,
+				args: blenderArgs,
+				cwd: options.cwd,
+				scriptPath: options.scriptPath,
+				payload: options.payload,
+				scriptArgs: options.scriptArgs,
+				blendPath: options.blendPath,
+				timeoutMs: options.timeoutMs,
+				signal: options.signal,
+				onSpawn: (pid) => {
+					leasedPid = pid;
+					claimHeadlessSlot(slot, pid);
+					acquireRunLease(pid, options.label);
+				},
+			});
+			if (leasedPid === null) {
+				leasedPid = result.pid;
+				claimHeadlessSlot(slot, result.pid);
+				acquireRunLease(result.pid, options.label);
+			}
+			return { stdout: result.stdout, stderr: result.stderr, code: result.code };
+		}
 		const result = await execCommand(command, args, options.cwd, {
 			signal: options.signal,
 			timeout: options.timeoutMs,
