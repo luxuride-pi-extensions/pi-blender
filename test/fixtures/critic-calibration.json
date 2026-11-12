@@ -1,0 +1,52 @@
+{
+  "_synthetic": true,
+  "images": [
+    { "id": "pass-hero", "truth": { "pass": true, "defects": [] } },
+    { "id": "fail-seam", "truth": { "pass": false, "defects": ["seam"] } },
+    { "id": "fail-scale", "truth": { "pass": false, "defects": ["wrong_scale"] } }
+  ],
+  "reviews": [
+    {
+      "id": "pass-hero",
+      "run": 1,
+      "pass": true,
+      "defects": [],
+      "axes": { "accuracy": 2, "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
+    },
+    {
+      "id": "pass-hero",
+      "run": 2,
+      "pass": true,
+      "defects": [],
+      "axes": { "accuracy": 2, "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
+    },
+    {
+      "id": "fail-seam",
+      "run": 1,
+      "pass": false,
+      "defects": ["seam"],
+      "axes": { "geometry": 1, "materials": 1, "completeness": 1, "quality": 1, "validity": 1 }
+    },
+    {
+      "id": "fail-seam",
+      "run": 2,
+      "pass": false,
+      "defects": ["seam"],
+      "axes": { "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
+    },
+    {
+      "id": "fail-scale",
+      "run": 1,
+      "pass": false,
+      "defects": ["wrong_scale"],
+      "axes": { "accuracy": 0, "geometry": 0, "materials": 0, "completeness": 0, "quality": 0, "validity": 0 }
+    },
+    {
+      "id": "fail-scale",
+      "run": 2,
+      "pass": true,
+      "defects": [],
+      "axes": { "accuracy": 2, "geometry": 0, "materials": 0, "completeness": 0, "quality": 0, "validity": 0 }
+    }
+  ]
+}
