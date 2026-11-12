@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLiveBridgeAlive } from "../launch.js";
 import { blenderBranchApply, blenderBranchRun } from "./branch.js";
+import { copyBlendFile } from "./blend-storage.js";
 import { collectModuleOwnership, isComparableStateDigest, previousModuleGeneration } from "./generations.js";
 import { requestLiveBlenderExecutePython, requestLiveBlenderReloadBlend, requestLiveBlenderRender } from "./bridge.js";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "./types.js";
@@ -380,7 +381,7 @@ async function runModuleInLiveBlender(options: ModuleRunOptions): Promise<Module
 	}
 
 	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
-	await copyFile(manifest.blendPath, checkpointPath);
+	await copyBlendFile(manifest.blendPath, checkpointPath);
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const result = await requestLiveBlenderExecutePython({

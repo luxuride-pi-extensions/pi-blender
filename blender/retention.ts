@@ -13,6 +13,7 @@
 import { lstat, readdir, rm, rmdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { parseCritiqueLog } from "./ranking.js";
+import { markBranchRetired, planBlendStorage } from "./blend-storage.js";
 import type { BlenderWorkspaceManifest, WorkspacePruneResult } from "./types.js";
 import { getWorkspaceCritiqueLogPath, loadWorkspaceManifest } from "./workspace.js";
 import { readFile } from "node:fs/promises";
@@ -24,6 +25,7 @@ interface FileEntry {
 	bytes: number;
 	module?: string;
 	iteration: number;
+	kind?: "render" | "checkpoint" | "branch";
 }
 
 /** True when `path` resolves inside `root`; a symlink out of the tree is not. */
@@ -100,6 +102,10 @@ export async function blenderWorkspacePrune(options: {
 	dryRun?: boolean;
 	/** How many of the newest iterations stay. Default 2, minimum 1. */
 	keepIterations?: number;
+	/** Include old checkpoints over the global budget. */
+	includeCheckpoints?: boolean;
+	/** Include applied branch files whose checkpoint already made them history. */
+	includeBranches?: boolean;
 	signal?: AbortSignal;
 }): Promise<WorkspacePruneResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
@@ -131,7 +137,7 @@ export async function blenderWorkspacePrune(options: {
 		const info = await stat(output.path).catch(() => undefined);
 		if (!info?.isFile()) continue;
 		seen.add(output.path);
-		candidates.push({ path: output.path, bytes: info.size, module: output.module, iteration: output.iteration });
+		candidates.push({ path: output.path, bytes: info.size, module: output.module, iteration: output.iteration, kind: "render" });
 	}
 
 	const unlisted: FileEntry[] = [];
@@ -142,9 +148,25 @@ export async function blenderWorkspacePrune(options: {
 			const info = await stat(path).catch(() => undefined);
 			if (!info?.isFile()) continue;
 			seen.add(path);
-			unlisted.push({ path, bytes: info.size, iteration });
+			unlisted.push({ path, bytes: info.size, iteration, kind: "render" });
 		}
 	}
+
+	const blendPlan = await planBlendStorage(manifest, {
+		includeCheckpoints: options.includeCheckpoints === true,
+		includeBranches: options.includeBranches === true,
+	});
+	const blendEntries: FileEntry[] = [...blendPlan.checkpoints, ...blendPlan.branches].map((entry) => ({
+		path: entry.path,
+		bytes: entry.bytes,
+		module: entry.module,
+		iteration: entry.iteration,
+		kind: entry.kind,
+	}));
+	const checkpointBytes = blendPlan.checkpoints.reduce((sum, entry) => sum + entry.bytes, 0);
+	const branchBytes = blendPlan.branches.reduce((sum, entry) => sum + entry.bytes, 0);
+	const checkpointFiles = blendPlan.checkpoints.length;
+	const branchFiles = blendPlan.branches.length;
 
 	const referenceDir = join(manifest.workspacePath, "references");
 	const referenceFiles = await walkFiles(referenceDir);
@@ -160,13 +182,15 @@ export async function blenderWorkspacePrune(options: {
 	};
 	for (const entry of candidates) count(entry.module ?? "unlisted", entry.bytes);
 	for (const entry of unlisted) count("unlisted", entry.bytes);
+	for (const entry of blendEntries) count(entry.module ?? "unlisted", entry.bytes);
 
-	const totalBytes = [...candidates, ...unlisted].reduce((total, entry) => total + entry.bytes, 0);
+	const totalBytes = [...candidates, ...unlisted, ...blendEntries].reduce((total, entry) => total + entry.bytes, 0);
 	if (options.signal?.aborted) throw new Error("Pruning was cancelled before anything was removed.");
 	if (!dryRun) {
-		for (const entry of [...candidates, ...unlisted]) {
+		for (const entry of [...candidates, ...unlisted, ...blendEntries]) {
 			await rm(entry.path, { force: true });
 		}
+		await markBranchRetired(manifest.manifestPath, blendPlan.branches.map((entry) => entry.path));
 		for (let iteration = 0; iteration <= cutoff; iteration += 1) {
 			// rmdir, not rm -r: a protected render can live in an old iteration,
 			// and removing the directory would delete it with the rest.
@@ -180,11 +204,12 @@ export async function blenderWorkspacePrune(options: {
 		keepIterations,
 		cutoff,
 		kept: [...kept].map(([path, reason]) => ({ path, reason })),
-		wouldRemove: [...candidates, ...unlisted].map((entry) => ({
+		wouldRemove: [...candidates, ...unlisted, ...blendEntries].map((entry) => ({
 			path: entry.path,
 			bytes: entry.bytes,
 			module: entry.module,
 			iteration: entry.iteration,
+			kind: entry.kind,
 		})),
 		byModule: [...byModule.values()].sort((a, b) => b.bytes - a.bytes),
 		totalBytes,
@@ -195,8 +220,11 @@ export async function blenderWorkspacePrune(options: {
 			retained: true,
 			reason: "References are inputs, not evidence. Nothing here can prove a copied file is unused, so pruning reports them and never deletes them.",
 		},
-		note: dryRun
-			? `Dry run: ${candidates.length + unlisted.length} file(s), ${totalBytes} bytes would be removed. Pass dryRun: false to remove them.`
-			: `Removed ${candidates.length + unlisted.length} file(s), ${totalBytes} bytes.`,
+		checkpoints: { files: checkpointFiles, bytes: checkpointBytes },
+		branches: { files: branchFiles, bytes: branchBytes },
+		note:
+			`${dryRun ? "Dry run" : "Removed"}: ${candidates.length + unlisted.length + blendEntries.length} file(s), ${totalBytes} bytes ` +
+			`(renders ${candidates.length + unlisted.length}, checkpoints ${checkpointFiles}/${checkpointBytes} bytes, branches ${branchFiles}/${branchBytes} bytes).` +
+			(dryRun ? " Pass dryRun: false to remove them." : ""),
 	};
 }

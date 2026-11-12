@@ -24,6 +24,7 @@
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { copyBlendFile } from "./blend-storage.js";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
@@ -867,13 +868,53 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const direct = options.direct === true;
 	const branchPath = direct ? manifest.blendPath : getBranchBlendPath(manifest.workspacePath, moduleName);
 	const capturedAt = new Date();
-	if (!direct) await copyFile(manifest.blendPath, branchPath);
+	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
+	if (!direct) {
+		// Record the claim BEFORE the branch exists. Every branch file is written
+		// before its result record, and an explicit prune reads records only; a
+		// path that is only owned by the previous applied record looks like dead
+		// history for the length of this run, and deleting it loses the run while
+		// the failure still claims the work is intact.
+		const running: BlenderBranchRunRecord = {
+			module: moduleName,
+			iteration,
+			sequence,
+			branchPath,
+			scriptPath,
+			checkpointPath,
+			at: capturedAt.toISOString(),
+			touchedObjects: [],
+			touchedMaterials: [],
+			addedObjects: [],
+			removedObjects: [],
+			applyObjects: [],
+			status: "running",
+		};
+		await updateManifest(
+			manifest.manifestPath,
+			(current) => {
+				current.branchRuns = [
+					...(current.branchRuns ?? []).filter(
+						(run) => !(run.module === moduleName && run.sequence === sequence),
+					),
+					running,
+				];
+			},
+			{ signal: options.signal },
+		);
+		try {
+			await copyBlendFile(manifest.blendPath, branchPath);
+		} catch (error) {
+			await removeRunningBranchRun(manifest.manifestPath, moduleName, sequence).catch(() => undefined);
+			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+			throw error;
+		}
+	}
 
 	// The revert checkpoint must describe the state this run REPLACES. Copying
 	// the branch rather than re-reading model.blend makes it the SAME read: an
 	// apply landing between two reads would put a sibling's merged work into the
 	// checkpoint, and a revert would then silently keep work this run never saw.
-	const checkpointPath = join(runDir, getModuleRunCheckpointName(iteration));
 	// A direct run mutates model.blend for the whole run, so the lock must be held
 	// from BEFORE the checkpoint is read. Otherwise an apply can land between the
 	// copy and the lock, and a failed run would roll the checkpoint over it.
@@ -887,7 +928,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		}
 	}
 	try {
-		await copyFile(branchPath, checkpointPath);
+		await copyBlendFile(branchPath, checkpointPath);
 		// The checkpoint's mtime is the revert guard's clock, and copyFile stamps
 		// it when the copy FINISHES, after the read it represents. Dating it to
 		// the read closes that window: a run that applied while the bytes were
@@ -1216,7 +1257,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	await updateManifest(
 		manifest.manifestPath,
 		(current) => {
-			current.branchRuns = appendBranchRun(current, record);
+			current.branchRuns = appendBranchRun(
+				{
+					branchRuns: (current.branchRuns ?? []).filter(
+						(run) => !(run.module === moduleName && run.sequence === sequence && run.status === "running"),
+					),
+				},
+				record,
+			);
 			if (direct) {
 				current.moduleRuns = [
 					...(current.moduleRuns ?? []),
@@ -1287,6 +1335,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		status: "staged",
 	};
 	} catch (error) {
+		await removeRunningBranchRun(manifest.manifestPath, moduleName, sequence).catch(() => undefined);
 		if (direct && !payload) {
 			await rm(checkpointPath, { force: true }).catch(() => undefined);
 			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
@@ -1295,6 +1344,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	} finally {
 		await releaseDirectLock?.();
 	}
+}
+
+async function removeRunningBranchRun(manifestPath: string, module: string, sequence: number): Promise<void> {
+	await updateManifest(manifestPath, (current) => {
+		current.branchRuns = (current.branchRuns ?? []).filter(
+			(run) => !(run.module === module && run.sequence === sequence && run.status === "running"),
+		);
+	});
 }
 
 /* ------------------------------------------------------------------ *
@@ -1860,6 +1917,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			];
 		}
 	}, { signal: options.signal });
+
 
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an

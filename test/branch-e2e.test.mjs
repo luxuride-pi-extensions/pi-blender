@@ -629,6 +629,10 @@ test("blender_module_run works with NO window, by branching and applying", { ski
 		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
 		assert.equal(manifest.moduleRuns.length, 1, "a headless module run must leave one run record");
 		assert.ok(manifest.moduleRuns[0].viaBranchApply, "the record must say it came from a branch apply, so a caller can tell the two paths apart");
+		const applied = manifest.branchRuns[0];
+		assert.equal(applied.branchRetired, undefined, "a run never retires evidence; pruning is the only deletion point");
+		assert.equal(existsSync(applied.branchPath), true, "the branch file survives its own run");
+		assert.ok(existsSync(manifest.blendPath), "model.blend still holds the merged geometry");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
