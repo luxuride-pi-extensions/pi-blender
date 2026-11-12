@@ -1346,6 +1346,20 @@ export type CritiqueVerdict = "continue" | "present" | "reject";
  */
 export type ExportFormat = "glb" | "gltf" | "obj" | "stl";
 
+export type ExportValidationProfile = "gltf" | "print" | "engine" | "none";
+
+export interface ExportValidationCheck {
+	name: string;
+	status: "pass" | "warn" | "fail";
+	detail: string;
+}
+
+export interface ExportValidation {
+	profile: ExportValidationProfile;
+	ok: boolean;
+	checks: ExportValidationCheck[];
+}
+
 export interface AssetExportOptions {
 	cwd: string;
 	workspace: string;
@@ -1359,6 +1373,13 @@ export interface AssetExportOptions {
 	animations?: boolean;
 	/** Export a build that has not reached the finalize stage. */
 	allowUnfinalized?: boolean;
+	/**
+	 * Validation to run on the written file. `gltf` checks nodes, meshes,
+	 * accessors and embedded/sidecar images; `print` checks manifold edges,
+	 * self-intersection, winding and unit scale; `engine` checks texture size
+	 * and material count. `none` skips it.
+	 */
+	validationProfile?: ExportValidationProfile;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }
@@ -1374,6 +1395,7 @@ export interface AssetExportResult {
 	images?: number;
 	textures?: number;
 	texturesVerified?: boolean | null;
+	validation?: ExportValidation | null;
 	warnings?: string[];
 }
 

@@ -11,7 +11,7 @@
 import { buildExportGate, readBuildState, recordBuildStage } from "./build-state.js";
 import { existsSync } from "node:fs";
 import { requestBridge } from "./bridge.js";
-import type { AssetExportOptions, AssetExportResult, ExportFormat } from "./types.js";
+import type { AssetExportOptions, AssetExportResult, ExportFormat, ExportValidation } from "./types.js";
 import { loadWorkspaceManifest } from "./workspace.js";
 
 /** Formats the handler dispatches to. Kept here so a bad value fails before a spawn. */
@@ -38,6 +38,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		images: number;
 		textures: number;
 		texturesVerified: boolean | null;
+		validation?: ExportValidation | null;
 		warnings: string[];
 	}>({
 		payload: {
@@ -48,6 +49,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 			outputDir: options.outputDir,
 			name: options.name,
 			animations: options.animations,
+		validationProfile: options.validationProfile ?? (format === "obj" || format === "stl" ? "print" : "gltf"),
 		},
 		label: "export",
 		timeoutMs: options.timeoutMs,
@@ -82,6 +84,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		images: result.images,
 		textures: result.textures,
 		texturesVerified: result.texturesVerified,
+		validation: result.validation,
 		warnings: result.warnings,
 	};
 }
