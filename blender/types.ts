@@ -244,6 +244,8 @@ export interface BlenderBranchRunRecord {
 	cameraPlan?: ResolvedCameraPlan;
 	/** The multi-panel review sheet this run wrote, if asked for one. */
 	reviewSheet?: ReviewSheetResult;
+	/** Structural checks measured before this run's render. */
+	preflight?: PreflightResult;
 }
 
 export interface BranchRunOptions {
@@ -293,6 +295,33 @@ export interface ReviewSheetResult {
 	panels: ReviewSheetPanel[];
 	/** Panels that failed, or why the sheet could not be composed. */
 	error?: string;
+}
+
+export type PreflightStatus = "ok" | "warn" | "block" | "notApplicable";
+
+/** One deterministic check, with the sample and method that produced it. */
+export interface PreflightCheck {
+	status: PreflightStatus;
+	value?: unknown;
+	method?: string;
+	limit?: number | null;
+	sampled?: boolean;
+	reason?: string;
+}
+
+/**
+ * Structural facts measured from the module's geometry before a critic sees it.
+ *
+ * `blocking` is the routing decision: a profile-critical failure should send
+ * the numbers back to the worker instead of spending a critic context on a
+ * render that cannot answer them.
+ */
+export interface PreflightResult {
+	profile: string;
+	blocking: boolean;
+	blockers: string[];
+	warnings: string[];
+	checks: Record<string, PreflightCheck>;
 }
 
 export interface BranchRunResult {
@@ -346,6 +375,8 @@ export interface BranchRunResult {
 	stateDigest?: string;
 	/** Content the headless apply does not carry, such as world or scene settings. */
 	warnings?: string[];
+	/** Structural checks measured before the render. */
+	preflight?: PreflightResult;
 }
 
 export interface BranchApplyOptions {
@@ -1572,6 +1603,8 @@ export interface ModuleRunResult {
 	cameraPlan?: ResolvedCameraPlan;
 	/** The multi-panel review sheet this run wrote, when asked for one. */
 	reviewSheet?: ReviewSheetResult;
+	/** Structural checks measured before the render, when the path can run them. */
+	preflight?: PreflightResult;
 	/** Behaviour the caller should know about, e.g. options this path ignored. */
 	warnings?: string[];
 	/**

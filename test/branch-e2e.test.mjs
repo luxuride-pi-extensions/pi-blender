@@ -1494,3 +1494,32 @@ background.inputs["Strength"].default_value = 2.5
 		rmSync(ws.root, { recursive: true, force: true });
 	}
 });
+
+test("an open mesh blocks the critic before it is spent", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "open", `${box("OpenPart", 2, 2, 2)}
+import bmesh
+_mesh = bpy.data.objects["OpenPart"].data
+_bm = bmesh.new()
+_bm.from_mesh(_mesh)
+_bm.faces.ensure_lookup_table()
+bmesh.ops.delete(_bm, geom=[_bm.faces[0]], context="FACES")
+_bm.to_mesh(_mesh)
+_bm.free()
+`);
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "open",
+			cameraProfile: "print",
+			timeoutSeconds: 300,
+		});
+		assert.ok(result.preflight, "a headless run reports a preflight");
+		assert.equal(result.preflight.blocking, true);
+		assert.ok(result.preflight.blockers.includes("nonManifold"), JSON.stringify(result.preflight.blockers));
+		assert.ok(result.renderOutputPath, "a structural failure does not discard the render");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});

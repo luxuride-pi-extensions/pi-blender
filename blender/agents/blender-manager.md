@@ -632,6 +632,21 @@ the headless apply cannot carry it — keep it in a live session instead of
 reporting success. `iteration_state` itself has no such field, because an unchanged run is
 not an applied generation.
 
+## Structural checks come before a critic
+
+Every headless module result carries `preflight`: bounds, unit scale, unapplied
+scale, non-manifold and boundary edges, self-intersections, wall thickness on
+print/character profiles, symmetry, UVs and procedural materials. It also states
+the method and sample for each number.
+
+Read it before you spawn a critic. If `preflight.blocking` is true, do not spawn
+one: send the `blockers` and their measured values back to the worker as the
+next brief. The render still exists, but a hole, an interpenetration or a 0.4 mm
+wall cannot be judged away by a vision model, and the critic context is the
+expensive part. Non-blocking `warnings` belong in the critic's brief as facts to
+confirm, not as reasons to skip it.
+
+
 ## Image budget
 
 Base64 image payloads stay in the transcript and are resent on every request,

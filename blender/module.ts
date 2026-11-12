@@ -187,6 +187,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
 		cameraPlan: branchResult.cameraPlan,
+		preflight: branchResult.preflight,
 		reviewSheet: branchResult.reviewSheet,
 		reused: branchResult.reused,
 		warnings:
