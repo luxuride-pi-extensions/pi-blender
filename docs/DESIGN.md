@@ -582,12 +582,16 @@ Start pi in any project dir. The extension:
   unless `dryRun: false` is passed. With `includeCheckpoints` it also plans old
   run checkpoints against a workspace-wide budget
   (`PI_BLENDER_CHECKPOINT_BUDGET_MB`, default 2048) while keeping each module's
-  newest; with `includeBranches` it plans applied branch copies. Checkpoints are
-  copied with `COPYFILE_FICLONE`, so a reflink-capable filesystem allocates
-  nothing until one side changes, and a failed branch copy falls back to a
-  normal copy. An applied branch file is retired immediately with
-  `branchRetired` on its record: the checkpoint is the revert subject, so the
-  branch is history rather than live state.
+  newest AND previous generation of each module, because compare judges against
+  the previous one and revert may still select it; with `includeBranches` it
+  plans applied branch copies, but never a path a staged or unchanged record
+  still owns. Checkpoints are copied with `COPYFILE_FICLONE`, so a
+  reflink-capable filesystem allocates nothing until one side changes, and a
+  failed branch copy falls back to a normal copy. Byte counts are apparent
+  sizes: a reflink's shared extents are counted in full for both files, which
+  overstates disk use but never understates it. Pruning is the only enforcement
+  point — a run never deletes evidence — and an applied branch file is
+  tombstoned only when the prune actually removes it.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
   `modules/<name>/render.png` (with `resolution`/`samples` parity with

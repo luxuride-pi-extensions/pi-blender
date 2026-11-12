@@ -53,25 +53,26 @@ test("a clone copy is a real independent file", async () => {
 	}
 });
 
-test("the global budget evicts old checkpoints but keeps each module's newest", async () => {
+test("the global budget evicts old checkpoints but keeps each module's newest two", async () => {
 	const root = mkdtempSync(join(tmpdir(), "blend-storage-"));
 	try {
-		const paths = ["a1", "a2", "b1", "b2"].map((name) => join(root, `${name}.blend`));
+		const paths = ["a1", "a2", "a3", "b1", "b2", "b3"].map((name) => join(root, `${name}.blend`));
 		for (const path of paths) writeFileSync(path, Buffer.alloc(100));
 		const runs = [
 			record(join(root, "branch-a1.blend"), "a", 1, 1, { checkpointPath: paths[0] }),
 			record(join(root, "branch-a2.blend"), "a", 2, 2, { checkpointPath: paths[1] }),
-			record(join(root, "branch-b1.blend"), "b", 1, 3, { checkpointPath: paths[2] }),
-			record(join(root, "branch-b2.blend"), "b", 2, 4, { checkpointPath: paths[3] }),
+			record(join(root, "branch-b1.blend"), "b", 1, 3, { checkpointPath: paths[3] }),
+			record(join(root, "branch-b2.blend"), "b", 2, 4, { checkpointPath: paths[4] }),
+			record(join(root, "branch-a3.blend"), "a", 3, 5, { checkpointPath: paths[2] }),
+			record(join(root, "branch-b3.blend"), "b", 3, 6, { checkpointPath: paths[5] }),
 		];
 		const plan = await storage.planBlendStorage(manifest(root, { branchRuns: runs }), {
 			includeCheckpoints: true,
-			budgetBytes: 150,
+			budgetBytes: 450,
 		});
-		assert.equal(plan.checkpoints.length, 1, "one eviction brings the total under budget");
-		assert.equal([paths[0], paths[2]].includes(plan.checkpoints[0].path), true);
-		assert.equal(plan.checkpoints.some((entry) => entry.path === paths[1] || entry.path === paths[3]), false);
-		assert.equal(plan.totalBytes, 100);
+		assert.equal(plan.checkpoints.length, 2, "the oldest of each module is evicted; newest and previous stay");
+		assert.deepEqual(plan.checkpoints.map((entry) => entry.path).sort(), [paths[0], paths[3]].sort());
+		assert.equal(plan.totalBytes, 200);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -117,6 +118,31 @@ test("a branch plan includes applied copies and never staged ones", async () => 
 		});
 		const plan = await storage.planBlendStorage(state, { includeBranches: true });
 		assert.deepEqual(plan.branches.map((entry) => entry.path), [applied]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a staged record sharing the module's single branch file keeps it live", async () => {
+	const root = mkdtempSync(join(tmpdir(), "blend-storage-"));
+	try {
+		const branch = join(root, "branch.blend");
+		writeFileSync(branch, "BLENDER");
+		const state = manifest(root, {
+			branchRuns: [
+				record(branch, "a", 1, 1),
+				record(branch, "a", 2, 2, { status: "staged" }),
+			],
+		});
+		const plan = await storage.planBlendStorage(state, { includeBranches: true });
+		assert.deepEqual(plan.branches, [], "a staged record owns the shared branch.blend");
+		const manifestPath = join(root, "blender-workspace.json");
+		writeFileSync(manifestPath, JSON.stringify(state));
+		assert.equal(await storage.retireAppliedBranches(manifestPath, state), 0);
+		assert.equal(readFileSync(branch, "utf8"), "BLENDER");
+		const next = JSON.parse(readFileSync(manifestPath, "utf8"));
+		assert.equal(next.branchRuns[0].branchRetired, undefined);
+		assert.equal(next.branchRuns[1].branchRetired, undefined);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

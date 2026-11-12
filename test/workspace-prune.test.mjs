@@ -152,6 +152,7 @@ test("protects the render a critique judged even when it has no module", async (
 
 test("reports checkpoint and branch storage by kind, and keeps each module's newest checkpoint", async () => {
   const { workspacePath, manifestPath } = makeWorkspace("blend-storage");
+  const oldest = addFile(workspacePath, "modules/a/runs/00/pre-00.blend", "a0");
   const old = addFile(workspacePath, "modules/a/runs/01/pre-01.blend", "a1");
   const newest = addFile(workspacePath, "modules/a/runs/02/pre-02.blend", "a2");
   const only = addFile(workspacePath, "modules/b/runs/01/pre-01.blend", "b1");
@@ -183,6 +184,7 @@ test("reports checkpoint and branch storage by kind, and keeps each module's new
       renderOutputs: [],
       references: [],
       branchRuns: [
+        run("a", 0, 0, "applied", oldest, join(workspacePath, "modules/a/branch-00.blend")),
         run("a", 1, 1, "applied", old, branch),
         run("a", 2, 2, "applied", newest, join(workspacePath, "modules/a/branch-02.blend")),
         run("b", 1, 3, "applied", only, join(workspacePath, "modules/b/branch-01.blend")),
@@ -195,17 +197,17 @@ test("reports checkpoint and branch storage by kind, and keeps each module's new
   try {
     const dry = await blenderWorkspacePrune({ cwd: workspacePath, workspace: workspacePath, includeCheckpoints: true, includeBranches: true });
     assert.equal(dry.dryRun, true);
-    assert.deepEqual(dry.checkpoints, { files: 1, bytes: 2 }, "only the non-newest checkpoint is over budget");
+    assert.deepEqual(dry.checkpoints, { files: 1, bytes: 2 }, "only the oldest checkpoint is over budget; newest and previous stay");
     assert.equal(dry.branches.files, 1, "the applied branch whose file exists is a candidate");
-    assert.equal(dry.wouldRemove.find((entry) => entry.kind === "checkpoint")?.path, old);
+    assert.equal(dry.wouldRemove.find((entry) => entry.kind === "checkpoint")?.path, oldest);
     assert.equal(dry.wouldRemove.find((entry) => entry.kind === "branch")?.path, branch);
     assert.match(dry.note, /checkpoints 1\/2 bytes/);
     const applied = await blenderWorkspacePrune({ cwd: workspacePath, workspace: workspacePath, dryRun: false, includeCheckpoints: true, includeBranches: true });
     assert.equal(applied.dryRun, false);
     assert.equal(readFileSync(newest, "utf8"), "a2", "the newest checkpoint survives");
     const next = JSON.parse(readFileSync(manifestPath, "utf8"));
-    assert.equal(next.branchRuns[0].branchRetired, true);
-    assert.equal(next.branchRuns[0].retiredAt !== undefined, true);
+    assert.equal(next.branchRuns[1].branchRetired, true);
+    assert.equal(next.branchRuns[1].retiredAt !== undefined, true);
   } finally {
     if (previous === undefined) delete process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB;
     else process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB = previous;

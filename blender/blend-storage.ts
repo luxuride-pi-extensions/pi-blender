@@ -47,13 +47,21 @@ interface CandidateMeta {
 	sequence: number;
 }
 
-function newestPerModule(entries: CandidateMeta[]): Set<string> {
-	const newest = new Map<string, CandidateMeta>();
+/**
+ * The newest and previous generation of each module are both protected:
+ * compare judges against the previous checkpoint, and revert may name any run
+ * still in the history. A budget that evicted the second-newest would break
+ * both while reporting nothing.
+ */
+function newestTwoPerModule(entries: CandidateMeta[]): Set<string> {
+	const newest = new Map<string, CandidateMeta[]>();
 	for (const entry of entries) {
-		const current = newest.get(entry.module);
-		if (!current || entry.sequence > current.sequence) newest.set(entry.module, entry);
+		const list = newest.get(entry.module) ?? [];
+		list.push(entry);
+		list.sort((a, b) => b.sequence - a.sequence);
+		newest.set(entry.module, list.slice(0, 2));
 	}
-	return new Set([...newest.values()].map((entry) => entry.path));
+	return new Set([...newest.values()].flat().map((entry) => entry.path));
 }
 
 function sequenceOf(record: { sequence?: number; iteration: number }): number {
@@ -71,9 +79,21 @@ export async function planBlendStorage(
 	const budget = options.budgetBytes ?? checkpointBudgetBytes();
 	const checkpointMeta: CandidateMeta[] = [];
 	const branchMeta: CandidateMeta[] = [];
+	// There is exactly ONE branch.blend per module, rewritten by every run, so a
+	// path shared with a staged or unchanged record is live work, not history.
+	const liveBranchPaths = new Set(
+		(manifest.branchRuns ?? [])
+			.filter((run) => (run.status === "staged" || run.status === "unchanged") && !run.branchRetired)
+			.map((run) => run.branchPath),
+	);
 	for (const run of manifest.branchRuns ?? []) {
 		checkpointMeta.push({ path: run.checkpointPath, module: run.module, iteration: run.iteration, sequence: sequenceOf(run) });
-		if (run.status === "applied" && !run.branchRetired && run.branchPath !== manifest.blendPath) {
+		if (
+			run.status === "applied" &&
+			!run.branchRetired &&
+			run.branchPath !== manifest.blendPath &&
+			!liveBranchPaths.has(run.branchPath)
+		) {
 			branchMeta.push({ path: run.branchPath, module: run.module, iteration: run.iteration, sequence: sequenceOf(run) });
 		}
 	}
@@ -81,7 +101,7 @@ export async function planBlendStorage(
 		checkpointMeta.push({ path: run.checkpointPath, module: run.name, iteration: run.iteration, sequence: sequenceOf(run) });
 	}
 
-	const protectedCheckpoints = newestPerModule(checkpointMeta);
+	const protectedCheckpoints = newestTwoPerModule(checkpointMeta);
 	const checkpoints: BlendStorageCandidate[] = [];
 	if (options.includeCheckpoints) {
 		const seen = new Set<string>();
@@ -95,6 +115,11 @@ export async function planBlendStorage(
 			all.push({ path: entry.path, bytes: info.size, module: entry.module, iteration: entry.iteration, kind: "checkpoint" });
 		}
 		let total = all.reduce((sum, entry) => sum + entry.bytes, 0);
+		for (const path of protectedCheckpoints) {
+			if (!isInside(manifest.workspacePath, path)) continue;
+			const info = await stat(path).catch(() => undefined);
+			if (info?.isFile()) total += info.size;
+		}
 		const withTimes = await Promise.all(
 			all.map(async (entry) => ({ entry, mtime: (await stat(entry.path).catch(() => undefined))?.mtimeMs ?? 0 })),
 		);
@@ -135,23 +160,22 @@ export async function removeBlendStorage(candidates: BlendStorageCandidate[]): P
  * direct run's `branchPath` IS model.blend, so it is never deleted, only marked.
  */
 export async function retireAppliedBranches(manifestPath: string, manifest: BlenderWorkspaceManifest): Promise<number> {
-	const retired: { path: string; iteration: number; module: string }[] = [];
+	const live = new Set(
+		(manifest.branchRuns ?? [])
+			.filter((run) => run.status === "staged" || run.status === "unchanged")
+			.map((run) => run.branchPath),
+	);
+	const retired: string[] = [];
 	for (const run of manifest.branchRuns ?? []) {
 		if (run.status !== "applied" || run.branchRetired) continue;
+		if (live.has(run.branchPath)) continue;
 		if (run.branchPath !== manifest.blendPath && isInside(manifest.workspacePath, run.branchPath)) {
 			await rm(run.branchPath, { force: true }).catch(() => undefined);
 		}
-		retired.push({ path: run.branchPath, iteration: run.iteration, module: run.module });
+		retired.push(run.branchPath);
 	}
 	if (retired.length === 0) return 0;
-	const at = new Date().toISOString();
-	await updateManifest(manifestPath, (current) => {
-		for (const run of current.branchRuns ?? []) {
-			if (run.status !== "applied" || run.branchRetired) continue;
-			run.branchRetired = true;
-			run.retiredAt = at;
-		}
-	});
+	await markBranchRetired(manifestPath, retired);
 	return retired.length;
 }
 
@@ -175,8 +199,13 @@ export async function markBranchRetired(manifestPath: string, paths: string[]): 
 	const removed = new Set(paths);
 	const at = new Date().toISOString();
 	await updateManifest(manifestPath, (current) => {
+		const live = new Set(
+			(current.branchRuns ?? [])
+				.filter((run) => run.status === "staged" || run.status === "unchanged")
+				.map((run) => run.branchPath),
+		);
 		for (const run of current.branchRuns ?? []) {
-			if (!removed.has(run.branchPath)) continue;
+			if (run.status !== "applied" || !removed.has(run.branchPath) || live.has(run.branchPath)) continue;
 			run.branchRetired = true;
 			run.retiredAt = at;
 		}
