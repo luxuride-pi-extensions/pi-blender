@@ -44,6 +44,7 @@ import type {
 	BranchConflict,
 	PreflightResult,
 	ResolvedCameraPlan,
+	ReviewPacket,
 	ReviewSheetResult,
 	BranchRunOptions,
 	BranchRunResult,
@@ -55,6 +56,7 @@ import {
 	getModuleRunCheckpointName,
 	getModuleScriptPath,
 	getRunDir,
+	getRunDirName,
 	MODULE_PREAMBLE_MARKER,
 	normalizeModuleName,
 	pruneOldModuleRuns,
@@ -111,6 +113,7 @@ import io
 import json
 import math
 import os
+import shutil
 import sys
 import traceback
 
@@ -676,6 +679,71 @@ if exit_code == 0 and render_result and payload.get("reviewSheet"):
     if cameras:
         bpy.context.scene.camera = bpy.data.objects.get(cameras[0]["cameraName"])
 
+review_packet = None
+packet_dir = payload.get("packetDir")
+if exit_code == 0 and packet_dir and render_result:
+    try:
+        os.makedirs(packet_dir, exist_ok=True)
+        current_render = os.path.join(packet_dir, "render.png")
+        shutil.copyfile(render_result["outputPath"], current_render)
+        packet = {
+            "iteration": payload.get("iteration"),
+            "module": module_name,
+            "render": current_render,
+            "cameraPlan": camera_plan_report,
+            "reviewSheet": review_sheet,
+            "preflight": preflight,
+            "stateDigest": state_digest,
+            "changed": changed,
+            "touchedObjects": touched_objects,
+            "applyObjects": sorted(apply_objects),
+            "removedObjects": removed_objects,
+            "reference": None,
+        }
+        panel_files = [{"name": "current", "file": current_render}]
+        current_review = os.path.join(packet_dir, "review.png")
+        if review_sheet and review_sheet.get("path") and os.path.exists(review_sheet["path"]):
+            shutil.copyfile(review_sheet["path"], current_review)
+            panel_files[0]["file"] = current_review
+            review_sheet = dict(review_sheet)
+            review_sheet["path"] = current_review
+            packet["reviewSheet"] = review_sheet
+        previous_dir = payload.get("previousPacketDir")
+        if previous_dir:
+            for candidate in ("review.png", "render.png"):
+                previous_file = os.path.join(previous_dir, candidate)
+                if os.path.exists(previous_file):
+                    panel_files.append({"name": f"previous {payload.get('iteration') - 1}", "file": previous_file})
+                    break
+        reference_path = payload.get("referencePath")
+        if reference_path and os.path.exists(reference_path):
+            reference_copy = os.path.join(packet_dir, "reference" + os.path.splitext(reference_path)[1])
+            shutil.copyfile(reference_path, reference_copy)
+            panel_files.append({"name": "reference", "file": reference_copy})
+            packet["reference"] = {"path": reference_copy, "caption": payload.get("referenceCaption")}
+        compare_path = None
+        # A reference is not a baseline: on a first generation the sheet would
+        # claim a photograph is iteration N-1. Compose only once there is a
+        # previous generation to compare against.
+        if len(panel_files) >= 2 and any(panel["name"].startswith("previous") for panel in panel_files):
+            compare_path = compose_review_sheet(panel_files, os.path.join(packet_dir, "compare.png"), columns=len(panel_files))
+            compare_path = compare_path["path"]
+        packet["compare"] = compare_path
+        packet["panels"] = panel_files
+        with open(os.path.join(packet_dir, "packet.json"), "w", encoding="utf-8") as handle:
+            json.dump(packet, handle, indent=2)
+        review_packet = {
+            "dir": packet_dir,
+            "renderPath": current_render,
+            "reviewPath": current_review if os.path.exists(current_review) else None,
+            "comparePath": compare_path,
+            "previousDir": previous_dir,
+            "referencePath": reference_copy if packet["reference"] else None,
+        }
+    except Exception as exc:
+        # A packet is evidence; failing to store it must not discard the run.
+        review_packet = {"dir": packet_dir, "error": str(exc)}
+
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
     "stdout": stdout_buffer.getvalue(),
@@ -697,6 +765,7 @@ print(json.dumps({
     "cameraPlan": camera_plan_report,
     "preflight": preflight,
     "reviewSheet": review_sheet,
+    "reviewPacket": review_packet,
     "render": render_result,
     "renderError": render_error,
 }))
@@ -742,6 +811,8 @@ interface BranchRunPayload {
 	renderError: string | null;
 	/** The multi-panel sheet, when the run was asked for one. */
 	reviewSheet: ReviewSheetResult | null;
+	/** Stored visual evidence for this generation. */
+	reviewPacket: ReviewPacket | null;
 }
 
 interface BranchRenderPayload {
@@ -904,6 +975,18 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// Ownership is read from the manifest before the run, so the digest subject
 	// survives a script that changes nothing this time.
 	const priorOwnership = collectModuleOwnership(manifest, moduleName);
+	// A packet belongs to the RUN, not to the applied generation: the critic
+	// reads it before the apply, and an unapplied branch still has a picture
+	// worth comparing against. So the previous packet is the previous branch
+	// run, applied or not.
+	const previousRun = [...(manifest.branchRuns ?? [])]
+		.filter((run) => run.module === moduleName && (run.sequence ?? run.iteration) < iteration)
+		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration))[0];
+	const packetDir = join(moduleDir, "iterations", getRunDirName(iteration));
+	const previousPacketDir = previousRun ? join(moduleDir, "iterations", getRunDirName(previousRun.iteration)) : null;
+	const reference = options.referenceId
+		? (manifest.references ?? []).find((entry) => entry.id === options.referenceId)
+		: undefined;
 	let payload: BranchRunPayload;
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
@@ -918,6 +1001,11 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				runDir,
 				scriptPath: effectiveScriptPath,
 				moduleName,
+				iteration,
+				packetDir,
+				previousPacketDir,
+				referencePath: reference?.path ?? null,
+				referenceCaption: reference?.caption ?? null,
 				// The generated run script is executed as a string, not as a file
 				// in the assets dir, so nothing about sys.path comes for free and
 				// the shared fingerprint module has to be pointed at explicitly.
@@ -1041,6 +1129,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
 		reviewSheet,
+		reviewPacket: payload.reviewPacket ?? undefined,
 	};
 
 	await updateManifest(
@@ -1092,6 +1181,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		cameraPlan: payload.cameraPlan,
 		preflight: payload.preflight ?? undefined,
 		reviewSheet: payload.reviewSheet ?? undefined,
+		reviewPacket: payload.reviewPacket ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		warnings,

@@ -128,6 +128,7 @@ test("module_run names the camera options only the headless path honours", () =>
 		"cameraDistance",
 		"reviewSheet",
 		"forceRender",
+		"referenceId",
 		"resolution",
 		"samples",
 		"timeoutSeconds",

@@ -720,6 +720,12 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	referenceId: Type.Optional(
+		Type.String({
+			description:
+				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -753,6 +759,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
 		forceRender: params.forceRender,
+		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -859,6 +866,12 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	referenceId: Type.Optional(
+		Type.String({
+			description:
+				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+		}),
+	),
 	resolution: Type.Optional(
 		Type.Object({
 			x: Type.Number({ description: "Render width in pixels." }),
@@ -892,6 +905,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
 		forceRender: params.forceRender,
+		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
 		timeoutSeconds: params.timeoutSeconds,
@@ -2093,10 +2107,12 @@ export const blenderCompareTool: CoreToolDefinition = {
 				type: "text",
 				text: [
 					`Comparison: ${result.montagePath}`,
-					`Baseline: ${result.labels.baseline} = ${result.baseline.blendPath}`,
+					result.baseline.blendPath
+						? `Baseline: ${result.labels.baseline} = ${result.baseline.blendPath}`
+						: `Baseline: ${result.labels.baseline}`,
 					`Current: ${result.labels.current}`,
 					`Views: ${result.views.join(", ")} (${result.layout.columns}x${result.layout.rows} of ${result.layout.panelWidth}x${result.layout.panelHeight})`,
-					`Framed: ${result.subject.join(", ")}`,
+					result.subject.length > 0 ? `Framed: ${result.subject.join(", ")}` : undefined,
 					missing.length > 0
 						? `Baseline is missing ${missing.join(", ")} — it predates those objects, so their absence in the ${result.labels.baseline} panels is not a render fault.`
 						: undefined,
@@ -2128,7 +2144,7 @@ export const blenderGetPythonApiDocsTool: CoreToolDefinition = {
 			"The bpy identifier to look up (e.g. 'bpy.types.Modifier', 'bpy.ops.mesh.primitive_uv_sphere_add'), or a wildcard query (e.g. 'bpy.ops.mesh.*', 'bpy.types.*') to list available members.",
 	}),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderGetPythonApiDocs({
 		identifier: params.identifier,
 	});
@@ -2162,7 +2178,7 @@ export const blenderSearchApiDocsTool: CoreToolDefinition = {
 		}),
 	),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderSearchApiDocs({
 		query: params.query,
 		limit: params.limit,
@@ -2197,7 +2213,7 @@ export const blenderSearchManualDocsTool: CoreToolDefinition = {
 		}),
 	),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderSearchManualDocs({
 		query: params.query,
 		limit: params.limit,
@@ -2226,7 +2242,7 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 		description: "The unique job identifier returned when the deferred job was dispatched.",
 	}),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderJobStatus({ jobId: params.jobId });
 	return {
 		content: [{ type: "text", text: formatJsonResult(result) }],

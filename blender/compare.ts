@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { requestLiveBlenderCompare } from "./bridge.js";
@@ -6,6 +6,7 @@ import { dispatchDeferredJob } from "./jobs.js";
 import { normalizeViews } from "./montage.js";
 import type { CompareOptions, CompareResult, DeferredJobHandle } from "./types.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
+import { decodePng } from "./png.js";
 
 /**
  * Two generations of one subject on one sheet, labelled, framed identically.
@@ -46,8 +47,19 @@ export async function blenderCompare(options: CompareOptions): Promise<CompareRe
 
 async function executeCompare(options: CompareOptions): Promise<CompareResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
-	const views = normalizeViews(options.views ?? []);
 	const moduleDir = join(manifest.workspacePath, "modules", options.moduleName);
+
+	// A stored packet already holds the current and previous pictures plus the
+	// plan they were taken with. When the caller asked for the default
+	// comparison, composing those files is the same sheet without a Blender
+	// process; an explicit baseline or view list still needs a fresh render.
+	// This has to run BEFORE normalizeViews, which refuses an empty list — the
+	// packet's sheet already has the views it was rendered with.
+	if (!options.baselineBlendPath && (options.views ?? []).length === 0) {
+		const stored = storedPacketComparison(options, manifest);
+		if (stored) return stored;
+	}
+	const views = normalizeViews(options.views ?? []);
 
 	// Labels name the ITERATION rather than before/after, because a sheet is
 	// read later than it is made — usually next to a third render — and
@@ -105,6 +117,72 @@ async function executeCompare(options: CompareOptions): Promise<CompareResult> {
 
 	await writeFile(join(iterationDir, "compare.json"), JSON.stringify(result, null, 2), "utf-8");
 	return result;
+}
+
+/**
+ * The comparison a completed packet already contains.
+ *
+ * The packet's panels were rendered with the same plan and stored beside the
+ * numbers that explain them, so re-rendering two checkpoints to reconstruct the
+ * same picture would spend a Blender start to arrive at a sheet already on disk.
+ * Only the default comparison qualifies: a caller naming a baseline or a view
+ * is asking a question the packet was not built to answer.
+ */
+function storedPacketComparison(
+	options: CompareOptions,
+	manifest: Awaited<ReturnType<typeof loadWorkspaceManifest>>,
+): CompareResult | null {
+	const runs = (manifest.branchRuns ?? [])
+		.filter((run) => run.module === options.moduleName && run.reviewPacket?.comparePath)
+		.sort((a, b) => (b.sequence ?? b.iteration) - (a.sequence ?? a.iteration));
+	const current = runs[0];
+	const packet = current?.reviewPacket;
+	if (!current || !packet?.comparePath || !packet.dir || !existsSync(packet.comparePath)) return null;
+	let record: { panels?: { name: string; file: string }[]; cameraPlan?: { shots?: unknown[] } };
+	try {
+		record = JSON.parse(readFileSync(join(packet.dir, "packet.json"), "utf-8"));
+	} catch {
+		return null;
+	}
+	const panels = record.panels ?? [];
+	const previousPanel = panels.find((panel) => panel.name.startsWith("previous"))?.file;
+	if (!previousPanel) return null;
+	const latestSequence = Math.max(
+		...[...(manifest.branchRuns ?? []), ...(manifest.moduleRuns ?? [])]
+			.filter((run) => ("module" in run ? run.module : run.name) === options.moduleName)
+			.map((run) => run.sequence ?? run.iteration),
+	);
+	if (current.sequence !== latestSequence) return null;
+	const image = decodePng(readFileSync(packet.comparePath));
+	const previousIteration = Number(
+		packet.previousDir?.match(/iterations\/(\d+)/)?.[1] ?? Math.max(1, current.iteration - 1),
+	);
+	const baselineLabel = `ITERATION ${previousIteration}`;
+	const currentLabel = `ITERATION ${current.iteration}`;
+	return {
+		workspacePath: manifest.workspacePath,
+		manifestPath: manifest.manifestPath,
+		montagePath: packet.comparePath,
+		panelPaths: panels.map((panel) => panel.file),
+		views: ["stored"],
+		layout: {
+			panelWidth: 640,
+			panelHeight: 480,
+			aspect: 640 / 480,
+			columns: panels.length,
+			rows: 1,
+		},
+		subject: [],
+		framing: { fromUnion: true, family: "orbit", center: [0, 0, 0], radius: 0, distance: 0, views: [] },
+		labels: { baseline: baselineLabel, current: currentLabel },
+		baseline: {
+			blendPath: "",
+			panelPaths: previousPanel ? [previousPanel] : [],
+			missingSubjects: [],
+			usedItsOwnExtent: false,
+		},
+		note: "Composed from the stored review packets; no Blender process was spawned. Panels are ordered current, previous, then reference.",
+	};
 }
 
 /**
