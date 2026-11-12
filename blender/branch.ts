@@ -24,7 +24,7 @@
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
-import { copyBlendFile, settleBlendStorage } from "./blend-storage.js";
+import { copyBlendFile } from "./blend-storage.js";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
@@ -1250,7 +1250,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		},
 		{ signal: options.signal },
 	);
-	await settleBlendStorage(manifest.manifestPath, await loadWorkspaceManifest(options.cwd, options.workspace).catch(() => manifest));
 
 	return {
 		workspacePath: manifest.workspacePath,
@@ -1863,7 +1862,6 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		}
 	}, { signal: options.signal });
 
-	await settleBlendStorage(manifest.manifestPath, await loadWorkspaceManifest(options.cwd, options.workspace).catch(() => manifest));
 
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an

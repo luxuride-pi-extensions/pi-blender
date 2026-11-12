@@ -54,14 +54,21 @@ interface CandidateMeta {
  * both while reporting nothing.
  */
 function newestTwoPerModule(entries: CandidateMeta[]): Set<string> {
-	const newest = new Map<string, CandidateMeta[]>();
+	// Dedupe by path first: a branch run and its apply companion record the
+	// SAME checkpoint at the same sequence, so taking two records would protect
+	// one file twice and leave the real previous generation evictable.
+	const byModule = new Map<string, Map<string, number>>();
 	for (const entry of entries) {
-		const list = newest.get(entry.module) ?? [];
-		list.push(entry);
-		list.sort((a, b) => b.sequence - a.sequence);
-		newest.set(entry.module, list.slice(0, 2));
+		const byPath = byModule.get(entry.module) ?? new Map<string, number>();
+		byPath.set(entry.path, Math.max(byPath.get(entry.path) ?? 0, entry.sequence));
+		byModule.set(entry.module, byPath);
 	}
-	return new Set([...newest.values()].flat().map((entry) => entry.path));
+	const protectedPaths = new Set<string>();
+	for (const byPath of byModule.values()) {
+		const ordered = [...byPath.entries()].sort((a, b) => b[1] - a[1]);
+		for (const [path] of ordered.slice(0, 2)) protectedPaths.add(path);
+	}
+	return protectedPaths;
 }
 
 function sequenceOf(record: { sequence?: number; iteration: number }): number {
@@ -171,26 +178,12 @@ export async function retireAppliedBranches(manifestPath: string, manifest: Blen
 		if (live.has(run.branchPath)) continue;
 		if (run.branchPath !== manifest.blendPath && isInside(manifest.workspacePath, run.branchPath)) {
 			await rm(run.branchPath, { force: true }).catch(() => undefined);
+			retired.push(run.branchPath);
 		}
-		retired.push(run.branchPath);
 	}
 	if (retired.length === 0) return 0;
 	await markBranchRetired(manifestPath, retired);
 	return retired.length;
-}
-
-/** Keep the global checkpoint budget bounded after a run. */
-export async function enforceCheckpointBudget(manifest: BlenderWorkspaceManifest): Promise<number> {
-	const plan = await planBlendStorage(manifest, { includeCheckpoints: true, includeBranches: false });
-	if (plan.checkpoints.length === 0) return 0;
-	await removeBlendStorage(plan.checkpoints);
-	return plan.checkpoints.length;
-}
-
-/** Retire applied branches and evict checkpoints over budget, after a merge. */
-export async function settleBlendStorage(manifestPath: string, manifest: BlenderWorkspaceManifest): Promise<void> {
-	await retireAppliedBranches(manifestPath, manifest);
-	await enforceCheckpointBudget(manifest);
 }
 
 /** Tombstone exactly the branch records whose files a prune removed. */

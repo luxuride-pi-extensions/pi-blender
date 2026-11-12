@@ -66,12 +66,16 @@ test("the global budget evicts old checkpoints but keeps each module's newest tw
 			record(join(root, "branch-a3.blend"), "a", 3, 5, { checkpointPath: paths[2] }),
 			record(join(root, "branch-b3.blend"), "b", 3, 6, { checkpointPath: paths[5] }),
 		];
-		const plan = await storage.planBlendStorage(manifest(root, { branchRuns: runs }), {
+		// The default path writes a branch record and an apply companion with
+		// the SAME checkpoint; protecting two records would protect one file twice.
+		const companion = { name: "a", iteration: 3, sequence: 5, checkpointPath: paths[2], status: "ok" };
+		const plan = await storage.planBlendStorage(manifest(root, { branchRuns: runs, moduleRuns: [companion] }), {
 			includeCheckpoints: true,
-			budgetBytes: 450,
+			budgetBytes: 250,
 		});
 		assert.equal(plan.checkpoints.length, 2, "the oldest of each module is evicted; newest and previous stay");
 		assert.deepEqual(plan.checkpoints.map((entry) => entry.path).sort(), [paths[0], paths[3]].sort());
+		assert.equal(plan.checkpoints.some((entry) => entry.path === paths[1]), false, "the previous generation stays");
 		assert.equal(plan.totalBytes, 200);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -94,13 +98,13 @@ test("applied copies are retired with a tombstone and staged work is untouched",
 			],
 		});
 		writeFileSync(manifestPath, JSON.stringify(state));
-		assert.equal(await storage.retireAppliedBranches(manifestPath, state), 2);
+		assert.equal(await storage.retireAppliedBranches(manifestPath, state), 1);
 		await assert.rejects(stat(applied));
 		assert.equal(readFileSync(staged, "utf8"), "BLENDER");
 		assert.equal(readFileSync(model, "utf8"), "BLENDER", "model.blend is never deleted");
 		const next = JSON.parse(readFileSync(manifestPath, "utf8"));
 		assert.equal(next.branchRuns[0].branchRetired, true);
-		assert.equal(next.branchRuns[2].branchRetired, true);
+		assert.equal(next.branchRuns[2].branchRetired, undefined, "model.blend is never deleted or tombstoned");
 		assert.equal(next.branchRuns[1].branchRetired, undefined);
 	} finally {
 		await rm(root, { recursive: true, force: true });
