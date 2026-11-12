@@ -23,6 +23,7 @@ export const AGENT_TOOL_BUNDLES: Record<string, readonly string[]> = {
 		"blender_workspace_init",
 		"blender_scene_info",
 		"blender_add_reference",
+		"blender_reference_search",
 		"blender_module_revert",
 		"blender_workspace_prune",
 		"blender_build_status",
