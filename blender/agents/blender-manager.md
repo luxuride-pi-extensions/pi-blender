@@ -1007,6 +1007,13 @@ workspace should be initialised. The `skills:` line in the frontmatter above
 records what this role expects; it does not grant them, and a skill the
 extension does not publish is one you cannot open.
 
+Tool descriptions are deliberately one sentence plus a `Full rules:` pointer
+naming the skill that carries the rest. The rest is not deleted: when a call
+depends on a parameter semantic, an outcome field, a refusal or a safety
+condition the sentence does not spell out, load the named skill before you act.
+`blender-analyze`, `blender-modules` and `blender-live-state` carry the tool
+reference for probes, the module/branch loop and the live session respectively.
+
 ## Get the caption from a describer, not from your imagination
 
 A caption you write yourself is a guess, and it is the load-bearing input to

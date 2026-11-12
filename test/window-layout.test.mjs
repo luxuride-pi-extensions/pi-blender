@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,13 +21,11 @@ const designSource = readFileSync(new URL("../docs/DESIGN.md", import.meta.url),
 const bridgeSource = readFileSync(new URL("../blender/bridge.ts", import.meta.url), "utf8");
 
 function toolDescription(name) {
-	const start = toolsSource.indexOf(`name: "${name}"`);
-	assert.notEqual(start, -1, `${name} is not registered in index.ts`);
-	const from = toolsSource.indexOf("description:", start);
-	assert.notEqual(from, -1, `${name} has no description`);
-	const end = toolsSource.indexOf('",', from);
-	assert.notEqual(end, -1, `${name}'s description never closes`);
-	return toolsSource.slice(from, end);
+	const skill = readFileSync(new URL("../blender/skills/blender-live-state/SKILL.md", import.meta.url), "utf8");
+	const start = skill.indexOf(`### ${name}`);
+	assert.notEqual(start, -1, `${name} is not documented in blender-live-state`);
+	const end = skill.indexOf("\n### ", start + 4);
+	return skill.slice(start, end === -1 ? undefined : end);
 }
 
 test("blender_window_layout is registered with annotations", () => {

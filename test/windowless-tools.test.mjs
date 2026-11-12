@@ -13,25 +13,17 @@
 // short of reading the description can show whether it is still made.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const sourcePath = existsSync(new URL("../core/tools.ts", import.meta.url))
-	? "../core/tools.ts"
-	: "../index.ts";
-const indexSource = readFileSync(new URL(sourcePath, import.meta.url), "utf8");
+const skillSource = readFileSync(new URL("../blender/skills/blender-live-state/SKILL.md", import.meta.url), "utf8");
 
-/** One tool's `description:` string, joined across its continuation lines. */
+/** One tool's moved description, as the model reads it in the live-state skill. */
 function toolDescription(name) {
-	const start = indexSource.indexOf(`name: "${name}"`);
-	assert.notEqual(start, -1, `${name} is not found in ${sourcePath}`);
-	const from = indexSource.indexOf("description:", start);
-	assert.notEqual(from, -1, `${name} has no description`);
-	// The description ends at the first line that is only the closing quote and
-	// semicolon, which is how every description in this file is written.
-	const end = indexSource.indexOf('",', from);
-	assert.notEqual(end, -1, `${name}'s description never closes`);
-	return indexSource.slice(from, end);
+	const start = skillSource.indexOf(`### ${name}`);
+	assert.notEqual(start, -1, `${name} is not documented in blender-live-state`);
+	const next = skillSource.indexOf("\n### ", start + 4);
+	return skillSource.slice(start, next === -1 ? undefined : next);
 }
 
 test("neither windowed-only tool tells an agent to run a slash command", () => {

@@ -102,3 +102,154 @@ Workspace: outputs/robot
 Queue, in order: [{module: "body", owns: ["robot_body"]}, {module: "head", owns: ["robot_head"]}, {module: "arm_l", owns: ["robot_arm_l"]}]
 Record the scene with blender_scene_info {categories: ["objects"]} first, run each module with blender_module_run in the order given, and diff the scene after each run. Report contamination, do not repair it.
 ```
+
+## Tool semantics moved out of the schemas
+
+The tool and parameter descriptions below are the full text that used to live in
+`core/tools.ts`. The schema keeps each first sentence for tool selection; load
+this skill when you need the precedence rules, failure modes and definitions.
+
+### blender_workspace_init
+
+Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available. When sourceBlend is given, the source scene is adopted wholesale as model.blend: this discards the default studio template rig and camera (StudioCamera, StudioKey, StudioFill, StudioRim), so the workspace inherits whatever lighting and cameras exist in the source file, or has none if none were defined.
+
+- **workspace** — Explicit workspace path. Relative paths resolve from the current working directory.
+- **sourceBlend** — Optional source .blend file to copy into the workspace as the starting model.blend. WARNING: adopting an external source scene wholesale discards the default studio lighting rig (StudioKey, StudioFill, StudioRim) and studio camera; the workspace inherits the source file's existing lighting and cameras, or lacks them entirely if the source defined none.
+- **template** — Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender's startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since adopting a source blend wholesale discards the studio rig/lighting.
+- **continueExisting** — When true, require the workspace to exist already instead of creating a new one.
+
+### blender_module_run
+
+Run a workspace module: checkpoint model.blend as the run found it to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode "live-session"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode "headless-apply"), which is the normal case since /blender no longer opens a window. A branch staged this way can be merged with other staged branches in one conflict-checked pass by blender_branch_apply, which the manager holds. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — Module name (lowercase letters, digits, dashes). Resolves to modules/<name>/script.py.
+- **render** — Capture a live camera render to modules/<name>/render.png after the run.
+- **view** — Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.
+- **cameraProfile** — Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.
+- **frontAxis** — Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot. A live run reports that it ignored this.
+- **cameraShots** — Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered. A live run reports that it ignored this.
+- **frameSubject** — Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body. A live run reports that it ignored this.
+- **cameraDistance** — Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject. A live run reports that it ignored this.
+- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
+- **direct** — Headless path only. Save model.blend in place instead of writing a branch and applying it, halving the Blender processes for a model no one else is editing. Other staged branches are not merged. Default false.
+- **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
+- **referenceId** — Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.
+- **resolution.x** — Render width in pixels.
+- **resolution.y** — Render height in pixels.
+- **resolution.percentage** — Resolution percentage (default 100).
+- **samples** — Sample count override for Cycles renders.
+- **timeoutSeconds** — Execution timeout in seconds.
+
+### blender_branch_run
+
+Run a workspace module HEADLESSLY against its own private copy of model.blend (modules/<name>/branch.blend), then stage the result for a later blender_branch_apply. No live Blender session is touched and no bridge lock is taken, so several modules can run at once — the concurrency ceiling is the headless run budget, not the one live session. Reports exactly which objects and materials the script changed, which is what the apply uses to bring back only this module's work instead of reverting its siblings'. A failed run leaves model.blend untouched and there is nothing to revert.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — Module name (lowercase letters, digits, dashes). Resolves to modules/<name>/script.py.
+- **render** — Render the BRANCH (not model.blend) to modules/<name>/render.png for critique. Defaults to true.
+- **view** — Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.
+- **cameraProfile** — Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.
+- **frontAxis** — Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.
+- **cameraShots** — Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered.
+- **frameSubject** — Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.
+- **cameraDistance** — Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.
+- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
+- **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
+- **referenceId** — Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.
+- **resolution.x** — Render width in pixels.
+- **resolution.y** — Render height in pixels.
+- **resolution.percentage** — Resolution percentage (default 100).
+- **samples** — Sample count override for Cycles renders.
+- **timeoutSeconds** — Execution timeout in seconds.
+
+### blender_branch_apply
+
+Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. The whole batch is pre-flighted first, merged by one headless Blender process and saved once, so concurrent module runs cannot interleave through a half-applied fan-out. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. A branch whose blend is missing from disk is reported in `missing` and does not stop the rest of the batch. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **modules** — Module names to apply, in any order — they are applied in the order their branch runs were staged. Every one must have a staged branch run.
+- **timeoutSeconds** — Timeout for the whole apply batch in seconds.
+
+### blender_module_revert
+
+Revert model.blend to a module's recorded pre-run checkpoint and reload it in the live Blender session. Uses the manifest's moduleRuns history, so it reverts the exact state before that run. Refuses when later module runs also modified the blend (pass force: true to accept discarding them). The reload DISCARDS any unsaved changes currently open in the live Blender UI, so save unrelated work in the UI before reverting.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — Module name to revert.
+- **iteration** — Revert this specific recorded run instead of the module's latest one.
+- **force** — Allow the revert even though later module runs also mutated the blend.
+
+### blender_log_critique
+
+Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric: five 0-2 craft axes plus a 0-2 category-validity axis, a 0-2 view adequacy that gates whether the judgement counts at all, and an optional rejectReason. Resolves a verdict (continue / present / reject) and records it, so blender_rank_assets can select across a batch without re-reading prose.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — The module this critique judged. Names the part the render shows, and keeps each module's 5-iteration budget its own rather than shared across a fan-out.
+- **iteration** — Optional iteration number, for a run whose number differs from the workspace's latest. Omit it and the latest is used.
+- **accuracy** — Accuracy score from 0 to 2.
+- **geometry** — Geometry and proportions score from 0 to 2.
+- **materials** — Materials and appearance score from 0 to 2.
+- **completeness** — Completeness score from 0 to 2.
+- **quality** — Quality score from 0 to 2.
+- **validity** — Is this a valid instance of the CATEGORY at all -- does it read as a mug, not as a well-formed object carrying a brief's worth of mug features? Separate from accuracy, which asks whether it matches its brief. Zero means the category is not satisfied, and no amount of polish recovers that.
+- **viewAdequacy** — Can the asset be judged FROM this render? 2 = the whole subject and its silhouette are visible, 1 = partly occluded or ambiguous, 0 = the render does not show the subject. Scored because it gates the JUDGEMENT, not the asset: an ugly render of a good mesh is still a good sample, but a render that cannot show the object makes every other score meaningless, so an unusable view never presents.
+- **viewNote** — Free text on the framing, coverage, or perspective, kept because the score cannot say why.
+- **issues** — Concrete problems found in the current render or scene.
+- **nextAction** — Either a fix to attempt next, or "present to user" when the result is good enough.
+- **rejectReason** — Reject the asset outright, whatever it scored. Use this when the ATTEMPT was wrong -- the category is unsatisfiable from this brief, or the structure is fundamentally not what was asked for -- rather than merely unpolished. Distinct from a low score on purpose: a scored failure is a finished attempt worth keeping the record of, and this says it should never have been made.
+
+### blender_iteration_state
+
+What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict with its six axis scores, blocking subset, issues and next action, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — The module to report on. One model's history cannot be summarised for all of them, and the budget, digest and waste guard are all per-module.
+
+### blender_record_iteration_fact
+
+Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold, and a crash. A fact without a record is re-measured by every fresh critic, which is how a loop spends three renders learning that the handle is the wrong thickness. Record what the probe actually returned and the tool that returned it, so the next critic can re-check the number rather than trusting a sentence. Re-recording the same statement updates it rather than duplicating it; the newest 24 facts per module are kept. Read blender_iteration_state to see what is already known before measuring anything.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **moduleName** — The module the fact is about.
+- **statement** — The measured finding itself, as a checkable sentence: "The handle is 12mm across, under the 18mm a hand needs". Not "the handle looks thin" -- that is a judgement, and the critic makes those.
+- **source** — Which tool produced it, with the identifying detail: "blender_geometry_probe, Mug vs MugHandle pair distance", "blender_image_probe, modules/mug/render.png". A fact with no source is an assertion.
+- **iteration** — The run the measurement belongs to. Defaults to nothing; supply it when the fact came from a specific run.
+
+### blender_job_status
+
+Check the state, execution progress, and result of a deferred background Blender job (such as a long render, montage, or compare dispatched with async: true). Reports state ('running', 'completed', 'failed' or 'cancelled') along with timestamps and full result payload, failure error or cancellation reason.
+
+- **jobId** — The unique job identifier returned when the deferred job was dispatched.
+
+### blender_workspace_prune
+
+Report or remove old iteration renders that no module's newest render and no current critique depends on. With includeCheckpoints/includeBranches it also reports old whole-file checkpoints over the global budget and applied branch copies, each with exact files and bytes. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. The newest AND previous checkpoint of every module are always kept: compare and revert both need them. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.
+
+- **workspace** — Explicit workspace path.
+- **dryRun** — Report what would be removed without deleting anything. Defaults to true.
+- **keepIterations** — How many of the newest iterations to keep. Default 2, minimum 1.
+- **includeCheckpoints** — Also plan old run checkpoints over the global budget, keeping each module's newest and previous generation.
+- **includeBranches** — Also plan applied branch copies whose checkpoint is the revert subject.
+
+### blender_job_cancel
+
+Cancel a deferred Blender job that is still running (render, montage or compare dispatched with async: true). The job is recorded as cancelled with the reason and its work is aborted when this process started it: a local process is stopped, and a queued live-viewport request is withdrawn best effort. A request the live UI already picked up cannot be interrupted. A completed or failed job is reported as such; cancelling an already-cancelled job returns its record.
+
+- **jobId** — The unique job identifier returned when the deferred job was dispatched.
+- **reason** — Why the job is being cancelled, stored on the record so a later reader knows this was a decision, not a crash.
+
+### blender_build_status
+
+Read the build contract's current stage and history. The stage advances only when the extension observes the work: a branch run stages, a batch apply merges, a logged critique critiques, and the finalizer advances to finalized with evidence. Export refuses a build that never reached finalized unless allowUnfinalized is passed.
+
+- **workspace** — Explicit workspace path for the Blender task.
+
+### blender_build_advance
+
+Advance the build contract to a stage the extension cannot observe by itself, with evidence. The finalizer uses it to move a merged, critiqued build to finalized; intake/planned may be recorded by the manager. A second finalize is a duplicate record rather than a second build; the export gate still refuses an unfinalized export.
+
+- **workspace** — Explicit workspace path for the Blender task.
+- **stage** — Stage to record. Normally finalized.
+- **evidence** — What was checked or produced for this stage.
+- **actor** — Who performed it. Defaults to blender-manager.

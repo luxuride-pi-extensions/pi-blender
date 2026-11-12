@@ -67,17 +67,17 @@ export const blenderWorkspaceInitTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and auto-open that blend in the live Blender session when available. When sourceBlend is given, the source scene is adopted wholesale as model.blend: this discards the default studio template rig and camera (StudioCamera, StudioKey, StudioFill, StudioRim), so the workspace inherits whatever lighting and cameras exist in the source file, or has none if none were defined.",
+	'Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
-			description: "Explicit workspace path. Relative paths resolve from the current working directory.",
+			description: 'Explicit workspace path.',
 		}),
 	),
 	sourceBlend: Type.Optional(
 		Type.String({
 			description:
-				"Optional source .blend file to copy into the workspace as the starting model.blend. WARNING: adopting an external source scene wholesale discards the default studio lighting rig (StudioKey, StudioFill, StudioRim) and studio camera; the workspace inherits the source file's existing lighting and cameras, or lacks them entirely if the source defined none.",
+				'Optional source .blend file.',
 		}),
 	),
 	template: Type.Optional(
@@ -88,14 +88,14 @@ export const blenderWorkspaceInitTool: CoreToolDefinition = {
 			],
 			{
 				description:
-					'Workspace template. "studio" (recommended) starts an empty file with a camera, a three-point light rig, a neutral world and EEVEE at 1200x900, so the first worker can model immediately instead of building a shot first. "blank" saves Blender\'s startup file as-is, with no camera or lights. Ignored when sourceBlend is given, since adopting a source blend wholesale discards the studio rig/lighting.',
+					'Workspace template.',
 				default: "studio",
 			},
 		),
 	),
 	continueExisting: Type.Optional(
 		Type.Boolean({
-			description: "When true, require the workspace to exist already instead of creating a new one.",
+			description: 'When true, require.',
 			default: false,
 		}),
 	),
@@ -127,43 +127,43 @@ export const blenderExecutePythonTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Copy a Blender Python script into a run directory, execute it inside the live bridge-enabled Blender session for the workspace, and persist the updated model.blend so the UI stays in sync. By default the run claims a numbered iteration slot; pass claimIteration=false for throwaway runs so it does not count as progress.",
+	'Copy a Blender Python script into a run directory, execute it inside. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	script_path: Type.String({
 		description:
-			"Path to the existing Blender Python script to snapshot and execute. Use the workspace root script.py.",
+			'Path.',
 	}),
 	saveBefore: Type.Optional(
 		Type.Boolean({
-			description: "If true, copy the current model.blend into the iteration folder before execution.",
+			description: 'If true, copy.',
 			default: false,
 		}),
 	),
 	saveAfter: Type.Optional(
 		Type.Boolean({
-			description: "If true, save the updated Blender scene back to model.blend after execution.",
+			description: 'If true, save.',
 			default: true,
 		}),
 	),
 	claimIteration: Type.Optional(
 		Type.Boolean({
 			description:
-				"If false, run without claiming a numbered iteration_NN slot — the copied script and log still go to a private runs/ad-hoc/<id>/ directory, so nothing clobbers, but the run does not advance latestIteration. Use false for throwaway work such as a camera nudge or a one-off inspection, and true (the default) for a change you would describe as progress. Claiming every ad-hoc run makes the iteration numbers in critique.log stop corresponding to anything readable.",
+				'If false, run without claiming.',
 			default: true,
 		}),
 	),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Execution timeout in seconds.",
+			description: 'Execution timeout in seconds.',
 			default: 120,
 		}),
 	),
 	label: Type.Optional(
 		Type.String({
-			description: "Optional label for the iteration step.",
+			description: 'Optional label for the iteration step.',
 		}),
 	),
 }),
@@ -198,12 +198,12 @@ export const blenderSessionContextTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected objects, viewport state, unsaved changes, and whether another pi session holds the same blend. This is the only source of truth for present-tense Blender state — for 'what is selected', 'update it', 'render from what I'm looking at', or any claim about what Blender currently shows. `blender_scene_info` is NOT that: it reads the last SAVED blend file, so it never sees a worker's in-flight edits or a change made by hand and not saved. Call it before mutating anything. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).",
+	'Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
 			description:
-				"Optional workspace path to compare against the live Blender session. Relative paths resolve from the current working directory.",
+				'Optional workspace path.',
 		}),
 	),
 	include: Type.Optional(
@@ -217,7 +217,7 @@ export const blenderSessionContextTool: CoreToolDefinition = {
 			]),
 			{
 				description:
-					"Optional live session categories to include. Omit to return the full live Blender session context.",
+					'Optional live session categories to include.',
 				uniqueItems: true,
 			},
 		),
@@ -251,52 +251,52 @@ export const blenderWindowLayoutTool: CoreToolDefinition = {
 	openWorldHint: true,
 },
 	description:
-	"Read the live Blender UI window layout, screens, areas, space types, active object, and selection as JSON (zero image token cost), or capture a byte-capped screenshot downscaled with system pixel_size awareness. Any screenshot capture is byte-capped at 500 KB (512,000 bytes) and downscaled honoring context.preferences.system.pixel_size. Window-only: reports layout: null and captured: false with a reason instead of failing when no watch window is open.",
+	'Read the live Blender UI layout and selection as JSON, or capture a byte-capped screenshot. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
 			description:
-				"Optional workspace path for the Blender task. Relative paths resolve from the current working directory.",
+				'Optional workspace path for the Blender task.',
 		}),
 	),
 	format: Type.Optional(
 		Type.Union([Type.Literal("json"), Type.Literal("image")], {
 			description:
-				"Output format: 'json' for zero-cost layout description (default), or 'image' for a byte-capped screenshot.",
+				'Output format: \'json\' for zero-cost layout, or \'image\' to return a PNG.',
 		}),
 	),
 	screenshot: Type.Optional(
 		Type.Boolean({
 			description:
-				"Whether to capture a screenshot (default false). When true, downscales and byte-caps the image at 500 KB.",
+				'Whether to capture a screenshot. Defaults to false.',
 		}),
 	),
 	as_image: Type.Optional(
 		Type.Boolean({
-			description: "Alias for screenshot: true.",
+			description: 'Alias for screenshot: true.',
 		}),
 	),
 	as_json: Type.Optional(
 		Type.Boolean({
 			description:
-				"Return layout and selection as JSON only, asserting no image payload (default true).",
+				'Return layout and selection as JSON only.',
 		}),
 	),
 	area_type: Type.Optional(
 		Type.String({
 			description:
-				"Optional Blender area type to screenshot (e.g. 'VIEW_3D', 'OUTLINER', 'PROPERTIES'). If omitted or 'window', captures the entire window.",
+				'Optional area type to screenshot.',
 		}),
 	),
 	max_bytes: Type.Optional(
 		Type.Number({
 			description:
-				"Maximum file size in bytes for the downscaled screenshot (default 512,000 = 500 KB).",
+				'Maximum screenshot file size in bytes.',
 		}),
 	),
 	output_path: Type.Optional(
 		Type.String({
-			description: "Optional file path where the screenshot PNG will be written.",
+			description: 'Optional screenshot output path.',
 		}),
 	),
 }),
@@ -332,10 +332,10 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects, collections, materials, cameras, lights, render settings, UVs, armatures, textures, paint settings), single-object detail (object_detail), file health (missingFiles, linkedLibraries), or aggregate scene metrics (scene_stats). With `scene_stats`, object counts report Object data-blocks and instance counts report linked duplicates sharing data-blocks plus collection instances separately from unique data-blocks; polycounts and vertex totals reflect un-evaluated base mesh data before modifier stack evaluation; a multi-scene file reports a per-scene breakdown with the combined figure labelled total. Nothing unsaved in the open Blender is visible here — a worker\'s in-flight edits are not on disk yet, and a session that has changed something by hand has not saved it. This is the right tool for the SAVED STATE of a build ("what objects exist", "what materials are assigned"), for per-object detail ("what is this object\'s transform, parent, modifiers"), and for file-health diagnostics ("is this file broken", missing external asset files, direct and indirect linked library trees). For what the UI currently shows — the open file, the selection, the mode, the viewport, unsaved changes, or another session holding the same blend — use `blender_session_context`, which reads the live Blender and is the only source of truth for present-tense state. Prefer a narrow `categories` list such as `["objects"]`, `["materials"]`, `["cameras", "cameraSettings"]`, `["object_detail"]`, or `["missingFiles", "linkedLibraries"]`, or `["scene_stats"]` when you only need one or a few sections. Omit `categories` only when you truly need the full scene info payload. Read-only by construction (see docs/SAFETY.md for full guarantee boundary).',
+'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	categories: Type.Optional(
 		Type.Array(
@@ -361,7 +361,7 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 			]),
 			{
 				description:
-					"Optional scene info categories to inspect. Pass one category to inspect only that section, or pass a short list for a subset. For paint/UV/rig work add `uv`, `textures`, `armatures`, and `paintSettings`. For single object detail add `object_detail` (requires `targetObject`). For blend-file health diagnostics without opening a window, add `missingFiles` (external references missing from disk) and `linkedLibraries` (direct and indirect linked library tree). Pass `scene_stats` for aggregate file metrics (object counts, instance counts, unique data-blocks, per-type breakdown, un-evaluated base mesh polycount/vertex totals, and per-scene render settings) without object detail. Pass `usage_guess` for an orientation heuristic over data-block signals. Content categories describe what is inside the scene; file-health categories report whether external references and link trees on disk are intact. These all describe the last SAVED blend file, not live UI state. Omit `categories` only when you need all available scene info sections.",
+					'Optional scene info categories to inspect.',
 				uniqueItems: true,
 			},
 		),
@@ -369,7 +369,7 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 	targetObject: Type.Optional(
 		Type.String({
 			description:
-				"Optional target object name when inspecting object detail in the saved blend file.",
+				'Optional target object name when.',
 		}),
 	),
 }),
@@ -399,18 +399,18 @@ export const blenderUsageGuessTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Inspect a saved .blend file headlessly (no live UI bridge lock needed) and guess what it is for. Evaluates signals across data-blocks for animation (actions, armatures), rendering (render engines, output paths, compositor), shading (materials, shader node trees, textures), procedural (geometry nodes, procedural modifiers), and modeling (mesh geometry complexity, curves, vertex groups, shape keys, with default cube check). Returns normalized score (0-100) and certainty (0-100) per category along with named contributing signals. If no signals are found in the file, returns zeroed scores rather than guessing a default.",
+	'Inspect a saved .blend file headlessly (no live UI bridge lock needed) and guess what it is for. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
 			description:
-				"Optional workspace path containing model.blend to analyze. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+				'Optional workspace path containing.',
 		}),
 	),
 	blendPath: Type.Optional(
 		Type.String({
 			description:
-				"Optional direct path to a .blend file to analyze headlessly. Relative paths resolve from current working directory. Either workspace or blendPath must be provided.",
+				'Optional direct path.',
 		}),
 	),
 }),
@@ -439,27 +439,27 @@ export const blenderObjectDetailTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Read the workspace blend file as it was last SAVED, and return detailed inspection data for a single object: transforms (with non-uniform scale flag), modifier stack (marking viewport-disabled modifiers), material slots, mesh counts (vertices, edges, polygons/faces), parent and child relationships, and orphan/unlinked-to-scene status. Does not pull the entire scene; payload is bounded to the specified object. Reads the saved blend file headlessly, matching blender_scene_info.',
+	'Read the workspace blend file as it was last SAVED. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	objectName: Type.Optional(
 		Type.String({
 			description:
-				"Name of the object in the saved blend file to inspect.",
+				'Name.',
 		}),
 	),
 	targetObject: Type.Optional(
 		Type.String({
 			description:
-				"Alias for objectName. Name of the object in the saved blend file to inspect.",
+				'Alias for objectName.',
 		}),
 	),
 	name: Type.Optional(
 		Type.String({
 			description:
-				"Alias for objectName. Name of the object in the saved blend file to inspect.",
+				'Alias for objectName.',
 		}),
 	),
 }),
@@ -494,22 +494,22 @@ export const blenderSaveViewTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Save a named render view in the workspace manifest. With source=active-camera, capture the current live Blender UI viewport into a dedicated camera object; otherwise bind the view to an existing camera object. source=active-camera photographs what the UI currently shows, including unsaved edits, so with no window open it reports savedView:null with a reason rather than failing — binding the view to a camera name works headlessly and is the right source when there is no window. Nothing is written to the manifest when the capture is skipped, so a later render cannot pick up a view bound to a camera that was never created.",
+	'Save a named render view in the workspace manifest. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	name: Type.String({
-		description: "Saved view name to store in the workspace manifest.",
+		description: 'Saved view name.',
 	}),
 	source: Type.String({
 		description:
-			'Either "active-camera" to capture the current Blender UI view, or a camera object name already present in the scene.',
+			'Either "active-camera".',
 	}),
 	camera_name: Type.Optional(
 		Type.String({
 			description:
-				'Optional dedicated camera object name to use when source is "active-camera". Defaults to the saved view name.',
+				'Optional dedicated camera object name.',
 		}),
 	),
 }),
@@ -540,14 +540,14 @@ export const blenderRenderTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Render the workspace blend file and write outputs into the current iteration. Use renderMethod=`live` for viewport renders and renderMethod=`background` for normal headless scene renders. Live renders default to camera-based framing with viewportShading=`material-preview`; switch to viewSource=`current-view` only when the user explicitly wants the raw current viewport. Live viewport renders disable overlays automatically so grids, axes, and other viewport clutter are not captured. Background renders are camera-based and use renderEngine overrides such as `eevee`, `cycles`, or `workbench` instead of viewport shading modes.",
+	'Render the workspace blend file and write outputs into the current iteration. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	view: Type.Optional(
 		Type.String({
-			description: 'Optional saved view name, camera name, or "active-camera".',
+			description: 'Optional saved view name, camera name.',
 		}),
 	),
 	resolution: Type.Optional(
@@ -559,25 +559,25 @@ export const blenderRenderTool: CoreToolDefinition = {
 	),
 	samples: Type.Optional(
 		Type.Number({
-			description: "Optional Cycles sample count override.",
+			description: 'Optional Cycles sample count override.',
 		}),
 	),
 	outputName: Type.Optional(
 		Type.String({
-			description: "Output image file name. Defaults to render.png.",
+			description: 'Output image file name.',
 		}),
 	),
 	renderMethod: Type.Optional(
 		Type.Union([Type.Literal("live"), Type.Literal("background")], {
 			description:
-				"How to execute the render. `live` uses the open Blender UI viewport. `background` uses a headless scene render. Defaults to `live`.",
+				'How to execute the render.',
 			default: "live",
 		}),
 	),
 	viewSource: Type.Optional(
 		Type.Union([Type.Literal("camera"), Type.Literal("current-view")], {
 			description:
-				"How to choose the framing. `camera` uses the saved view, explicit camera, or active camera. `current-view` uses the raw current viewport in the live Blender UI. Defaults to `camera`.",
+				'How to choose the framing.',
 			default: "camera",
 		}),
 	),
@@ -591,7 +591,7 @@ export const blenderRenderTool: CoreToolDefinition = {
 			],
 			{
 				description:
-					"Viewport shading mode for live renders only. Defaults to `material-preview`. `solid` uses Workbench-style viewport shading. `rendered` uses the scene render engine interactively.",
+					'Viewport shading mode for live renders only.',
 				default: "material-preview",
 			},
 		),
@@ -599,13 +599,13 @@ export const blenderRenderTool: CoreToolDefinition = {
 	renderEngine: Type.Optional(
 		Type.Union([Type.Literal("eevee"), Type.Literal("cycles"), Type.Literal("workbench")], {
 			description:
-				"Optional render engine override for background renders only. Omit to keep the scene's current engine.",
+				'Optional render engine override.',
 		}),
 	),
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				"If true, dispatch the render as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -642,38 +642,38 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Run a workspace module: checkpoint model.blend as the run found it to modules/<name>/runs/NN/pre-NN.blend, execute modules/<name>/script.py, save the result, and optionally capture a render to modules/<name>/render.png for critique. The run is recorded in the workspace manifest (moduleRuns), so blender_module_revert knows exactly which state it restores. Use one module per object or concern in multi-part tasks. With a window open it runs in the live session (executionMode \"live-session\"); with none, it runs HEADLESSLY against a branch copy and merges the result back (executionMode \"headless-apply\"), which is the normal case since /blender no longer opens a window. A branch staged this way can be merged with other staged branches in one conflict-checked pass by blender_branch_apply, which the manager holds. A headless run reports stateDigest — a content hash of the objects this module owns — plus unchangedSinceLastRun, which is true when the previous run of this module produced the same digest. An iteration that changed nothing produces the same render as the last one, so re-rendering and re-critiquing it buys a verdict you already have: read that flag before spending a critic.",
+	'Run a workspace module: checkpoint model.blend, execute the script, and stage the branch for apply. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			"Module name (lowercase letters, digits, dashes). Resolves to modules/<name>/script.py.",
+			'Module name (lowercase letters, digits, and underscores).',
 	}),
 	render: Type.Optional(
 		Type.Boolean({
-			description: "Capture a live camera render to modules/<name>/render.png after the run.",
+			description: 'Capture.',
 			default: true,
 		}),
 	),
 	view: Type.Optional(
 		Type.String({
 			description:
-			'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
+			'Optional saved view name, camera object.',
 		}),
 	),
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop; a live run reports that it ignored this.",
+				'Headless path only: use-case profile.',
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
 	frontAxis: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot. A live run reports that it ignored this.",
+				'Headless path only.',
 			enum: ["-Y", "+Y", "-X", "+X"],
 		}),
 	),
@@ -695,64 +695,64 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 					"lineup_front",
 				],
 			}),
-			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered. A live run reports that it ignored this." },
+			{ description: 'Headless path only.' },
 		),
 	),
 	frameSubject: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body. A live run reports that it ignored this.",
+				'Headless path only.',
 			enum: ["module", "apply"],
 		}),
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject. A live run reports that it ignored this.",
+			description: 'Headless path only.',
 			minimum: 0,
 		}),
 	),
 	reviewSheet: Type.Optional(
 		Type.Boolean({
 			description:
-				"Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.",
+				'Also render the plan\'s other shots into.',
 			default: false,
 		}),
 	),
 	direct: Type.Optional(
 		Type.Boolean({
 			description:
-				"Headless path only. Save model.blend in place instead of writing a branch and applying it, halving the Blender processes for a model no one else is editing. Other staged branches are not merged. Default false.",
+				'Headless path only.',
 			default: false,
 		}),
 	),
 	forceRender: Type.Optional(
 		Type.Boolean({
 			description:
-				"Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.",
+				'Headless path only.',
 			default: false,
 		}),
 	),
 	referenceId: Type.Optional(
 		Type.String({
 			description:
-				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+				'Reference id whose image.',
 		}),
 	),
 	resolution: Type.Optional(
 		Type.Object({
-			x: Type.Number({ description: "Render width in pixels." }),
-			y: Type.Number({ description: "Render height in pixels." }),
-			percentage: Type.Optional(Type.Number({ description: "Resolution percentage (default 100)." })),
+			x: Type.Number({ description: 'Render width in pixels.' }),
+			y: Type.Number({ description: 'Render height in pixels.' }),
+			percentage: Type.Optional(Type.Number({ description: 'Resolution percentage (default 100).' })),
 		}),
 	),
 	samples: Type.Optional(
 		Type.Number({
-			description: "Sample count override for Cycles renders.",
+			description: 'Sample count override for Cycles renders.',
 		}),
 	),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Execution timeout in seconds.",
+			description: 'Execution timeout in seconds.',
 			default: DEFAULT_MODULE_TIMEOUT_SECONDS,
 		}),
 	),
@@ -797,38 +797,38 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Run a workspace module HEADLESSLY against its own private copy of model.blend (modules/<name>/branch.blend), then stage the result for a later blender_branch_apply. No live Blender session is touched and no bridge lock is taken, so several modules can run at once — the concurrency ceiling is the headless run budget, not the one live session. Reports exactly which objects and materials the script changed, which is what the apply uses to bring back only this module's work instead of reverting its siblings'. A failed run leaves model.blend untouched and there is nothing to revert.",
+	'Run a workspace module HEADLESSLY against its own private copy of model.blend. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			"Module name (lowercase letters, digits, dashes). Resolves to modules/<name>/script.py.",
+			'Module name (lowercase letters, digits, and underscores).',
 	}),
 	render: Type.Optional(
 		Type.Boolean({
-			description: "Render the BRANCH (not model.blend) to modules/<name>/render.png for critique. Defaults to true.",
+			description: 'Render.',
 			default: true,
 		}),
 	),
 	view: Type.Optional(
 		Type.String({
 			description:
-				'Optional saved view name, camera object name, or "active-camera" to render from. Defaults to the active camera.',
+				'Optional saved view name, camera object.',
 		}),
 	),
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only: use-case profile selecting the default camera plan: prop, character, hard_surface, interior, print, paint, or asset_pack. Defaults to prop.",
+				'Headless path only: use-case profile.',
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
 	frontAxis: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only. Which world axis the subject faces: -Y (default), +Y, -X or +X. Declared, not inferred; a wrong guess inverts every shot.",
+				'Headless path only.',
 			enum: ["-Y", "+Y", "-X", "+X"],
 		}),
 	),
@@ -850,57 +850,57 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 					"lineup_front",
 				],
 			}),
-			{ description: "Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered." },
+			{ description: 'Headless path only.' },
 		),
 	),
 	frameSubject: Type.Optional(
 		Type.String({
 			description:
-				"Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.",
+				'Headless path only.',
 			enum: ["module", "apply"],
 		}),
 	),
 	cameraDistance: Type.Optional(
 		Type.Number({
-			description: "Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.",
+			description: 'Headless path only.',
 			minimum: 0,
 		}),
 	),
 	reviewSheet: Type.Optional(
 		Type.Boolean({
 			description:
-				"Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.",
+				'Also render the plan\'s other shots into.',
 			default: false,
 		}),
 	),
 	forceRender: Type.Optional(
 		Type.Boolean({
 			description:
-				"Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.",
+				'Headless path only.',
 			default: false,
 		}),
 	),
 	referenceId: Type.Optional(
 		Type.String({
 			description:
-				"Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.",
+				'Reference id whose image.',
 		}),
 	),
 	resolution: Type.Optional(
 		Type.Object({
-			x: Type.Number({ description: "Render width in pixels." }),
-			y: Type.Number({ description: "Render height in pixels." }),
-			percentage: Type.Optional(Type.Number({ description: "Resolution percentage (default 100)." })),
+			x: Type.Number({ description: 'Render width in pixels.' }),
+			y: Type.Number({ description: 'Render height in pixels.' }),
+			percentage: Type.Optional(Type.Number({ description: 'Resolution percentage (default 100).' })),
 		}),
 	),
 	samples: Type.Optional(
 		Type.Number({
-			description: "Sample count override for Cycles renders.",
+			description: 'Sample count override for Cycles renders.',
 		}),
 	),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Execution timeout in seconds.",
+			description: 'Execution timeout in seconds.',
 			default: 300,
 		}),
 	),
@@ -944,18 +944,18 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. The whole batch is pre-flighted first, merged by one headless Blender process and saved once, so concurrent module runs cannot interleave through a half-applied fan-out. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. A branch whose blend is missing from disk is reported in `missing` and does not stop the rest of the batch. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.",
+	'Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	modules: Type.Array(Type.String(), {
 		description:
-			"Module names to apply, in any order — they are applied in the order their branch runs were staged. Every one must have a staged branch run.",
+			'Module names to apply.',
 	}),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
-			description: "Timeout for the whole apply batch in seconds.",
+			description: 'Timeout for the whole apply batch in seconds.',
 			default: 300,
 		}),
 	),
@@ -987,24 +987,24 @@ export const blenderModuleRevertTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Revert model.blend to a module's recorded pre-run checkpoint and reload it in the live Blender session. Uses the manifest's moduleRuns history, so it reverts the exact state before that run. Refuses when later module runs also modified the blend (pass force: true to accept discarding them). The reload DISCARDS any unsaved changes currently open in the live Blender UI, so save unrelated work in the UI before reverting.",
+	'Revert model.blend to a module\'s recorded pre-run checkpoint and reload it in the live Blender session. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
-		description: "Module name to revert.",
+		description: 'Module name to revert.',
 	}),
 	iteration: Type.Optional(
 		Type.Number({
 			description:
-				"Revert this specific recorded run instead of the module's latest one.",
+				'Revert.',
 		}),
 	),
 	force: Type.Optional(
 		Type.Boolean({
 			description:
-				"Allow the revert even though later module runs also mutated the blend.",
+				'Allow.',
 			default: false,
 		}),
 	),
@@ -1036,10 +1036,10 @@ export const blenderSetModeTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint, vertex/weight/face paint, sculpt, pose, edit-armature, or UV editing. Supported modes: OBJECT, POSE, EDIT_MESH, EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT, FACE_PAINT, and UV (enters edit mode and turns on the viewport UV editor overlay). Paint modes require a MESH object, POSE/EDIT_ARMATURE require an ARMATURE object. Use this before/after authoring paint or rig changes in script.py so the user sees the correct workspace in the live UI. A viewport mode is a statement about a UI, so with no window open this reports switched:false and a reason instead of failing: the paint is applied as bpy data either way and nothing about the asset depends on this. Authoring does not need a window — blender_module_run and blender_branch_run work headlessly.",
+	'Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	mode: Type.Union(
 		[
@@ -1056,13 +1056,13 @@ export const blenderSetModeTool: CoreToolDefinition = {
 		],
 		{
 			description:
-				"Target viewport/object mode. UV enters edit mode with the UV editor overlay enabled.",
+				'Target viewport/object mode.',
 		},
 	),
 	objectName: Type.Optional(
 		Type.String({
 			description:
-					"Optional object to act on. Defaults to the active object. Paint modes need a MESH, POSE/EDIT_ARMATURE need an ARMATURE.",
+					'Optional object to act on.',
 		}),
 	),
 }),
@@ -1094,21 +1094,21 @@ export const blenderSwitchWorkspaceTool: CoreToolDefinition = {
 	openWorldHint: true,
 },
 	description:
-	"Switch the active workspace tab in the live Blender window by workspace name (e.g. 'Layout', 'Modeling', 'Sculpting', 'UV Editing', 'Shading', 'Animation', 'Rendering', 'Compositing', 'Geometry Nodes', 'Scripting') or by contained editor space_type (e.g. 'VIEW_3D', 'NODE_EDITOR', 'IMAGE_EDITOR', 'SEQUENCE_EDITOR'). This changes what editor and layout the user is currently looking at in the live UI. Window-only: this is a statement about the live UI window, so when no /blender-watch window is open this reports switched: false with an explicit reason rather than throwing.",
+	'Switch the active workspace tab in the live Blender window by workspace name. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	workspaceName: Type.Optional(
 		Type.String({
 			description:
-				"Name of workspace tab to switch to (e.g. 'Layout', 'Modeling', 'Shading', 'Geometry Nodes', 'Scripting').",
+				'Workspace tab name to switch to, e.g. Modeling.',
 		}),
 	),
 	spaceType: Type.Optional(
 		Type.String({
 			description:
-				"Editor space type to switch to (e.g. 'VIEW_3D', 'NODE_EDITOR', 'IMAGE_EDITOR', 'SEQUENCE_EDITOR'). Finds the first workspace containing an area of this type.",
+				'Editor space type to switch to, e.g. VIEW_3D.',
 		}),
 	),
 }),
@@ -1140,13 +1140,13 @@ export const blenderFocusViewTool: CoreToolDefinition = {
 	openWorldHint: true,
 },
 	description:
-	"Center and frame the 3D viewport on a named object in the live Blender window. Focuses the view on the object's geometry (view_selected). Window-only: this is a statement about the live 3D viewport, so when no /blender-watch window is open this reports moved: false with an explicit reason rather than throwing.",
+	'Center and frame the 3D viewport on a named object in the live Blender window. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	objectName: Type.String({
-		description: "Name of the target object (or object data) to frame and focus in the 3D viewport.",
+		description: 'Name.',
 	}),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -1174,73 +1174,73 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric: five 0-2 craft axes plus a 0-2 category-validity axis, a 0-2 view adequacy that gates whether the judgement counts at all, and an optional rejectReason. Resolves a verdict (continue / present / reject) and records it, so blender_rank_assets can select across a batch without re-reading prose.",
+	'Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			"The module this critique judged. Names the part the render shows, and keeps each module's 5-iteration budget its own rather than shared across a fan-out.",
+			'The module this critique judged.',
 	}),
 	iteration: Type.Optional(
 		Type.Number({
 			description:
-				"Optional iteration number, for a run whose number differs from the workspace's latest. Omit it and the latest is used.",
+				'Optional iteration number.',
 		}),
 	),
 	accuracy: Type.Number({
-		description: "Accuracy score from 0 to 2.",
+		description: 'Accuracy score from 0 to 2.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	geometry: Type.Number({
-		description: "Geometry and proportions score from 0 to 2.",
+		description: 'Geometry and proportions score from 0 to 2.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	materials: Type.Number({
-		description: "Materials and appearance score from 0 to 2.",
+		description: 'Materials and appearance score from 0 to 2.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	completeness: Type.Number({
-		description: "Completeness score from 0 to 2.",
+		description: 'Completeness score from 0 to 2.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	quality: Type.Number({
-		description: "Quality score from 0 to 2.",
+		description: 'Quality score from 0 to 2.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	validity: Type.Number({
 		description:
-			"Is this a valid instance of the CATEGORY at all -- does it read as a mug, not as a well-formed object carrying a brief's worth of mug features? Separate from accuracy, which asks whether it matches its brief. Zero means the category is not satisfied, and no amount of polish recovers that.",
+			'Is.',
 		minimum: 0,
 		maximum: 2,
 	}),
 	viewAdequacy: Type.Number({
 		description:
-			"Can the asset be judged FROM this render? 2 = the whole subject and its silhouette are visible, 1 = partly occluded or ambiguous, 0 = the render does not show the subject. Scored because it gates the JUDGEMENT, not the asset: an ugly render of a good mesh is still a good sample, but a render that cannot show the object makes every other score meaningless, so an unusable view never presents.",
+			'Can the asset be judged FROM this render?',
 		minimum: 0,
 		maximum: 2,
 	}),
 	viewNote: Type.String({
-		description: "Free text on the framing, coverage, or perspective, kept because the score cannot say why.",
+		description: 'Free text on the framing, coverage.',
 	}),
 	issues: Type.Array(
 		Type.String({
-				description: "Concrete problems found in the current render or scene.",
+				description: 'Concrete problems found.',
 		}),
 	),
 	nextAction: Type.String({
-		description: 'Either a fix to attempt next, or "present to user" when the result is good enough.',
+		description: 'Either a fix to attempt next.',
 	}),
 	rejectReason: Type.Optional(
 		Type.String({
 			description:
-				"Reject the asset outright, whatever it scored. Use this when the ATTEMPT was wrong -- the category is unsatisfiable from this brief, or the structure is fundamentally not what was asked for -- rather than merely unpolished. Distinct from a low score on purpose: a scored failure is a finished attempt worth keeping the record of, and this says it should never have been made.",
+				'Reject the asset outright, whatever it.',
 		}),
 	),
 }),
@@ -1280,19 +1280,19 @@ export const blenderRankAssetsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Rank a batch against ITSELF and return the best slice. An absolute threshold can say whether an asset is good enough; it can never say whether it is the best of a thousand, and the gap between the 60th and 95th percentile is invisible to a rubric that only ever sees one asset at a time. Reads critique.log's STRUCTURE (never its prose), keeps each module's latest judgement, ranks only presented assets judged from a usable view, and returns the top fraction best-first plus per-verdict counts and batch-level warnings. Use this before shipping a batch for training or curation: when rejects outnumber presents, the brief is usually wrong rather than the assets.",
+	'Rank a batch against ITSELF and return the best slice. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	topFraction: Type.Optional(
 		Type.Number({
 			description:
-				"Fraction of ELIGIBLE assets to keep, 0..1, default 0.1. A batch of 100 with a 0.1 slice returns the best 10. Always at least one asset is kept, so a batch of 3 returns its best rather than nothing.",
+				'Fraction of ELIGIBLE assets to keep, 0..1.',
 		}),
 	),
 	minScore: Type.Optional(
 		Type.Number({
 			description:
-				"Score an asset must reach before it may be ranked at all, default 0. The verdict already gates on the present threshold; raise this only to keep borderline-but-presented assets out of a slice.",
+				'Score.',
 		}),
 	),
 }),
@@ -1330,12 +1330,12 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"What this module's iteration loop already knows, derived from the manifest and critique.log rather than from anyone's memory. Read it BEFORE spending a run or a fresh critic: it reports the per-module iteration budget, the last run and its content digest, the last verdict with its six axis scores, blocking subset, issues and next action, whether the last briefed fix actually changed the content, the probe facts already recorded, and a waste guard that names the specific condition under which another render would tell you nothing new. A loop that has lost its budget to a context fold is a loop that runs forever; this is where the budget lives. Read-only.",
+	'What this module\'s iteration loop already knows, derived. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	moduleName: Type.String({
 		description:
-			"The module to report on. One model's history cannot be summarised for all of them, and the budget, digest and waste guard are all per-module.",
+			'The module to report on.',
 	}),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -1385,20 +1385,20 @@ export const blenderRecordIterationFactTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold, and a crash. A fact without a record is re-measured by every fresh critic, which is how a loop spends three renders learning that the handle is the wrong thickness. Record what the probe actually returned and the tool that returned it, so the next critic can re-check the number rather than trusting a sentence. Re-recording the same statement updates it rather than duplicating it; the newest 24 facts per module are kept. Read blender_iteration_state to see what is already known before measuring anything.",
+	'Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
-	moduleName: Type.String({ description: "The module the fact is about." }),
+	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	moduleName: Type.String({ description: 'The module the fact is about.' }),
 	statement: Type.String({
 		description:
-			'The measured finding itself, as a checkable sentence: "The handle is 12mm across, under the 18mm a hand needs". Not "the handle looks thin" -- that is a judgement, and the critic makes those.',
+			'The measured finding itself.',
 	}),
 	source: Type.String({
 		description:
-			'Which tool produced it, with the identifying detail: "blender_geometry_probe, Mug vs MugHandle pair distance", "blender_image_probe, modules/mug/render.png". A fact with no source is an assertion.',
+			'Which tool produced it.',
 	}),
 	iteration: Type.Optional(
-		Type.Number({ description: "The run the measurement belongs to. Defaults to nothing; supply it when the fact came from a specific run." }),
+		Type.Number({ description: 'The run the measurement belongs to.' }),
 	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -1437,46 +1437,46 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Export the workspace blend to an interchange format: glb or gltf (materials, scene graph, modifiers applied) or obj (geometry, UVs, materials) or stl. This is what makes the asset leave Blender at all -- .blend is not an interchange format and no training pipeline reads it. Works headlessly. Pass `objects` to export a named subset, which is how you keep the studio rig out of a dataset. Read-only with respect to model.blend: the exporter writes a new file and never saves back.",
+	'Export the workspace blend to glb, gltf, obj, or stl with materials and scene graph. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	format: Type.Optional(
 		Type.String({
-			description: "glb (default, single file), gltf (separate .bin and textures), obj, or stl. USD is not offered because no exporter is guaranteed present in a stock Blender build.",
+			description: 'glb (default), gltf, obj, or stl (geometry only).',
 			enum: ["glb", "gltf", "obj", "stl"],
 		}),
 	),
 	objects: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Names to export, when given. Omit for the whole blend. Naming the asset's own objects is how a studio camera and three lights stay out of the dataset.",
+				'Names to export, when given.',
 		}),
 	),
 	outputDir: Type.Optional(
 		Type.String({
-			description: "Directory for the exported file. Defaults to the blend's own directory.",
+			description: 'Directory for the exported file.',
 		}),
 	),
 	name: Type.Optional(
 		Type.String({
-			description: "Base filename, without extension. Defaults to the blend's name. Sanitised, since it usually comes from a prompt.",
+			description: 'Base filename, without extension.',
 		}),
 	),
 	animations: Type.Optional(
 		Type.Boolean({
-			description: "Include animation data (glTF only). Default false.",
+			description: 'Include animation data (glTF only).',
 		}),
 	),
 	allowUnfinalized: Type.Optional(
 		Type.Boolean({
 			description:
-				"Export a build that has not reached finalized. The build contract refuses an earlier export otherwise, because an intermediate state is not the asset.",
+				'Export.',
 		}),
 	),
 	validationProfile: Type.Optional(
 		Type.String({
 			description:
-				"Validation to run on the written file. gltf (default) checks nodes, meshes, accessors and images; print checks manifold edges, self-intersection, winding and unit scale; engine checks texture size and material count; none skips it.",
+				'Validation to run on the written file.',
 			enum: ["gltf", "print", "engine", "none"],
 		}),
 	),
@@ -1531,24 +1531,24 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Checkpoints the workspace blend before importing so partial imports are cleanly revertible. Guards against path traversal and sanitizes asset names. Probes format and add-on support (e.g. FBX), reporting missing capabilities as explicit results rather than tracebacks. Returns a post-import report detailing imported objects, non-uniform scale checks, and principal axes.",
+	'Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
-	path: Type.String({ description: "Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx)." }),
+	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	path: Type.String({ description: 'Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx).' }),
 	format: Type.Optional(
 		Type.String({
-			description: "Format of the asset: obj, stl, gltf, glb, or fbx. If omitted, inferred from file extension.",
+			description: 'Format of the asset: obj, stl, gltf, glb.',
 			enum: ["obj", "stl", "gltf", "glb", "fbx"],
 		}),
 	),
 	name: Type.Optional(
 		Type.String({
-			description: "Optional asset name or object name prefix. Sanitized against invalid characters.",
+			description: 'Optional asset name or object name prefix.',
 		}),
 	),
 	allowedPaths: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Allowed directories or file paths for source assets to guard against traversal. Defaults to the workspace directory and current working directory.",
+			description: 'Allowed directories.',
 		}),
 	),
 }),
@@ -1596,43 +1596,43 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Register a reference image with a workspace. Copies the image into <workspace>/references/ and records it in the manifest so it can be listed, addressed by a stable id in briefs, and handed to a critic that cannot read images. The `caption` is required and is the only description of the image available to the worker and critic, because the manager is blocked from reading image files.",
+	'Register a reference image with a workspace. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	path: Type.Optional(
 		Type.String({
 			description:
-				"Path to an existing image file on disk. It is COPIED into the workspace references/ directory, so later moves or deletions of the original do not break pending work. Supported: .png .jpg .jpeg .gif .webp .bmp",
+				'Path to an existing image file on disk.',
 		}),
 	),
 	url: Type.Optional(
 		Type.String({
 			description:
-				"HTTPS image URL on a CC0 host (cdn.polyhaven.com or dl.polyhaven.org), downloaded once and then copied in. Use blender_reference_search to find one. Pass either path or url, not both.",
+				'HTTPS image URL.',
 		}),
 	),
 	license: Type.Optional(
-		Type.String({ description: "Licence stated by the source, e.g. CC0-1.0. Recorded in the manifest." }),
+		Type.String({ description: 'Licence stated by the source.' }),
 	),
 	credit: Type.Optional(
-		Type.String({ description: "Credit line required or recommended by the source. Recorded in the manifest." }),
+		Type.String({ description: 'Credit line required.' }),
 	),
 	caption: Type.String({
 		description:
-			"What this image depicts, in one or two sentences: the subject, the angle it is shot from, and anything a worker or critic would need to judge against it. Required — you cannot read the image yourself, so this text is the only thing that will convey its contents.",
+			'What this image depicts.',
 	}),
 	id: Type.Optional(
 		Type.String({
 			description:
-				"Stable id to address this reference by in briefs, e.g. 'front' or 'three-quarter'. Defaults to the file's name without its extension. Adding a reference whose id is taken stores it as <id>-2 rather than overwriting, so earlier verdicts stay reproducible.",
+				'Stable id.',
 		}),
 	),
 	suggestedView: Type.Optional(
 		Type.String({
 			description:
-				"Optional saved view or camera name you believe this reference should be compared against. The pairing is a hypothesis: a critic will report whether the two images are actually comparable, and name the view it would prefer if not.",
+				'Optional saved view.',
 		}),
 	),
 }),
@@ -1662,16 +1662,16 @@ export const blenderReferenceSearchTool: CoreToolDefinition = {
 	label: "Blender Reference Search",
 	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 	description:
-		"Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata, licence, credit and a preview URL. It does not download anything: choose a candidate and pass its preview URL to blender_add_reference, which fetches it once, records provenance and copies it into the workspace.",
+		'Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-		query: Type.String({ description: "Words to match against the asset name, id and tags." }),
+		query: Type.String({ description: 'Words to match against the asset name, id.' }),
 		source: Type.Optional(
-			Type.String({ enum: ["polyhaven", "ambientcg"], description: "Catalogue to search. Default polyhaven." }),
+			Type.String({ enum: ["polyhaven", "ambientcg"], description: 'Catalogue to search.' }),
 		),
 		kind: Type.Optional(
-			Type.String({ enum: ["model", "texture", "hdri"], description: "Poly Haven asset type. Default model." }),
+			Type.String({ enum: ["model", "texture", "hdri"], description: 'Poly Haven asset type.' }),
 		),
-		limit: Type.Optional(Type.Number({ description: "Maximum candidates (1–24, default 8).", minimum: 1, maximum: 24 })),
+		limit: Type.Optional(Type.Number({ description: 'Maximum candidates (1–24, default 8).', minimum: 1, maximum: 24 })),
 	}),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 		const candidates = await searchReferenceSources({
@@ -1695,11 +1695,11 @@ export const blenderBridgeStatusTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Check whether the live Blender bridge can serve a request right now: is the UI running, is another request holding the single live-Blender slot, how many requests are pending, how many headless Blender runs may execute concurrently on this machine, and how many are open RIGHT NOW across this session's workers. Use it before a long or mutating batch, or when a bridge call timed out, instead of guessing or burning another timeout. The open count is the one to read mid-fan-out: the budget says what is permitted, not what your workers already spent. A /blender-watch window is reported apart from the runs, because it is not one of them.",
+	'Check whether the live Blender bridge can serve a request right now: is the UI running. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
-			description: "Optional workspace path to report alongside the bridge state.",
+			description: 'Optional workspace path.',
 		}),
 	),
 }),
@@ -1727,15 +1727,15 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds, thin/long principal axes and their angle to an expected axis, pair distance with an interpenetrating/in-contact/separated verdict, a scene-wide sweep for parts that ought to meet and do not — or that share a surface and will z-fight, mesh island counts, and non-manifold/loose/duplicate geometry counts. Read-only by construction — it never mutates or saves, claims no iteration, and is safe to call while a worker has a module mid-flight (see docs/SAFETY.md for full guarantee boundary and measurement pitfalls like coincident deepestPenetration). Use it instead of reasoning about placement: a floating or buried handle is a measured gap distance, not a guess. Works with no window: it then measures model.blend on disk headlessly. With a window open it measures the live session instead, including unsaved edits, and warns when the two differ.",
+	'Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	objects: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Object names to measure. Omit to probe every visible mesh in the scene — usually the right default, because a misplaced part is found by its relationship to the rest, and the culprit is often not yet known.",
+				'Object names to measure.',
 		}),
 	),
 	pairs: Type.Optional(
@@ -1746,7 +1746,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			}),
 			{
 				description:
-					'Object-name pairs to measure against each other, e.g. [["Mug", "MugHandle"]]. Each pair yields the closest surface distance, penetration depth, per-object vertex-inside counts, a coincident-surface figure, bounding-box overlap, and a verdict. Omit to auto-pair when exactly two objects are given.',
+					'Object-name pairs.',
 			},
 		),
 	),
@@ -1761,7 +1761,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			}),
 			{
 				description:
-					"Reference dimensions per object name, compared against what the scene actually measures. A bare integer is MILLIMETRES and a bare decimal is METRES, because a brief says `2400` and `2.4m` for the same ceiling; unitless-as-metres is not an option when a 1000x error renders identically. Naming dimensions implies the `scale` check.",
+					'Reference dimensions per object name.',
 			},
 		),
 	),
@@ -1782,38 +1782,38 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			]),
 			{
 				description:
-					"Measurement families to run. Omit for all but the heaviest (`sculpt`), which runs only when named. `transform` catches unapplied/mirror scale; `axis` finds a ring's own axis and how far it is off the expected one; `pair` measures only the pairs you NAME; `joint` sweeps the whole scope for pairs nobody named — bounding boxes that overlap or come within 50mm while the surfaces are further apart than the tolerance — and is the check that finds a riser pipe modelled clear of the pipe it continues; it also reports `coincident-surface`, the two parts sharing a stretch of geometry that renders as z-fighting colour banding, which no verdict can see because a flush-laid panel is in contact and so is a clean one, and `buried`, a part swallowed whole by another, which is a correct render of a wrong model; `clearance` answers whether the room is USABLE — it samples the floor with a person-sized body, dilates every obstruction by that reach, and reports `islandCount` (free floor cut into pieces nobody can walk between) and `unreachableArea` (floor that reaches no edge at all), which is what catches a sofa laid wall to wall; it takes its room from the same `objects` you scope it to, so measure one room rather than the house; `path` asks whether the WALK between two points is longer than the line between them — pass `points` (door centres, the ends of a corridor) and it walks every pair over the same floor raster, walls included, and reports a `detour` ratio: 1.0 is a corridor, one bend is about 1.1–1.3, and a stair-step of several offset doors runs to 1.9 or more, which is the shape a render cannot show because from above it is still a house; `shape` reports self-symmetry, a radius profile along the mesh's own long axis, convexity and open edges — the defects a render cannot show; `topology` is the expensive one (bmesh pass per mesh) and is only needed when the shape itself is suspect, and its island count is what catches a mesh split into drifting pieces; `sculpt` reports self-intersections, minimum wall thickness, symmetry error, dihedral distribution and density against `densityCap` — the numbers that decide whether an organic surface reads as natural, which one render cannot show; it is opt-in because its BVH overlap scan is unbounded; `scale` needs `specifications` and compares each object against the reference dimensions your brief named.",
+					'Measurement families to run.',
 			},
 		),
 	),
 	symmetryAxis: Type.Optional(
 		Type.Union([Type.Literal("x"), Type.Literal("y"), Type.Literal("z")], {
 			description:
-				"Axis the `sculpt` symmetry metric mirrors across, default `x` for bilateral symmetry. Independent of `expectedAxis`, which is the axis check's thin-direction alignment.",
+				'Axis.',
 		}),
 	),
 	densityCap: Type.Optional(
 		Type.Number({
 			description:
-				"Face ceiling for the `sculpt` check's density budget, e.g. 50000. Naming a cap runs `sculpt` even when `checks` omits it. Omit to report vertex/face counts without judging them.",
+				'Face ceiling for the `sculpt` check\'s density budget.',
 		}),
 	),
 	tolerance: Type.Optional(
 		Type.Number({
 			description:
-				"Contact distance in Blender units (default 0.002, i.e. 2 mm at default scale). Distances within tolerance report as `in-contact` rather than `separated`.",
+				'Contact distance.',
 		}),
 	),
 	expectedAxis: Type.Optional(
 		Type.Union([Type.Literal("X"), Type.Literal("Y"), Type.Literal("Z")], {
 			description:
-				"The axis a part's thin direction should align with — `Z` for a mug handle's ring axis, `Z` for a vertical stem. Omit to skip the alignment comparison.",
+				'The axis a part\'s thin direction should.',
 		}),
 	),
 	body: Type.Optional(
 		Type.Number({
 			description:
-				"`clearance` and `path` only. Metres a person reaches — a sample is blocked when an obstruction comes within this. Default 0.25, which is what makes a 50 mm gap read as blocked and a 500 mm one as a doorway. Widen it to ask whether a wheelchair gets through, narrow it to ask whether anything does. Any other check ignores it.",
+				'`clearance` and `path` only.',
 		}),
 	),
 	points: Type.Optional(
@@ -1834,26 +1834,26 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		Type.Unsafe<[number, number][]>(
 			Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
 				description:
-					"World `[x, y]` positions in metres a person is meant to travel between — door centres, the ends of a corridor, the foot of a stair. Passing these implies the `path` check. Every PAIR is walked, not just the ones you ordered: a house is short of doors and long of rooms, so the pair a designer forgot is the one that zig-zags. Each point snaps to the nearest free floor within a body's reach, so a door centre given beside its frame still resolves; one that lands on nothing is reported in `unresolved` rather than guessed at.",
+					'World `[x, y]` positions.',
 			}),
 		),
 	),
 	detour: Type.Optional(
 		Type.Number({
 			description:
-				"`path` only. The detour ratio above which a route counts as a zig-zag, default 1.45. A straight corridor is 1.0 and a single right-angle bend is about 1.1–1.3, which is why the default sits well above 1: real architecture bends, and the defect is the several-turn stair-step. Cannot go below 1.0 — the straight line is a lower bound on any walk.",
+				'`path` only.',
 		}),
 	),
 	cell: Type.Optional(
 		Type.Number({
 			description:
-				"`clearance` and `path` only. Metres, the sampling granularity, default 0.05. The effective stride is this widened to cover `body`, because a sample is stamped with a dilated box spanning `2 * body` — so `cell` alone does not set the resolution. Lower it for a fine question, and expect a proportionally larger sample count. The two checks share one raster, so the same scope and the same `cell` report the same `stride`.",
+				'`clearance` and `path` only.',
 		}),
 	),
 	timeoutMs: Type.Optional(
 		Type.Number({
 			description:
-				"Bridge timeout override in ms. Defaults to 120000 (4x the 30s round-trip) because a probe scales with scene size — raise it for a `topology` check on a heavy scene, lower it when you are probing a small object list and want a dead bridge to report sooner.",
+				'Bridge timeout override in ms.',
 		}),
 	),
 }),
@@ -1895,27 +1895,27 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean subject colour, an nx-by-ny mean-luma grid, silhouette row occupancy, edge sharpness, dominant subject colours, clipped fractions and luma percentiles over the subject. Read-only by construction, and it needs no live Blender — the pixels are the whole input, so any read-only role can use it (see docs/SAFETY.md for full guarantee boundary). Use it to check a visual suspicion before asserting it: 'the part is bare' is a colour fraction, 'the arms are hidden behind the body' is a row-occupancy pattern, and 'the render is too dark to judge' is a mean luma.",
+	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	path: Type.String({
 		description:
-			"Path to the PNG to measure, e.g. `modules/<name>/render.png`. Relative paths resolve against the workspace root.",
+			'Path to the PNG to measure.',
 	}),
 	background: Type.Optional(
 		Type.Array(Type.Number(), {
 			minItems: 3,
 			maxItems: 3,
 			description:
-				"The image's background colour as three 0..1 values (r, g, b). Defaults to black. This is a property of the shot, so read it from the render settings or the world rather than guessing from a corner pixel — a wrong value makes the background read as subject and empties the measurement.",
+				'The image\'s background colour.',
 		}),
 	),
 	tolerance: Type.Optional(
 		Type.Number({
 			description:
-				"Per-channel 0..1 tolerance for calling a pixel background (default 0). Raise it for a noisy or film-grain background, or for an antialiased edge that should count as subject.",
+				'Per-channel 0..1 tolerance.',
 		}),
 	),
 	grid: Type.Optional(
@@ -1923,12 +1923,12 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 			minItems: 2,
 			maxItems: 2,
 			description:
-				"Luma grid resolution as [nx, ny] (default [8,8], maximum 32 per side). Each cell is the mean luma of the subject pixels inside it, and null where there are none — a null cell means the subject does not reach that part of the frame.",
+				'Luma grid resolution as [nx, ny]. Defaults to [8, 8].',
 		}),
 	),
 	paletteLimit: Type.Optional(
 		Type.Number({
-			description: "How many dominant subject colours to report (default 6, 0 disables).",
+			description: 'How many dominant subject colours.',
 		}),
 	),
 }),
@@ -1960,18 +1960,18 @@ export const blenderReadOnlyPythonTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Run a Python measurement script in the LIVE Blender scene and get its stdout back, with mutating bpy operations refused by the bridge itself — bpy.ops, bpy.data and bpy.data.<collection> removal (including batch_remove and orphans_purge), linking or unlinking in the scene collection, assigning to an object or its vectors, and saving. It never mutates, saves, or claims an iteration. This exists because a question like 'is the tights the visible surface' is one raycast, and answering it any other way means eyeballing a render. A refusal comes back as `refused: true` naming the operation, which is an answer, not a failure: rewrite the script to ask a question that does not need the change. Print what you measured; the return value is whatever you printed. Two honest limits: this guards bpy, NOT the filesystem, so a read-only script may still read and write files with `os` and `open` — do not use it on anything you would mind losing. And it is a denylist of named entry points rather than a sandbox, so a bpy API this tool does not know about is not refused; see docs/SAFETY.md for the full guarantee boundary. If a measurement needs to change the scene, use blender_execute_python or blender_module_run. Works with no window: the script then runs headlessly against model.blend. With a window open it runs against the live session instead, so it can see unsaved edits.",
+	'Run a Python measurement script in the LIVE scene and get its stdout; mutating bpy operations are refused. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	script: Type.String({
 		description:
-			"The Python to run, as text. Inline rather than a path on purpose: a read-only role has no `write` tool, so a path-only API would make the tool unusable for exactly the role that needs it, and would push it toward asking a worker to author its own evidence.",
+			'The Python to run, as text.',
 	}),
 	timeoutMs: Type.Optional(
 		Type.Number({
-			description: "Bridge timeout override in ms for the script itself.",
+			description: 'Bridge timeout override.',
 		}),
 	),
 }),
@@ -2008,48 +2008,48 @@ export const blenderMontageTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Render several preset views of one subject and tile them into a single labelled sheet, plus the individual panels at full size. Two families of preset, chosen per view name. ORBIT presets (front, three-quarter, …) frame the subject's bounding sphere at one fixed distance, so every panel frames identically and a difference between panels is the geometry rather than the camera. INTERIOR presets (interior-corner, interior-doorway, …) stand inside the subject at eye height — a room has no silhouette to orbit, and a 6x4x2.8m room has a bounding-sphere radius of 3.9m, so every orbit panel of it photographs the outside of a wall. Use it when one angle cannot answer the question — a silhouette that might be hiding a limb, a shape that reads as symmetric from the front and wrong from three-quarter, a room that reads as cluttered from one corner and open from another, a critic that keeps calling something vague. Name the views; do not ask for views. Read-only with respect to the file it photographs: resolution, filepath, scene camera and viewport are restored, and the temporary cameras are removed. Works with no window: it then renders each panel headlessly from model.blend.",
+	'Render several preset views of one subject and tile them into a single labelled sheet, plus. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
-		description: "Module the sheet belongs to. Written to modules/<name>/montage.png, with panel-N-<view>.png beside it.",
+		description: 'Module the sheet belongs to.',
 	}),
 	views: Type.Array(Type.String(), {
 		minItems: 1,
 		maxItems: 4,
 		description:
-			"Preset view names. Orbit: front, back, left, right, top, bottom, three-quarter, three-quarter-left, three-quarter-high, profile-left, profile-right, front-high. Interior: interior-corner, interior-corner-left, interior-corner-right, interior-elevated, interior-doorway, interior-low. An unknown name is refused with the list rather than approximated. Two to four views make a useful sheet; one view is a render with extra steps.",
+			'Preset view names.',
 	}),
 	subject: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Objects to frame. Defaults to every visible mesh, which frames the whole build. Pass names when one module is the subject and the rest of the scene is context.",
+				'Objects to frame.',
 		}),
 	),
 	columns: Type.Optional(
 		Type.Number({
 			description:
-				"Sheet columns. Default 1 for up to two views, otherwise 2. A 2x2 sheet of four panels is the most a critic can resolve before the panels get downsampled.",
+				'Sheet columns.',
 		}),
 	),
 	panelResolution: Type.Optional(
 		Type.Object({
-			x: Type.Number({ description: "Panel width in pixels (default 900)." }),
-			y: Type.Number({ description: "Panel height in pixels (default 700)." }),
+			x: Type.Number({ description: 'Panel width in pixels (default 900).' }),
+			y: Type.Number({ description: 'Panel height in pixels (default 700).' }),
 		}),
 	),
 	timeoutMs: Type.Optional(
 		Type.Number({
 			description:
-				"Bridge timeout override in ms. Defaults to four times the single-render budget, because this is one render per panel.",
+				'Bridge timeout override in ms.',
 		}),
 	),
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				"If true, dispatch the montage as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -2102,65 +2102,65 @@ export const blenderCompareTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	"Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so a regression is visible. Each panel is labelled with which ITERATION it is (the baseline is the run before this module's latest, the current one is the latest; pass baselineLabel/currentLabel to say otherwise), and the two panels of one view sit side by side, which is what makes the sheet a comparison rather than a pair of pictures. Both generations are framed from the UNION of their extents, so the camera is identical in every panel and a difference between two panels of the same view is geometry — framing each generation on its own extent would make a part that grew read as a camera change. The baseline is rendered again from the checkpoint the earlier run started from (a checkpoint IS that generation's state, so no kept render is needed); pass baselineBlendPath to compare against a named earlier iteration instead. Two runs is the minimum: with only one there is no previous generation, and a sheet of identical pairs would read as proof of stability. Views are the same preset names as blender_montage. The baseline is a file on disk, never the session's own state: it is opened, rendered, and the workspace blend put back, so a comparison never replaces what you are looking at. A baseline missing subjects you named is reported as missingSubjects rather than rendered as an absence. Works with no window: both generations then render headlessly.",
+	'Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: "Explicit workspace path for the Blender task.",
+		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			"Module whose two generations are compared. Defaults the baseline from this module's run history, and writes modules/<name>/compare.png.",
+			'Module whose two generations are compared.',
 	}),
 	baselineBlendPath: Type.Optional(
 		Type.String({
 			description:
-				"The generation to compare against — normally a checkpoint under modules/<name>/runs/NN/. Defaults to the run immediately before this module's latest one. Refused outright when there is none, because a sheet of one generation wearing a comparison's labels invites reading the build as an improvement over nothing.",
+				'The generation.',
 		}),
 	),
 	baselineLabel: Type.Optional(
 		Type.String({
 			description:
-				"What to call the baseline in every panel label. Default its iteration number when the baseline came from run history, and BEFORE when you named the path yourself.",
+				'What.',
 		}),
 	),
 	currentLabel: Type.Optional(
 		Type.String({
-			description: "What to call the current generation. Default AFTER.",
+			description: 'What to call the current generation.',
 		}),
 	),
 	views: Type.Array(Type.String(), {
 		minItems: 1,
 		maxItems: 4,
 		description:
-			"Preset view names, same as blender_montage. Two to four make a readable sheet; with columns 2 each view's two generations sit adjacent, so the reading order IS the comparison.",
+			'Preset view names, same as blender_montage.',
 	}),
 	subject: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Objects to frame and compare. Defaults to every visible mesh. Pass names when one module is the subject and the rest of the scene is context.",
+				'Objects to frame and compare.',
 		}),
 	),
 	columns: Type.Optional(
 		Type.Number({
-			description: "Sheet columns. Default 2, so a view's two generations sit side by side.",
+			description: 'Sheet columns.',
 		}),
 	),
 	panelResolution: Type.Optional(
 		Type.Object({
-			x: Type.Number({ description: "Panel width in pixels (default 900)." }),
-			y: Type.Number({ description: "Panel height in pixels (default 700)." }),
+			x: Type.Number({ description: 'Panel width in pixels (default 900).' }),
+			y: Type.Number({ description: 'Panel height in pixels (default 700).' }),
 		}),
 	),
 	timeoutMs: Type.Optional(
 		Type.Number({
 			description:
-				"Bridge timeout override in ms. Defaults to eight times the single-render budget: this renders every panel twice and opens a second blend.",
+				'Bridge timeout override in ms.',
 		}),
 	),
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				"If true, dispatch the compare as a deferred non-blocking job and return immediately with a job handle ({ jobId, state: 'running' }), releasing bridge.lock.",
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -2225,11 +2225,11 @@ export const blenderGetPythonApiDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Look up authoritative documentation and signatures from the Blender 4.2 LTS Python API reference for a specific identifier (e.g. bpy.types.Modifier, bpy.ops.mesh.primitive_uv_sphere_add, bpy.data.objects) or list matching identifiers and submodules when ending with a wildcard * (e.g. bpy.ops.mesh.*, bpy.types.*). Offline and fast; does not require a running Blender instance or bridge lock.",
+	'Look up a bpy identifier in the Blender 4.2 LTS Python API reference. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	identifier: Type.String({
 		description:
-			"The bpy identifier to look up (e.g. 'bpy.types.Modifier', 'bpy.ops.mesh.primitive_uv_sphere_add'), or a wildcard query (e.g. 'bpy.ops.mesh.*', 'bpy.types.*') to list available members.",
+			'The bpy identifier to look up.',
 	}),
 }),
 	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -2254,15 +2254,15 @@ export const blenderSearchApiDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus (bpy.types, bpy.ops, bpy.data, bpy.context, bpy.props). Returns matching API signatures, descriptions, and parameter definitions. Offline and fast; does not require a running Blender instance or bridge lock.",
+	'Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	query: Type.String({
 		description:
-			"Search query string to match against Blender 4.2 LTS API reference (types, operators, signatures, properties).",
+			'Search query string.',
 	}),
 	limit: Type.Optional(
 		Type.Number({
-			description: "Maximum number of search results to return (default 10).",
+			description: 'Maximum number.',
 		}),
 	),
 }),
@@ -2289,15 +2289,15 @@ export const blenderSearchManualDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Perform full-text search across curated Blender 4.2 LTS user manual excerpts covering modeling, modifiers, rigging, shading, render, and geometry nodes. Returns matching topics, explanations, and workflows. Offline and fast; does not require a running Blender instance or bridge lock.",
+	'Perform full-text search across curated Blender 4.2 LTS user manual excerpts. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	query: Type.String({
 		description:
-			"Search query string to match against Blender 4.2 LTS user manual excerpts (modeling, modifiers, rigging, shading, render, geometry nodes).",
+			'Search query string.',
 	}),
 	limit: Type.Optional(
 		Type.Number({
-			description: "Maximum number of search results to return (default 10).",
+			description: 'Maximum number.',
 		}),
 	),
 }),
@@ -2324,10 +2324,10 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Check the state, execution progress, and result of a deferred background Blender job (such as a long render, montage, or compare dispatched with async: true). Reports state ('running', 'completed', 'failed' or 'cancelled') along with timestamps and full result payload, failure error or cancellation reason.",
+	'Check the state, execution progress. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	jobId: Type.String({
-		description: "The unique job identifier returned when the deferred job was dispatched.",
+		description: 'The unique job identifier returned when.',
 	}),
 }),
 	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -2349,27 +2349,27 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Report or remove old iteration renders that no module's newest render and no current critique depends on. With includeCheckpoints/includeBranches it also reports old whole-file checkpoints over the global budget and applied branch copies, each with exact files and bytes. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. The newest AND previous checkpoint of every module are always kept: compare and revert both need them. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
+	'Report or remove old iteration renders that no module\'s newest render and no current critique depends on. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-		workspace: Type.String({ description: "Explicit workspace path." }),
+		workspace: Type.String({ description: 'Explicit workspace path.' }),
 		dryRun: Type.Optional(
 			Type.Boolean({
-				description: "Report what would be removed without deleting anything. Defaults to true.",
+				description: 'Report what would be removed without.',
 			}),
 		),
 		keepIterations: Type.Optional(
 			Type.Number({
-				description: "How many of the newest iterations to keep. Default 2, minimum 1.",
+				description: 'How many of the newest iterations to keep.',
 			}),
 		),
 		includeCheckpoints: Type.Optional(
 			Type.Boolean({
-				description: "Also plan old run checkpoints over the global budget, keeping each module's newest and previous generation.",
+				description: 'Also plan old run checkpoints over.',
 			}),
 		),
 		includeBranches: Type.Optional(
 			Type.Boolean({
-				description: "Also plan applied branch copies whose checkpoint is the revert subject.",
+				description: 'Also plan applied branch copies whose.',
 			}),
 		),
 	}),
@@ -2399,14 +2399,14 @@ export const blenderJobCancelTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Cancel a deferred Blender job that is still running (render, montage or compare dispatched with async: true). The job is recorded as cancelled with the reason and its work is aborted when this process started it: a local process is stopped, and a queued live-viewport request is withdrawn best effort. A request the live UI already picked up cannot be interrupted. A completed or failed job is reported as such; cancelling an already-cancelled job returns its record.",
+	'Cancel a deferred Blender job that is still running (render, montage or compare dispatched with async: true). Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	jobId: Type.String({
-		description: "The unique job identifier returned when the deferred job was dispatched.",
+		description: 'The unique job identifier returned when.',
 	}),
 	reason: Type.Optional(
 		Type.String({
-			description: "Why the job is being cancelled, stored on the record so a later reader knows this was a decision, not a crash.",
+			description: 'Why the job is being cancelled, stored.',
 		}),
 	),
 }),
@@ -2425,9 +2425,9 @@ export const blenderBuildStatusTool: CoreToolDefinition = {
 	label: "Blender Build Status",
 	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 	description:
-		"Read the build contract's current stage and history. The stage advances only when the extension observes the work: a branch run stages, a batch apply merges, a logged critique critiques, and the finalizer advances to finalized with evidence. Export refuses a build that never reached finalized unless allowUnfinalized is passed.",
+		'Read the build contract\'s current stage and history. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-		workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+		workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	}),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 		const result = await blenderBuildStatus({
@@ -2444,15 +2444,15 @@ export const blenderBuildAdvanceTool: CoreToolDefinition = {
 	label: "Blender Build Advance",
 	annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 	description:
-		"Advance the build contract to a stage the extension cannot observe by itself, with evidence. The finalizer uses it to move a merged, critiqued build to finalized; intake/planned may be recorded by the manager. A second finalize is a duplicate record rather than a second build; the export gate still refuses an unfinalized export.",
+		'Advance the build contract to a stage the extension cannot observe by itself, with evidence. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-		workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+		workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 		stage: Type.String({
 			enum: ["intake", "planned", "finalized"],
-			description: "Stage to record. Normally finalized.",
+			description: 'Stage to record.',
 		}),
-		evidence: Type.String({ description: "What was checked or produced for this stage." }),
-		actor: Type.Optional(Type.String({ description: "Who performed it. Defaults to blender-manager." })),
+		evidence: Type.String({ description: 'What was checked or produced for this stage.' }),
+		actor: Type.Optional(Type.String({ description: 'Who performed it.' })),
 	}),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 		const result = await blenderBuildAdvance({

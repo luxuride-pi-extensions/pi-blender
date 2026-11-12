@@ -66,20 +66,17 @@ test("index.ts registers blender_switch_workspace and blender_focus_view in LAZY
 });
 
 test("tool descriptions state window-only semantics and graceful refusal", () => {
-	const startSwitch = toolsSource.indexOf('name: "blender_switch_workspace"');
-	assert.notEqual(startSwitch, -1);
-	// The window is generous on purpose: it must cover the whole tool literal, and
-	// a description's length is not a contract. A tight slice silently turns a
-	// content assertion into a position assertion the day a sentence is added.
-	const switchSection = toolsSource.slice(startSwitch, startSwitch + 2000);
-	assert.match(switchSection, /switched:\s*false/);
-	assert.match(switchSection, /Window-only/i);
-
-	const startFocus = toolsSource.indexOf('name: "blender_focus_view"');
-	assert.notEqual(startFocus, -1);
-	const focusSection = toolsSource.slice(startFocus, startFocus + 2000);
-	assert.match(focusSection, /moved:\s*false/);
-	assert.match(focusSection, /Window-only/i);
+	const skill = readFileSync(new URL("../blender/skills/blender-live-state/SKILL.md", import.meta.url), "utf8");
+	const section = (name) => {
+		const start = skill.indexOf(`### ${name}`);
+		assert.notEqual(start, -1, `${name} must be documented in blender-live-state`);
+		const end = skill.indexOf("\n### ", start + 4);
+		return skill.slice(start, end === -1 ? undefined : end);
+	};
+	assert.match(section("blender_switch_workspace"), /switched:\s*false/);
+	assert.match(section("blender_switch_workspace"), /Window-only/i);
+	assert.match(section("blender_focus_view"), /moved:\s*false/);
+	assert.match(section("blender_focus_view"), /Window-only/i);
 });
 
 test("without watch window, blenderSwitchWorkspace reports switched: false with reason and does not throw", async () => {

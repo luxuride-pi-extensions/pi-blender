@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -47,8 +47,8 @@ function scratchRoot() {
 	return mkdtempSync(join(base, "usage-guess-"));
 }
 
-test("sourceBlend is documented with its rig/lighting consequences stated explicitly in index.ts", () => {
-	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8");
+test("sourceBlend is documented with its rig/lighting consequences", () => {
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-modules/SKILL.md"), "utf-8");
 
 	// blender_workspace_init tool description must mention discarding default studio template rig / lighting
 	assert.match(

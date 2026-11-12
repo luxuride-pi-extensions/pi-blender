@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { after, describe } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,11 @@ function scratchRoot() {
 
 test("index.ts declares scene_stats as a blender_scene_info category without registering a new tool", () => {
 	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8");
+	const skillSource = readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8");
+	const sceneInfoStart = skillSource.indexOf("### blender_scene_info");
+	assert.notEqual(sceneInfoStart, -1, "blender_scene_info is documented in blender-analyze");
+	const sceneInfoEnd = skillSource.indexOf("\n### ", sceneInfoStart + 4);
+	const sceneInfoSkill = skillSource.slice(sceneInfoStart, sceneInfoEnd === -1 ? undefined : sceneInfoEnd);
 
 	// Acceptance criteria: No new top-level tool registered for scene stats
 	assert.equal(
@@ -69,16 +74,16 @@ test("index.ts declares scene_stats as a blender_scene_info category without reg
 
 	// Acceptance criteria: Description states whether counts are objects or unique data-blocks, and mesh evaluation
 	assert.ok(
-		/unique data-blocks/i.test(toolsSource),
-		"index.ts tool description must state whether counts are objects or unique data-blocks",
+		/unique data-blocks/i.test(sceneInfoSkill),
+		"the scene_info skill must state whether counts are objects or unique data-blocks",
 	);
 	assert.ok(
-		/un-evaluated.*mesh/i.test(toolsSource) || /base mesh/i.test(toolsSource),
-		"index.ts tool description must indicate which mesh evaluation polycount reflects",
+		/un-evaluated.*mesh/i.test(sceneInfoSkill) || /base mesh/i.test(sceneInfoSkill),
+		"the scene_info skill must indicate which mesh evaluation polycount reflects",
 	);
 	assert.ok(
-		/multi-scene/i.test(toolsSource) && /total/i.test(toolsSource),
-		"index.ts tool description must document multi-scene breakdown and total",
+		/multi-scene/i.test(sceneInfoSkill) && /total/i.test(sceneInfoSkill),
+		"the scene_info skill must document the multi-scene breakdown and total",
 	);
 });
 

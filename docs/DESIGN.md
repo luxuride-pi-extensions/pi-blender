@@ -40,6 +40,16 @@ node_modules/typebox -> symlink to pi's bundled typebox (jiti resolves it)
 docs/adr/                   architectural decision records (0001: do not rewrite as an MCP server; 0002: brush stroke is not an authoring path)
 ```
 
+### Tool schema prose
+
+A tool description is a selector, not a manual. Each schema keeps a short
+selector and a pointer (`Full rules: skill blender-…`); the complete text lives
+under `### blender_…` in the skill that owns the tool. `test/tool-schema-budget.test.mjs`
+caps total schema prose at 11,000 characters and each tool at 700, and checks
+that the named skill documents that tool, so a rule cannot return to a schema
+instead of the skill. Parameter descriptions keep a short selector too.
+
+
 ## Flatpak fixes (vs. upstream)
 
 1. **Temp scripts** — upstream writes bpy scripts to `os.tmpdir()` (`/tmp`),
