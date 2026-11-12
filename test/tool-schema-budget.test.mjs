@@ -20,16 +20,16 @@ function proseLength(tool) {
 }
 
 test("tool-schema prose stays inside the measured budget", () => {
-	// 14,400 characters is roughly 4K tokens at the 3.6 chars/token estimate this
+	// 11,000 characters is under 4K tokens at the 3.6 chars/token estimate this
 	// repository already uses. The full text lives in the skills, not here.
 	const total = BLENDER_TOOLS.reduce((sum, tool) => sum + proseLength(tool), 0);
 	assert.ok(
-		total <= 12_500,
-		`tool-schema prose is ${total} characters; the budget is 12500. Move rules into the skill instead of the schema.`,
+		total <= 11_000,
+		`tool-schema prose is ${total} characters; the budget is 11000. Move rules into the skill instead of the schema.`,
 	);
 	for (const tool of BLENDER_TOOLS) {
 		const length = proseLength(tool);
-		assert.ok(length <= 800, `${tool.name} carries ${length} characters of schema prose; the per-tool cap is 800.`);
+		assert.ok(length <= 700, `${tool.name} carries ${length} characters of schema prose; the per-tool cap is 700.`);
 	}
 });
 

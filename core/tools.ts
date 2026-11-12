@@ -67,7 +67,7 @@ export const blenderWorkspaceInitTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest, and… Full rules: skill `blender-modules`.',
+	'Create or reopen a managed Blender workspace with a persistent model.blend and workspace manifest. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
@@ -77,7 +77,7 @@ export const blenderWorkspaceInitTool: CoreToolDefinition = {
 	sourceBlend: Type.Optional(
 		Type.String({
 			description:
-				'Optional source .blend file to copy into…',
+				'Optional source .blend file.',
 		}),
 	),
 	template: Type.Optional(
@@ -95,7 +95,7 @@ export const blenderWorkspaceInitTool: CoreToolDefinition = {
 	),
 	continueExisting: Type.Optional(
 		Type.Boolean({
-			description: 'When true, require the workspace to exist…',
+			description: 'When true, require.',
 			default: false,
 		}),
 	),
@@ -127,31 +127,31 @@ export const blenderExecutePythonTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Copy a Blender Python script into a run directory, execute it inside the live bridge-enabled Blender… Full rules: skill `blender-live-state`.',
+	'Copy a Blender Python script into a run directory, execute it inside. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
 	}),
 	script_path: Type.String({
 		description:
-			'Path to the existing Blender Python script…',
+			'Path.',
 	}),
 	saveBefore: Type.Optional(
 		Type.Boolean({
-			description: 'If true, copy the current model.blend into…',
+			description: 'If true, copy.',
 			default: false,
 		}),
 	),
 	saveAfter: Type.Optional(
 		Type.Boolean({
-			description: 'If true, save the updated Blender scene…',
+			description: 'If true, save.',
 			default: true,
 		}),
 	),
 	claimIteration: Type.Optional(
 		Type.Boolean({
 			description:
-				'If false, run without claiming a numbered…',
+				'If false, run without claiming.',
 			default: true,
 		}),
 	),
@@ -198,12 +198,12 @@ export const blenderSessionContextTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected… Full rules: skill `blender-live-state`.',
+	'Read the LIVE Blender session: the open blend path, active scene, current mode, active object, selected. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
 			description:
-				'Optional workspace path to compare against…',
+				'Optional workspace path.',
 		}),
 	),
 	include: Type.Optional(
@@ -262,7 +262,7 @@ export const blenderWindowLayoutTool: CoreToolDefinition = {
 	format: Type.Optional(
 		Type.Union([Type.Literal("json"), Type.Literal("image")], {
 			description:
-				'Output format: \'json\' for zero-cost layout…',
+				'Output format: \'json\' for zero-cost layout, or \'image\' to return a PNG.',
 		}),
 	),
 	screenshot: Type.Optional(
@@ -279,24 +279,24 @@ export const blenderWindowLayoutTool: CoreToolDefinition = {
 	as_json: Type.Optional(
 		Type.Boolean({
 			description:
-				'Return layout and selection as JSON only,…',
+				'Return layout and selection as JSON only.',
 		}),
 	),
 	area_type: Type.Optional(
 		Type.String({
 			description:
-				'Optional Blender area type to screenshot…',
+				'Optional area type to screenshot.',
 		}),
 	),
 	max_bytes: Type.Optional(
 		Type.Number({
 			description:
-				'Maximum file size in bytes for the…',
+				'Maximum screenshot file size in bytes.',
 		}),
 	),
 	output_path: Type.Optional(
 		Type.String({
-			description: 'Optional file path where the screenshot…',
+			description: 'Optional screenshot output path.',
 		}),
 	),
 }),
@@ -332,7 +332,7 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects,… Full rules: skill `blender-analyze`.',
+'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -369,7 +369,7 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 	targetObject: Type.Optional(
 		Type.String({
 			description:
-				'Optional target object name when…',
+				'Optional target object name when.',
 		}),
 	),
 }),
@@ -404,13 +404,13 @@ export const blenderUsageGuessTool: CoreToolDefinition = {
 	workspace: Type.Optional(
 		Type.String({
 			description:
-				'Optional workspace path containing…',
+				'Optional workspace path containing.',
 		}),
 	),
 	blendPath: Type.Optional(
 		Type.String({
 			description:
-				'Optional direct path to a .blend file to…',
+				'Optional direct path.',
 		}),
 	),
 }),
@@ -439,7 +439,7 @@ export const blenderObjectDetailTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Read the workspace blend file as it was last SAVED, and return detailed inspection data for a single… Full rules: skill `blender-analyze`.',
+	'Read the workspace blend file as it was last SAVED. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -447,7 +447,7 @@ export const blenderObjectDetailTool: CoreToolDefinition = {
 	objectName: Type.Optional(
 		Type.String({
 			description:
-				'Name of the object in the saved blend file…',
+				'Name.',
 		}),
 	),
 	targetObject: Type.Optional(
@@ -500,16 +500,16 @@ export const blenderSaveViewTool: CoreToolDefinition = {
 		description: 'Explicit workspace path for the Blender task.',
 	}),
 	name: Type.String({
-		description: 'Saved view name to store in the workspace…',
+		description: 'Saved view name.',
 	}),
 	source: Type.String({
 		description:
-			'Either "active-camera" to capture the…',
+			'Either "active-camera".',
 	}),
 	camera_name: Type.Optional(
 		Type.String({
 			description:
-				'Optional dedicated camera object name to…',
+				'Optional dedicated camera object name.',
 		}),
 	),
 }),
@@ -547,7 +547,7 @@ export const blenderRenderTool: CoreToolDefinition = {
 	}),
 	view: Type.Optional(
 		Type.String({
-			description: 'Optional saved view name, camera name, or…',
+			description: 'Optional saved view name, camera name.',
 		}),
 	),
 	resolution: Type.Optional(
@@ -599,13 +599,13 @@ export const blenderRenderTool: CoreToolDefinition = {
 	renderEngine: Type.Optional(
 		Type.Union([Type.Literal("eevee"), Type.Literal("cycles"), Type.Literal("workbench")], {
 			description:
-				'Optional render engine override for…',
+				'Optional render engine override.',
 		}),
 	),
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				'If true, dispatch the render as a deferred…',
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -653,20 +653,20 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	}),
 	render: Type.Optional(
 		Type.Boolean({
-			description: 'Capture a live camera render to…',
+			description: 'Capture.',
 			default: true,
 		}),
 	),
 	view: Type.Optional(
 		Type.String({
 			description:
-			'Optional saved view name, camera object…',
+			'Optional saved view name, camera object.',
 		}),
 	),
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				'Headless path only: use-case profile…',
+				'Headless path only: use-case profile.',
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
@@ -714,7 +714,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	reviewSheet: Type.Optional(
 		Type.Boolean({
 			description:
-				'Also render the plan\'s other shots into…',
+				'Also render the plan\'s other shots into.',
 			default: false,
 		}),
 	),
@@ -735,7 +735,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	referenceId: Type.Optional(
 		Type.String({
 			description:
-				'Reference id whose image is copied into…',
+				'Reference id whose image.',
 		}),
 	),
 	resolution: Type.Optional(
@@ -808,20 +808,20 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	}),
 	render: Type.Optional(
 		Type.Boolean({
-			description: 'Render the BRANCH (not model.blend) to…',
+			description: 'Render.',
 			default: true,
 		}),
 	),
 	view: Type.Optional(
 		Type.String({
 			description:
-				'Optional saved view name, camera object…',
+				'Optional saved view name, camera object.',
 		}),
 	),
 	cameraProfile: Type.Optional(
 		Type.String({
 			description:
-				'Headless path only: use-case profile…',
+				'Headless path only: use-case profile.',
 			enum: ["prop", "character", "hard_surface", "interior", "print", "paint", "asset_pack"],
 		}),
 	),
@@ -869,7 +869,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	reviewSheet: Type.Optional(
 		Type.Boolean({
 			description:
-				'Also render the plan\'s other shots into…',
+				'Also render the plan\'s other shots into.',
 			default: false,
 		}),
 	),
@@ -883,7 +883,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	referenceId: Type.Optional(
 		Type.String({
 			description:
-				'Reference id whose image is copied into…',
+				'Reference id whose image.',
 		}),
 	),
 	resolution: Type.Optional(
@@ -951,7 +951,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 	}),
 	modules: Type.Array(Type.String(), {
 		description:
-			'Module names to apply, in any order — they…',
+			'Module names to apply.',
 	}),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
@@ -998,13 +998,13 @@ export const blenderModuleRevertTool: CoreToolDefinition = {
 	iteration: Type.Optional(
 		Type.Number({
 			description:
-				'Revert this specific recorded run instead…',
+				'Revert.',
 		}),
 	),
 	force: Type.Optional(
 		Type.Boolean({
 			description:
-				'Allow the revert even though later module…',
+				'Allow.',
 			default: false,
 		}),
 	),
@@ -1036,7 +1036,7 @@ export const blenderSetModeTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint,… Full rules: skill `blender-live-state`.',
+	'Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -1146,7 +1146,7 @@ export const blenderFocusViewTool: CoreToolDefinition = {
 		description: 'Explicit workspace path for the Blender task.',
 	}),
 	objectName: Type.String({
-		description: 'Name of the target object (or object data)…',
+		description: 'Name.',
 	}),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -1174,7 +1174,7 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric:… Full rules: skill `blender-modules`.',
+	'Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -1186,7 +1186,7 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 	iteration: Type.Optional(
 		Type.Number({
 			description:
-				'Optional iteration number, for a run whose…',
+				'Optional iteration number.',
 		}),
 	),
 	accuracy: Type.Number({
@@ -1216,7 +1216,7 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 	}),
 	validity: Type.Number({
 		description:
-			'Is this a valid instance of the CATEGORY…',
+			'Is.',
 		minimum: 0,
 		maximum: 2,
 	}),
@@ -1227,20 +1227,20 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 		maximum: 2,
 	}),
 	viewNote: Type.String({
-		description: 'Free text on the framing, coverage, or…',
+		description: 'Free text on the framing, coverage.',
 	}),
 	issues: Type.Array(
 		Type.String({
-				description: 'Concrete problems found in the current…',
+				description: 'Concrete problems found.',
 		}),
 	),
 	nextAction: Type.String({
-		description: 'Either a fix to attempt next, or "present…',
+		description: 'Either a fix to attempt next.',
 	}),
 	rejectReason: Type.Optional(
 		Type.String({
 			description:
-				'Reject the asset outright, whatever it…',
+				'Reject the asset outright, whatever it.',
 		}),
 	),
 }),
@@ -1286,13 +1286,13 @@ export const blenderRankAssetsTool: CoreToolDefinition = {
 	topFraction: Type.Optional(
 		Type.Number({
 			description:
-				'Fraction of ELIGIBLE assets to keep, 0..1,…',
+				'Fraction of ELIGIBLE assets to keep, 0..1.',
 		}),
 	),
 	minScore: Type.Optional(
 		Type.Number({
 			description:
-				'Score an asset must reach before it may be…',
+				'Score.',
 		}),
 	),
 }),
@@ -1330,7 +1330,7 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'What this module\'s iteration loop already knows, derived from the manifest and critique.log rather than… Full rules: skill `blender-modules`.',
+	'What this module\'s iteration loop already knows, derived. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	moduleName: Type.String({
@@ -1385,17 +1385,17 @@ export const blenderRecordIterationFactTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold, and… Full rules: skill `blender-modules`.',
+	'Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	moduleName: Type.String({ description: 'The module the fact is about.' }),
 	statement: Type.String({
 		description:
-			'The measured finding itself, as a…',
+			'The measured finding itself.',
 	}),
 	source: Type.String({
 		description:
-			'Which tool produced it, with the…',
+			'Which tool produced it.',
 	}),
 	iteration: Type.Optional(
 		Type.Number({ description: 'The run the measurement belongs to.' }),
@@ -1437,12 +1437,12 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Export the workspace blend to glb or gltf with its materials and scene graph. Full rules: skill `blender-create`.',
+	'Export the workspace blend to glb, gltf, obj, or stl with materials and scene graph. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
 	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	format: Type.Optional(
 		Type.String({
-			description: 'glb (default, single file) or gltf (separate files).',
+			description: 'glb (default), gltf, obj, or stl (geometry only).',
 			enum: ["glb", "gltf", "obj", "stl"],
 		}),
 	),
@@ -1470,7 +1470,7 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 	allowUnfinalized: Type.Optional(
 		Type.Boolean({
 			description:
-				'Export a build that has not reached…',
+				'Export.',
 		}),
 	),
 	validationProfile: Type.Optional(
@@ -1537,7 +1537,7 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 	path: Type.String({ description: 'Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx).' }),
 	format: Type.Optional(
 		Type.String({
-			description: 'Format of the asset: obj, stl, gltf, glb,…',
+			description: 'Format of the asset: obj, stl, gltf, glb.',
 			enum: ["obj", "stl", "gltf", "glb", "fbx"],
 		}),
 	),
@@ -1548,7 +1548,7 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 	),
 	allowedPaths: Type.Optional(
 		Type.Array(Type.String(), {
-			description: 'Allowed directories or file paths for…',
+			description: 'Allowed directories.',
 		}),
 	),
 }),
@@ -1610,29 +1610,29 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 	url: Type.Optional(
 		Type.String({
 			description:
-				'HTTPS image URL on a CC0 host…',
+				'HTTPS image URL.',
 		}),
 	),
 	license: Type.Optional(
 		Type.String({ description: 'Licence stated by the source.' }),
 	),
 	credit: Type.Optional(
-		Type.String({ description: 'Credit line required or recommended by the…' }),
+		Type.String({ description: 'Credit line required.' }),
 	),
 	caption: Type.String({
 		description:
-			'What this image depicts, in one or two…',
+			'What this image depicts.',
 	}),
 	id: Type.Optional(
 		Type.String({
 			description:
-				'Stable id to address this reference by in…',
+				'Stable id.',
 		}),
 	),
 	suggestedView: Type.Optional(
 		Type.String({
 			description:
-				'Optional saved view or camera name you…',
+				'Optional saved view.',
 		}),
 	),
 }),
@@ -1662,9 +1662,9 @@ export const blenderReferenceSearchTool: CoreToolDefinition = {
 	label: "Blender Reference Search",
 	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 	description:
-		'Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata,… Full rules: skill `blender-create`.',
+		'Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-		query: Type.String({ description: 'Words to match against the asset name, id…' }),
+		query: Type.String({ description: 'Words to match against the asset name, id.' }),
 		source: Type.Optional(
 			Type.String({ enum: ["polyhaven", "ambientcg"], description: 'Catalogue to search.' }),
 		),
@@ -1695,11 +1695,11 @@ export const blenderBridgeStatusTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Check whether the live Blender bridge can serve a request right now: is the UI running, is another request… Full rules: skill `blender-live-state`.',
+	'Check whether the live Blender bridge can serve a request right now: is the UI running. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
-			description: 'Optional workspace path to report…',
+			description: 'Optional workspace path.',
 		}),
 	),
 }),
@@ -1727,7 +1727,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds,… Full rules: skill `blender-analyze`.',
+	'Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -1746,7 +1746,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			}),
 			{
 				description:
-					'Object-name pairs to measure against each…',
+					'Object-name pairs.',
 			},
 		),
 	),
@@ -1761,7 +1761,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 			}),
 			{
 				description:
-					'Reference dimensions per object name,…',
+					'Reference dimensions per object name.',
 			},
 		),
 	),
@@ -1789,7 +1789,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 	symmetryAxis: Type.Optional(
 		Type.Union([Type.Literal("x"), Type.Literal("y"), Type.Literal("z")], {
 			description:
-				'Axis the `sculpt` symmetry metric mirrors…',
+				'Axis.',
 		}),
 	),
 	densityCap: Type.Optional(
@@ -1801,13 +1801,13 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 	tolerance: Type.Optional(
 		Type.Number({
 			description:
-				'Contact distance in Blender units (default…',
+				'Contact distance.',
 		}),
 	),
 	expectedAxis: Type.Optional(
 		Type.Union([Type.Literal("X"), Type.Literal("Y"), Type.Literal("Z")], {
 			description:
-				'The axis a part\'s thin direction should…',
+				'The axis a part\'s thin direction should.',
 		}),
 	),
 	body: Type.Optional(
@@ -1834,7 +1834,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 		Type.Unsafe<[number, number][]>(
 			Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
 				description:
-					'World `[x, y]` positions in metres a…',
+					'World `[x, y]` positions.',
 			}),
 		),
 	),
@@ -1895,7 +1895,7 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean… Full rules: skill `blender-analyze`.',
+	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -1909,13 +1909,13 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 			minItems: 3,
 			maxItems: 3,
 			description:
-				'The image\'s background colour as three…',
+				'The image\'s background colour.',
 		}),
 	),
 	tolerance: Type.Optional(
 		Type.Number({
 			description:
-				'Per-channel 0..1 tolerance for calling a…',
+				'Per-channel 0..1 tolerance.',
 		}),
 	),
 	grid: Type.Optional(
@@ -1923,12 +1923,12 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 			minItems: 2,
 			maxItems: 2,
 			description:
-				'Luma grid resolution as [nx, ny] (default…',
+				'Luma grid resolution as [nx, ny]. Defaults to [8, 8].',
 		}),
 	),
 	paletteLimit: Type.Optional(
 		Type.Number({
-			description: 'How many dominant subject colours to…',
+			description: 'How many dominant subject colours.',
 		}),
 	),
 }),
@@ -1971,7 +1971,7 @@ export const blenderReadOnlyPythonTool: CoreToolDefinition = {
 	}),
 	timeoutMs: Type.Optional(
 		Type.Number({
-			description: 'Bridge timeout override in ms for the…',
+			description: 'Bridge timeout override.',
 		}),
 	),
 }),
@@ -2008,7 +2008,7 @@ export const blenderMontageTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Render several preset views of one subject and tile them into a single labelled sheet, plus the individual… Full rules: skill `blender-analyze`.',
+	'Render several preset views of one subject and tile them into a single labelled sheet, plus. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -2049,7 +2049,7 @@ export const blenderMontageTool: CoreToolDefinition = {
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				'If true, dispatch the montage as a…',
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -2102,7 +2102,7 @@ export const blenderCompareTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so a… Full rules: skill `blender-analyze`.',
+	'Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
@@ -2114,13 +2114,13 @@ export const blenderCompareTool: CoreToolDefinition = {
 	baselineBlendPath: Type.Optional(
 		Type.String({
 			description:
-				'The generation to compare against —…',
+				'The generation.',
 		}),
 	),
 	baselineLabel: Type.Optional(
 		Type.String({
 			description:
-				'What to call the baseline in every panel…',
+				'What.',
 		}),
 	),
 	currentLabel: Type.Optional(
@@ -2160,7 +2160,7 @@ export const blenderCompareTool: CoreToolDefinition = {
 	async: Type.Optional(
 		Type.Boolean({
 			description:
-				'If true, dispatch the compare as a…',
+				'If true, dispatch.',
 		}),
 	),
 }),
@@ -2225,7 +2225,7 @@ export const blenderGetPythonApiDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Look up authoritative documentation and signatures from the Blender 4.2 LTS Python API reference for a… Full rules: skill `blender-analyze`.',
+	'Look up a bpy identifier in the Blender 4.2 LTS Python API reference. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	identifier: Type.String({
 		description:
@@ -2254,15 +2254,15 @@ export const blenderSearchApiDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus (bpy.types,… Full rules: skill `blender-analyze`.',
+	'Perform full-text search across the curated Blender 4.2 LTS Python API reference corpus. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	query: Type.String({
 		description:
-			'Search query string to match against…',
+			'Search query string.',
 	}),
 	limit: Type.Optional(
 		Type.Number({
-			description: 'Maximum number of search results to return…',
+			description: 'Maximum number.',
 		}),
 	),
 }),
@@ -2289,15 +2289,15 @@ export const blenderSearchManualDocsTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Perform full-text search across curated Blender 4.2 LTS user manual excerpts covering modeling, modifiers,… Full rules: skill `blender-analyze`.',
+	'Perform full-text search across curated Blender 4.2 LTS user manual excerpts. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	query: Type.String({
 		description:
-			'Search query string to match against…',
+			'Search query string.',
 	}),
 	limit: Type.Optional(
 		Type.Number({
-			description: 'Maximum number of search results to return…',
+			description: 'Maximum number.',
 		}),
 	),
 }),
@@ -2324,10 +2324,10 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Check the state, execution progress, and result of a deferred background Blender job (such as a long… Full rules: skill `blender-modules`.',
+	'Check the state, execution progress. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	jobId: Type.String({
-		description: 'The unique job identifier returned when…',
+		description: 'The unique job identifier returned when.',
 	}),
 }),
 	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
@@ -2354,7 +2354,7 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		workspace: Type.String({ description: 'Explicit workspace path.' }),
 		dryRun: Type.Optional(
 			Type.Boolean({
-				description: 'Report what would be removed without…',
+				description: 'Report what would be removed without.',
 			}),
 		),
 		keepIterations: Type.Optional(
@@ -2364,12 +2364,12 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		),
 		includeCheckpoints: Type.Optional(
 			Type.Boolean({
-				description: 'Also plan old run checkpoints over the…',
+				description: 'Also plan old run checkpoints over.',
 			}),
 		),
 		includeBranches: Type.Optional(
 			Type.Boolean({
-				description: 'Also plan applied branch copies whose…',
+				description: 'Also plan applied branch copies whose.',
 			}),
 		),
 	}),
@@ -2402,11 +2402,11 @@ export const blenderJobCancelTool: CoreToolDefinition = {
 	'Cancel a deferred Blender job that is still running (render, montage or compare dispatched with async: true). Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	jobId: Type.String({
-		description: 'The unique job identifier returned when…',
+		description: 'The unique job identifier returned when.',
 	}),
 	reason: Type.Optional(
 		Type.String({
-			description: 'Why the job is being cancelled, stored on…',
+			description: 'Why the job is being cancelled, stored.',
 		}),
 	),
 }),
