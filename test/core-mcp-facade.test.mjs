@@ -50,6 +50,7 @@ const EXPECTED_TOOL_NAMES = [
 	"blender_record_iteration_fact",
 	"blender_export_asset",
 	"blender_add_reference",
+	"blender_reference_search",
 	"blender_bridge_status",
 	"blender_geometry_probe",
 	"blender_image_probe",
@@ -106,7 +107,7 @@ test("core files import NO pi symbols or pi-manager-core", () => {
 // pi extension registers, and a silent drop here would make a tool vanish from
 // the MCP façade while still working in pi.
 test("core capability layer exports every Blender tool with valid shapes", () => {
-	assert.equal(BLENDER_TOOLS.length, 37);
+	assert.equal(BLENDER_TOOLS.length, 38);
 	assert.deepEqual(BLENDER_TOOL_NAMES, EXPECTED_TOOL_NAMES);
 
 	for (const tool of BLENDER_TOOLS) {

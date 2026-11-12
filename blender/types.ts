@@ -21,8 +21,8 @@ export interface BlenderReference {
 	id: string;
 	/** Absolute path to the copy inside the workspace. */
 	path: string;
-	/** Original path the file was added from, kept for provenance. */
-	sourcePath: string;
+	/** Original local path the file was added from; absent for downloads. */
+	sourcePath?: string;
 	/** What the image depicts. Required — the manager cannot see images. */
 	caption: string;
 	/**
@@ -31,6 +31,10 @@ export interface BlenderReference {
 	 * which half needs to change.
 	 */
 	suggestedView?: string;
+	/** Where a downloaded reference came from, when it was not a local file. */
+	sourceUrl?: string;
+	license?: string;
+	credit?: string;
 	addedAt: string;
 }
 
@@ -38,7 +42,11 @@ export interface AddReferenceOptions {
 	cwd: string;
 	workspace: string;
 	/** Path to an existing image file on disk. Copied into the workspace. */
-	path: string;
+	path?: string;
+	/** HTTPS URL on a CC0 host, downloaded once and then copied in. */
+	url?: string;
+	license?: string;
+	credit?: string;
 	/** Stable id to address it by in briefs. Defaults to the file's stem. */
 	id?: string;
 	/** What the image depicts. Required, because the manager cannot see it. */

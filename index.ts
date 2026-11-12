@@ -218,6 +218,7 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_workspace_init",
 	"blender_scene_info",
 	"blender_add_reference",
+	"blender_reference_search",
 	"blender_module_revert",
 	// Retention is a workspace-level decision: which evidence may go is the
 	// manager's call, and the dry run keeps it inspectable before it is.

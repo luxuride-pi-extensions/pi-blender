@@ -1,4 +1,4 @@
-import { copyFile, mkdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, rm, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import type {
 	AddReferenceOptions,
@@ -7,6 +7,7 @@ import type {
 	BlenderWorkspaceManifest,
 } from "./types.js";
 import { nowIso } from "./utils.js";
+import { downloadReferenceImage } from "./reference-sources.js";
 import { getManifestPath, loadWorkspaceManifest, readManifest, updateManifest } from "./workspace.js";
 
 /** Extensions the manager and critics can actually reason about. */
@@ -29,6 +30,10 @@ function sanitizeReferenceId(raw: string): string {
 	return cleaned.length > 0 ? cleaned : "reference";
 }
 
+async function cleanupDownloaded(path: string | undefined): Promise<void> {
+	if (path) await rm(path, { force: true }).catch(() => undefined);
+}
+
 function describeFailure(action: string, target: string, error: unknown): Error {
 	const reason = error instanceof Error ? error.message : String(error);
 	return new Error(`Unable to ${action} ${target}: ${reason}`);
@@ -42,6 +47,24 @@ async function assertReadableImage(path: string): Promise<number> {
 		}
 		if (stats.size === 0) {
 			throw new Error("the file is empty");
+		}
+		const handle = await open(path, "r");
+		const magic = Buffer.alloc(12);
+		let bytesRead = 0;
+		try {
+			({ bytesRead } = await handle.read(magic, 0, 12, 0));
+		} finally {
+			await handle.close();
+		}
+		const header = magic.subarray(0, bytesRead);
+		const isPng = header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+		const isGif = header.subarray(0, 4).toString("ascii") === "GIF8";
+		const isWebp =
+			header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP";
+		const isBmp = header.subarray(0, 2).toString("ascii") === "BM";
+		if (!isPng && !isJpeg && !isGif && !isWebp && !isBmp) {
+			throw new Error("the bytes are not a PNG, JPEG, GIF, WebP or BMP image");
 		}
 		return stats.size;
 	} catch (error) {
@@ -64,12 +87,31 @@ export function getReferencesDir(workspacePath: string): string {
  */
 export async function blenderAddReference(options: AddReferenceOptions): Promise<AddReferenceResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
+	const referencesDir = getReferencesDir(manifest.workspacePath);
+	await mkdir(referencesDir, { recursive: true });
 
-	const sourcePath = isAbsolute(options.path) ? options.path : resolve(options.cwd, options.path);
+	if (!options.path && !options.url) {
+		throw new Error("A reference needs either a local path or an HTTPS url.");
+	}
+	if (options.path && options.url) {
+		throw new Error("Pass either a local path or a url, not both.");
+	}
+	let downloaded: string | undefined;
+	let sourcePath: string;
+	try {
+		sourcePath = options.url
+			? (downloaded = await downloadReferenceImage(options.url, referencesDir, { signal: options.signal }))
+			: isAbsolute(options.path as string)
+				? (options.path as string)
+				: resolve(options.cwd, options.path as string);
+	} catch (error) {
+		throw describeFailure("download reference image", options.url ?? String(options.path), error);
+	}
+	try {
 	const extension = extname(sourcePath).toLowerCase();
 	if (!REFERENCE_EXTENSIONS.has(extension)) {
 		throw new Error(
-			`Reference "${options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
+			`Reference "${options.url ?? options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
 		);
 	}
 	await assertReadableImage(sourcePath);
@@ -85,8 +127,6 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	}
 
 	const stem = sanitizeReferenceId(options.id ?? basename(sourcePath, extname(sourcePath)));
-	const referencesDir = getReferencesDir(manifest.workspacePath);
-	await mkdir(referencesDir, { recursive: true });
 
 	// Disambiguate rather than overwrite: re-adding the same id is how a user
 	// swaps in a corrected image, and silently replacing the old bytes would
@@ -114,9 +154,12 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	const reference: BlenderReference = {
 		id,
 		path: targetPath,
-		sourcePath,
+		sourcePath: options.url ? undefined : sourcePath,
 		caption,
 		suggestedView: options.suggestedView?.trim() || undefined,
+		sourceUrl: options.url,
+		license: options.license?.trim() || undefined,
+		credit: options.credit?.trim() || undefined,
 		addedAt: nowIso(),
 	};
 
@@ -136,4 +179,7 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 		reference,
 		references,
 	};
+	} finally {
+		await cleanupDownloaded(downloaded);
+	}
 }

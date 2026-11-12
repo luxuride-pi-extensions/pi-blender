@@ -6,7 +6,7 @@ vision-informed iteration, render loop) in stock pi, with fixes for a
 
 ## Tools
 
-Registered tools (`blender_*`, 37). Usage detail, per-tool notes and the
+Registered tools (`blender_*`, 38). Usage detail, per-tool notes and the
 verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Tool | What it does |
@@ -23,7 +23,8 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_image_probe` | sample a rendered PNG on disk (mean brightness, color stats) |
 | `blender_montage` | render several preset orbit angles of one subject |
 | `blender_compare` | render previous generation beside current for A/B judging |
-| `blender_add_reference` | attach a reference image for modelling |
+| `blender_add_reference` | attach a local or downloaded reference image, with provenance |
+| `blender_reference_search` | search CC0 catalogues (Poly Haven, ambientCG) for references |
 | `blender_save_view` | save a named camera view |
 | `blender_render` | render (live material-preview or background engine) |
 | `blender_set_mode` | switch live viewport mode (OBJECT, POSE, EDIT_MESH, …) |

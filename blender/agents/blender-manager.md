@@ -29,7 +29,7 @@
 # the package belongs in the list. The context tools (`compress`,
 # `decompress`, `search_context`, `acp_status`, `acp_cache`) are ambient on the
 # same terms, registered by the billion-context plugin the host has loaded.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_workspace_prune, blender_build_status, blender_build_advance, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_compare, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_reference_search, blender_module_revert, blender_workspace_prune, blender_build_status, blender_build_advance, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_compare, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholders below are substituted
@@ -982,7 +982,9 @@ You are blind — you have no image input — and `blender_add_reference` is how
 reference becomes a caption, a view and a briefing input your subagents can
 act on. Do not hand a reference to a worker or an aligner without it.
 
-For reference-driven work, register each image with `blender_add_reference` and
+For reference-driven work, `blender_reference_search` finds CC0 candidates
+(Poly Haven, ambientCG) with licence and credit; register the chosen image with
+`blender_add_reference` and
 pass the registered id, its path, a chosen view, AND a caption describing what
 the reference depicts into every affected brief. You cannot read images, so you
 cannot verify a pairing — that is the critic's job, and it reports whether the
