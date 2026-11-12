@@ -1095,7 +1095,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
 		if (!branchSaved) {
 			if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
-			await rm(checkpointPath, { force: true }).catch(() => undefined);
+			// Keep the checkpoint when a direct exit rollback could not restore it.
+			if (!(direct && rolledBack)) await rm(checkpointPath, { force: true }).catch(() => undefined);
 		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		if (branchSaved) {
