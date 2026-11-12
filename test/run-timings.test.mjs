@@ -12,7 +12,7 @@ test("the branch script measures launch, import, exec, save and render", async (
 	for (const field of ["launchMs", "importMs", "execMs", "saveMs", "renderMs", "totalMs", "processStartedAt"]) {
 		assert.match(source, new RegExp(`"${field}"`), `branch payload must report ${field}`);
 	}
-	assert.match(source, /payload\.timings\.processStartedAt - spawnAt/, "launch is the gap before the script starts");
+	assert.match(source, /processStartedAt - spawnAt/, "launch is the gap before the script starts");
 	assert.match(source, /timings,\n\t\tresolvedEngine/, "the result carries timings, not only the payload");
 });
 

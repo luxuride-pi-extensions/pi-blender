@@ -663,7 +663,8 @@ render_request = payload.get("render")
 # caller's way to say the PICTURE inputs changed (view, resolution, engine), which
 # the content fingerprint deliberately does not cover.
 render_started_at = time.time()
-if exit_code == 0 and render_request and (changed or payload.get("forceRender")):
+render_attempted = exit_code == 0 and bool(render_request) and bool(changed or payload.get("forceRender"))
+if render_attempted:
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
     # A render failure must not discard the run: the geometry is already saved in
@@ -680,7 +681,7 @@ timings = {
     "importMs": round((imports_finished_at - process_started_at) * 1000),
     "execMs": round((exec_finished_at - exec_started_at) * 1000),
     "saveMs": round((save_finished_at - save_started_at) * 1000),
-    "renderMs": round((render_finished_at - render_started_at) * 1000) if render_result else 0,
+    "renderMs": round((render_finished_at - render_started_at) * 1000) if render_attempted else 0,
     "totalMs": round((render_finished_at - process_started_at) * 1000),
     "processStartedAt": round(process_started_at * 1000),
 }
@@ -767,6 +768,8 @@ if exit_code == 0 and packet_dir and render_result:
     except Exception as exc:
         # A packet is evidence; failing to store it must not discard the run.
         review_packet = {"dir": packet_dir, "error": str(exc)}
+
+timings["totalMs"] = round((time.time() - process_started_at) * 1000)
 
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps({
@@ -1226,7 +1229,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
 	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
-	const timings = { ...payload.timings, launchMs: Math.max(0, payload.timings.processStartedAt - spawnAt) };
+	const { processStartedAt, ...measured } = payload.timings;
+	const timings = { ...measured, launchMs: Math.max(0, processStartedAt - spawnAt) };
 	const warnings: string[] = [];
 	if (payload.touchedWorlds.length > 0) {
 		warnings.push(
@@ -1878,9 +1882,10 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 				timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 			});
 			outcomes = payload.branches;
+			const { processStartedAt, ...measuredApply } = payload.timings;
 			applyTimings = {
-				...payload.timings,
-				launchMs: Math.max(0, payload.timings.processStartedAt - applySpawnAt),
+				...measuredApply,
+				launchMs: Math.max(0, processStartedAt - applySpawnAt),
 			};
 		} finally {
 			await release();
