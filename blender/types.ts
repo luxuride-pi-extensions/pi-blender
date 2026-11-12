@@ -21,8 +21,8 @@ export interface BlenderReference {
 	id: string;
 	/** Absolute path to the copy inside the workspace. */
 	path: string;
-	/** Original path the file was added from, kept for provenance. */
-	sourcePath: string;
+	/** Original local path the file was added from; absent for downloads. */
+	sourcePath?: string;
 	/** What the image depicts. Required — the manager cannot see images. */
 	caption: string;
 	/**

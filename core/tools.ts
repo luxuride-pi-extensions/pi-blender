@@ -1588,7 +1588,7 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 		readOnlyHint: false,
 		destructiveHint: false,
 		idempotentHint: false,
-		openWorldHint: false,
+		openWorldHint: true,
 	},
 	description:
 	"Register a reference image with a workspace. Copies the image into <workspace>/references/ and records it in the manifest so it can be listed, addressed by a stable id in briefs, and handed to a critic that cannot read images. The `caption` is required and is the only description of the image available to the worker and critic, because the manager is blocked from reading image files.",

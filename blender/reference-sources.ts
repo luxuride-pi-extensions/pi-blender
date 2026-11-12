@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 
 /** Sources whose licences allow commercial use without an account. */
@@ -69,17 +69,28 @@ export function parseAmbientCg(payload: unknown, query: string, limit: number): 
 	if (!Array.isArray(found)) return [];
 	return found
 		.filter((asset) => typeof asset.assetId === "string")
-		.slice(0, limit)
-		.map((asset) => ({
-			source: "ambientcg" as const,
-			id: String(asset.assetId),
-			name: String(asset.displayName ?? asset.assetId),
-			kind: "texture" as const,
-			pageUrl: `https://ambientcg.com/view?id=${encodeURIComponent(String(asset.assetId))}`,
-			license: "CC0-1.0",
-			credit: `ambientCG — ${String(asset.displayName ?? asset.assetId)}`,
-			tags: Array.isArray(asset.tags) ? asset.tags.map(String) : query.split(/\s+/),
-		}));
+		.map((asset) => {
+			const preview = asset.previewImage;
+			const previewUrl =
+				typeof preview === "string"
+					? preview
+					: preview && typeof preview === "object"
+						? Object.values(preview as Record<string, unknown>).find((value): value is string => typeof value === "string")
+						: undefined;
+			return {
+				source: "ambientcg" as const,
+				id: String(asset.assetId),
+				name: String(asset.displayName ?? asset.assetId),
+				kind: "texture" as const,
+				pageUrl: `https://ambientcg.com/view?id=${encodeURIComponent(String(asset.assetId))}`,
+				previewUrl,
+				license: "CC0-1.0",
+				credit: `ambientCG — ${String(asset.displayName ?? asset.assetId)}`,
+				tags: Array.isArray(asset.tags) ? asset.tags.map(String) : query.split(/\s+/),
+			};
+		})
+		.filter((candidate) => Boolean(candidate.previewUrl))
+		.slice(0, limit);
 }
 
 /**
@@ -90,7 +101,8 @@ export function parseAmbientCg(payload: unknown, query: string, limit: number): 
 export async function searchReferenceSources(options: ReferenceSearchOptions): Promise<ReferenceCandidate[]> {
 	const source = options.source ?? "polyhaven";
 	const kind = options.kind ?? "model";
-	const limit = Math.min(Math.max(options.limit ?? 8, 1), 24);
+	const requested = options.limit ?? 8;
+	const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 8, 1), 24);
 	const request = options.fetchImpl ?? fetch;
 	if (source === "ambientcg") {
 		const query = new URLSearchParams({
@@ -99,13 +111,18 @@ export async function searchReferenceSources(options: ReferenceSearchOptions): P
 			limit: String(limit),
 			include: "displayData",
 		});
-		const response = await request(`https://ambientcg.com/api/v2/full_json?${query}`, { signal: options.signal });
+		await rateLimit();
+		const response = await request(`https://ambientcg.com/api/v2/full_json?${query}`, {
+			signal: options.signal,
+			headers: { "User-Agent": USER_AGENT },
+		});
 		if (!response.ok) throw new Error(`ambientCG search failed: HTTP ${response.status}`);
 		return parseAmbientCg(await response.json(), options.query, limit).slice(0, limit);
 	}
+	await rateLimit();
 	const response = await request(`https://api.polyhaven.com/assets?t=${POLYHAVEN_TYPES[kind]}`, {
 		signal: options.signal,
-		headers: { "User-Agent": "pi-blender/reference-search" },
+		headers: { "User-Agent": USER_AGENT },
 	});
 	if (!response.ok) throw new Error(`Poly Haven search failed: HTTP ${response.status}`);
 	return parsePolyHaven(
@@ -116,7 +133,16 @@ export async function searchReferenceSources(options: ReferenceSearchOptions): P
 	);
 }
 
-const DOWNLOAD_HOSTS = new Set(["cdn.polyhaven.com", "dl.polyhaven.org"]);
+const DOWNLOAD_HOSTS = new Set(["cdn.polyhaven.com", "dl.polyhaven.org", "ambientcg.com"]);
+const USER_AGENT = "pi-blender/0.1 (reference search; +https://github.com/luxuride-pi-extensions/pi-blender)";
+const MIN_SEARCH_INTERVAL_MS = 250;
+let lastSearchAt = 0;
+
+async function rateLimit(): Promise<void> {
+	const wait = lastSearchAt + MIN_SEARCH_INTERVAL_MS - Date.now();
+	if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+	lastSearchAt = Date.now();
+}
 const MAX_BYTES = 25 * 1024 * 1024;
 const IMAGE_TYPES: Record<string, string> = {
 	"image/png": ".png",
@@ -152,7 +178,10 @@ export async function downloadReferenceImage(
 		);
 	}
 	const request = options.fetchImpl ?? fetch;
-	const response = await request(parsed, { signal: options.signal });
+	const response = await request(parsed, { signal: options.signal, redirect: "manual" });
+	if (response.status >= 300 && response.status < 400) {
+		throw new Error(`Reference download redirected to ${response.headers.get("location") ?? "another URL"}; redirects are not followed.`);
+	}
 	if (!response.ok) throw new Error(`Reference download failed: HTTP ${response.status}`);
 	const declared = Number(response.headers.get("content-length") ?? "0");
 	if (declared > MAX_BYTES) {
@@ -162,11 +191,22 @@ export async function downloadReferenceImage(
 	if (!Object.values(IMAGE_TYPES).includes(extension)) {
 		throw new Error(`Reference download is not a supported image (content-type ${response.headers.get("content-type")}).`);
 	}
-	const buffer = Buffer.from(await response.arrayBuffer());
-	if (buffer.byteLength > MAX_BYTES) {
-		throw new Error(`Reference image is ${buffer.byteLength} bytes; the limit is ${MAX_BYTES}.`);
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error("Reference download returned no body.");
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > MAX_BYTES) {
+			await reader.cancel().catch(() => undefined);
+			throw new Error(`Reference image exceeds the ${MAX_BYTES}-byte limit while downloading.`);
+		}
+		chunks.push(value);
 	}
-	const path = `${directory}/download-${randomUUID()}${extension}`;
+	const buffer = Buffer.concat(chunks);
+	const path = join(directory, `download-${randomUUID()}${extension}`);
 	await writeFile(path, buffer);
 	return path;
 }

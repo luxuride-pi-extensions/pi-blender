@@ -165,7 +165,7 @@ const EXPECTED_ANNOTATIONS = {
 		readOnlyHint: false,
 		destructiveHint: false,
 		idempotentHint: false,
-		openWorldHint: false,
+		openWorldHint: true,
 	},
 	blender_reference_search: {
 		readOnlyHint: true,
@@ -378,6 +378,7 @@ test("openWorldHint accurately distinguishes live Blender/external tools from wo
 		"blender_read_only_python",
 		"blender_montage",
 		"blender_compare",
+		"blender_add_reference",
 	];
 	const workspaceFileOnlyTools = [
 		"blender_scene_info",
@@ -387,7 +388,6 @@ test("openWorldHint accurately distinguishes live Blender/external tools from wo
 		"blender_iteration_state",
 		"blender_record_iteration_fact",
 		"blender_export_asset",
-		"blender_add_reference",
 		"blender_image_probe",
 	];
 	const networkTools = ["blender_reference_search"];

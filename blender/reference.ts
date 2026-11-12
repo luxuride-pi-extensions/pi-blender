@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import type {
 	AddReferenceOptions,
@@ -48,6 +48,17 @@ async function assertReadableImage(path: string): Promise<number> {
 		if (stats.size === 0) {
 			throw new Error("the file is empty");
 		}
+		const header = await readFile(path);
+		const magic = header.subarray(0, 12);
+		const isPng = magic.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		const isJpeg = magic[0] === 0xff && magic[1] === 0xd8 && magic[2] === 0xff;
+		const isGif = magic.subarray(0, 4).toString("ascii") === "GIF8";
+		const isWebp =
+			magic.subarray(0, 4).toString("ascii") === "RIFF" && magic.subarray(8, 12).toString("ascii") === "WEBP";
+		const isBmp = magic.subarray(0, 2).toString("ascii") === "BM";
+		if (!isPng && !isJpeg && !isGif && !isWebp && !isBmp) {
+			throw new Error("the bytes are not a PNG, JPEG, GIF, WebP or BMP image");
+		}
 		return stats.size;
 	} catch (error) {
 		throw describeFailure("read reference image", path, error);
@@ -89,9 +100,9 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	} catch (error) {
 		throw describeFailure("download reference image", options.url ?? String(options.path), error);
 	}
+	try {
 	const extension = extname(sourcePath).toLowerCase();
 	if (!REFERENCE_EXTENSIONS.has(extension)) {
-		await cleanupDownloaded(downloaded);
 		throw new Error(
 			`Reference "${options.url ?? options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
 		);
@@ -99,7 +110,6 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	try {
 		await assertReadableImage(sourcePath);
 	} catch (error) {
-		await cleanupDownloaded(downloaded);
 		throw error;
 	}
 
@@ -135,15 +145,13 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	try {
 		await copyFile(sourcePath, targetPath);
 	} catch (error) {
-		await cleanupDownloaded(downloaded);
 		throw describeFailure("copy reference image into the workspace", sourcePath, error);
 	}
-	await cleanupDownloaded(downloaded);
 
 	const reference: BlenderReference = {
 		id,
 		path: targetPath,
-		sourcePath,
+		sourcePath: options.url ? undefined : sourcePath,
 		caption,
 		suggestedView: options.suggestedView?.trim() || undefined,
 		sourceUrl: options.url,
@@ -168,4 +176,7 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 		reference,
 		references,
 	};
+	} finally {
+		await cleanupDownloaded(downloaded);
+	}
 }

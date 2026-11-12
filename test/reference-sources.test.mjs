@@ -39,7 +39,7 @@ test("ambiguous queries intersect words instead of matching any", () => {
 test("ambientCG parsing tolerates a missing list and maps CC0 metadata", () => {
 	assert.deepEqual(parseAmbientCg({}, "brick", 5), []);
 	const candidates = parseAmbientCg(
-		{ foundAssets: [{ assetId: "Bricks001", displayName: "Bricks 001", tags: ["brick"] }] },
+		{ foundAssets: [{ assetId: "Bricks001", displayName: "Bricks 001", tags: ["brick"], previewImage: { 512: "https://ambientcg.com/preview/Bricks001.png" } }] },
 		"brick",
 		5,
 	);
@@ -81,6 +81,9 @@ test("downloads are limited to CC0 hosts and https", async () => {
 		const huge = async () =>
 			new Response(Buffer.alloc(4), { status: 200, headers: { "content-type": "image/png", "content-length": "999999999" } });
 		await assert.rejects(downloadReferenceImage("https://cdn.polyhaven.com/x.png", dir, { fetchImpl: huge }), /limit/);
+		const redirected = async () =>
+			new Response(null, { status: 302, headers: { location: "http://127.0.0.1/secret" } });
+		await assert.rejects(downloadReferenceImage("https://cdn.polyhaven.com/x.png", dir, { fetchImpl: redirected }), /redirects are not followed/);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
