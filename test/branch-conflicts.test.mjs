@@ -250,7 +250,7 @@ test("the branch run path appends through the retention window", () => {
 	// The window is only useful if the run path uses it: a helper-only test stays
 	// green after the wiring is deleted.
 	const source = readFileSync(new URL("../blender/branch.ts", import.meta.url), "utf8");
-	assert.match(source, /current\.branchRuns = appendBranchRun\(current, record\)/);
+	assert.match(source, /current\.branchRuns = appendBranchRun\(\s*\{[\s\S]{0,400}?record,\s*\)/);
 	assert.match(source, /latestStagedBranch\(manifest, name\)/);
 	const current = { branchRuns: Array.from({ length: 5 }, (_, index) => ({ ...record("body"), sequence: index + 1, iteration: index + 1 })) };
 	const appended = appendBranchRun(current, { ...record("body"), sequence: 6, iteration: 6 });
