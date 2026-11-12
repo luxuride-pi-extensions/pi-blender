@@ -196,14 +196,19 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
         component_tree[component] = BVHTree.FromPolygons(
             vertices, [triangles[index] for index in indices], all_triangles=True, epsilon=1e-6
         )
-        component_extent[component] = max(
-            (vertex.length for index in indices for vertex in corners_world[index]), default=1.0
-        ) or 1.0
+        component_points = [vertex for index in indices for vertex in corners_world[index]]
+        if component_points:
+            minimum = Vector((min(point[i] for point in component_points) for i in range(3)))
+            maximum = Vector((max(point[i] for point in component_points) for i in range(3)))
+            component_extent[component] = max((maximum - minimum).length, 1e-6)
+        else:
+            component_extent[component] = 1.0
 
     tree = BVHTree.FromPolygons(vertices, triangles, all_triangles=True, epsilon=1e-6)
     pairs = 0
     adjacent_checked = 0
     tested = 0
+    truncated = False
 
     def inside(bvh, point, extent):
         """True when a point is inside by a three-axis parity vote.
@@ -251,12 +256,13 @@ def _self_intersections(bpy, meshes, faces, depsgraph):
             continue
         tested += 1
         if tested > 50000:
+            truncated = True
             break
         if penetrates(corners_world[first], component_tree[second_component], component_extent[second_component]) or penetrates(
             corners_world[second], component_tree[first_component], component_extent[first_component]
         ):
             pairs += 1
-    return {"pairs": pairs, "adjacentPairs": adjacent_checked, "testedPairs": tested}, None
+    return {"pairs": pairs, "adjacentPairs": adjacent_checked, "testedPairs": tested, "truncated": truncated}, None
 
 def _wall_thickness(bpy, meshes, depsgraph):
     # pi-lens-ignore: ast-grep:unresolved-import-python
@@ -278,6 +284,21 @@ def _wall_thickness(bpy, meshes, depsgraph):
                 continue
             tree = BVHTree.FromBMesh(bm)
             extent = max((obj.matrix_world @ vertex.co).length for vertex in mesh.vertices) if mesh.vertices else 1.0
+            parent = list(range(len(bm.faces)))
+
+            def root(index):
+                while parent[index] != index:
+                    parent[index] = parent[parent[index]]
+                    index = parent[index]
+                return index
+
+            for edge in bm.edges:
+                faces = [face.index for face in edge.link_faces]
+                for other in faces[1:]:
+                    first_root, other_root = root(faces[0]), root(other)
+                    if first_root != other_root:
+                        parent[other_root] = first_root
+            face_component = [root(index) for index in range(len(bm.faces))]
             step = max(1, len(bm.faces) // 300)
             for index, face in enumerate(bm.faces):
                 if index % step:
@@ -289,6 +310,12 @@ def _wall_thickness(bpy, meshes, depsgraph):
                 origin = face.calc_center_median() - face.normal * 1e-5
                 hit = tree.ray_cast(origin, -face.normal, max(extent * 2.0, 1.0))
                 if hit[0] is None or hit[3] is None:
+                    open_faces += 1
+                    continue
+                # A joined model has several shells. Hitting another shell says
+                # nothing about this wall, and a crossing curve would otherwise
+                # measure ~0 and block the character profile.
+                if hit[2] is not None and face_component[hit[2]] != face_component[index]:
                     open_faces += 1
                     continue
                 distance = hit[3]
@@ -441,21 +468,19 @@ def validate(bpy, objects, profile="prop", symmetry_axis="x"):
         record("selfIntersections", _check("block" if pairs["pairs"] else "ok", pairs, "BVHTree.overlap plus a three-axis inside vote for cross-object pairs"), "selfIntersections" in critical)
 
     wall_limit = MIN_WALL_METRES.get(profile)
-    wall, _ = _wall_thickness(bpy, meshes, depsgraph)
-    # Distance is converted to metres above; the thresholds are metres.
-    wall_status = "ok"
-    if wall_limit is not None:
-        if wall["distance"] is None:
-            wall_status = "warn"
-        elif wall["distance"] < wall_limit:
-            wall_status = "block"
-    record("wallThickness", _check(wall_status, wall, "ray from sampled face centres along the inverted normal", limit=wall_limit), "wallThickness" in critical)
+    if wall_limit is None:
+        record("wallThickness", _check("notApplicable", None, "no profile limit; the scan was skipped"), False)
+    else:
+        wall, _ = _wall_thickness(bpy, meshes, depsgraph)
+        # Distance is converted to metres above; the thresholds are metres.
+        wall_status = "warn" if wall["distance"] is None else "block" if wall["distance"] < wall_limit else "ok"
+        record("wallThickness", _check(wall_status, wall, "ray from sampled face centres along the inverted normal, ignoring other shells", limit=wall_limit), "wallThickness" in critical)
 
     symmetry, _ = _symmetry(bpy, meshes, symmetry_axis, depsgraph)
     record("symmetry", _check("warn" if symmetry["rms"] and symmetry["rms"] > 1e-3 else "ok", symmetry, "KD-tree nearest mirrored vertex about the bounds centre"), False)
 
     missing_uv = _uv(meshes, depsgraph)
-    record("uv", _check("block" if missing_uv else "ok", {"missing": missing_uv} if missing_uv else {"missing": []}, "mesh.uv_layers plus polygon loop indices"), "uv" in critical)
+    record("uv", _check("block" if missing_uv else "ok", {"missing": missing_uv} if missing_uv else {"missing": []}, "mesh.uv_layers on the named meshes"), "uv" in critical)
 
     procedural = _materials(bpy, meshes)
     record("materials", _check("warn" if procedural else "ok", {"procedural": procedural} if procedural else {"procedural": []}, "node types outside the glTF-safe set"), "materials" in critical)

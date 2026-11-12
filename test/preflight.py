@@ -89,9 +89,10 @@ def main():
     bpy.ops.object.select_all(action="SELECT")
     bpy.context.view_layer.objects.active = first
     bpy.ops.object.join()
-    verdict = validate(bpy, [first.name], profile="print")
+    verdict = validate(bpy, [first.name], profile="character")
     checks["a joined interpenetration is a fold"] = (
         verdict["checks"]["selfIntersections"]["value"]["pairs"] > 0
+        and "wallThickness" not in verdict["blockers"]
     )
 
     reset()

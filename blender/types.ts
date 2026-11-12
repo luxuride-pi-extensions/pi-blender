@@ -281,7 +281,7 @@ export interface ReviewSheetResult {
 	error?: string;
 }
 
-export type PreflightStatus = "ok" | "warn" | "block";
+export type PreflightStatus = "ok" | "warn" | "block" | "notApplicable";
 
 /** One deterministic check, with the sample and method that produced it. */
 export interface PreflightCheck {
