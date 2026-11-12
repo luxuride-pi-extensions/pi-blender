@@ -779,8 +779,9 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},

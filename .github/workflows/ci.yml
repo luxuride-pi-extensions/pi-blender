@@ -137,7 +137,7 @@ jobs:
       #   a sibling checkout of manager-core; a sibling checkout of
       #   pi-manager-core.
       #   ...
-      #   # tests 83
+      #   # tests 80
       #   # pass 31
       #   # fail 49
       #
@@ -145,11 +145,11 @@ jobs:
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
       # not exist -- which is the state this step creates. Exactly fifteen files
-      # and 83 tests survive:
+      # and 80 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
-      #   critic-calibration.test.mjs    4
+      #   critic-calibration.test.mjs    5
       #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
       #   live-ownership.test.mjs        3
@@ -284,7 +284,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations -e camera-plan \
-                          -e live-ownership -e module-state -e preflight -e tool-surface)
+                          -e live-ownership -e module-state -e preflight -e run-timings -e tool-surface)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
@@ -348,7 +348,7 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "83 tests ran, in 15 files: camera-plan, concurrency-budget,"
+            echo "80 tests ran, in 15 files: camera-plan, concurrency-budget,"
             echo "critic-calibration, headless-changed, live-ownership, module-paths,"
             echo "reference-sources, run-timings, preflight, tool-params, tool-surface,"
             echo "module-state,"
