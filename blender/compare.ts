@@ -145,11 +145,19 @@ function storedPacketComparison(
 		return null;
 	}
 	const panels = record.panels ?? [];
-	if (panels.length < 2) return null;
-	const previousPanel = panels[1]?.file;
+	const previousPanel = panels.find((panel) => panel.name.startsWith("previous"))?.file;
+	if (!previousPanel) return null;
+	const latestSequence = Math.max(
+		...[...(manifest.branchRuns ?? []), ...(manifest.moduleRuns ?? [])]
+			.filter((run) => ("module" in run ? run.module : run.name) === options.moduleName)
+			.map((run) => run.sequence ?? run.iteration),
+	);
+	if (current.sequence !== latestSequence) return null;
 	const image = decodePng(readFileSync(packet.comparePath));
-	const previous = runs[1];
-	const baselineLabel = `ITERATION ${previous?.iteration ?? Math.max(1, current.iteration - 1)}`;
+	const previousIteration = Number(
+		packet.previousDir?.match(/iterations\/(\d+)/)?.[1] ?? Math.max(1, current.iteration - 1),
+	);
+	const baselineLabel = `ITERATION ${previousIteration}`;
 	const currentLabel = `ITERATION ${current.iteration}`;
 	return {
 		workspacePath: manifest.workspacePath,
@@ -158,9 +166,9 @@ function storedPacketComparison(
 		panelPaths: panels.map((panel) => panel.file),
 		views: ["stored"],
 		layout: {
-			panelWidth: Math.floor((image.width - 8 * (panels.length - 1)) / panels.length),
-			panelHeight: image.height,
-			aspect: image.width / image.height,
+			panelWidth: 640,
+			panelHeight: 480,
+			aspect: 640 / 480,
 			columns: panels.length,
 			rows: 1,
 		},

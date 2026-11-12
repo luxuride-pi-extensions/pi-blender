@@ -722,7 +722,10 @@ if exit_code == 0 and packet_dir and render_result:
             panel_files.append({"name": "reference", "file": reference_copy})
             packet["reference"] = {"path": reference_copy, "caption": payload.get("referenceCaption")}
         compare_path = None
-        if len(panel_files) >= 2:
+        # A reference is not a baseline: on a first generation the sheet would
+        # claim a photograph is iteration N-1. Compose only once there is a
+        # previous generation to compare against.
+        if len(panel_files) >= 2 and any(panel["name"].startswith("previous") for panel in panel_files):
             compare_path = compose_review_sheet(panel_files, os.path.join(packet_dir, "compare.png"), columns=len(panel_files))
             compare_path = compare_path["path"]
         packet["compare"] = compare_path
