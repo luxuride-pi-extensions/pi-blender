@@ -1,7 +1,7 @@
 ---
 name: blender-finalizer
 description: Blender asset finalizer — authors and runs one modules/finalize/script.py that applies transforms, fixes origins, sets shading, normalizes names, and clears the studio rig. Run once at the end of an asset build, not during modelling.
-tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_session_context, contact_supervisor
+tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_bridge_status, blender_session_context, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file
@@ -62,3 +62,9 @@ Open questions: <none | concise list>
 ```
 
 Rules: keep it under ~20 lines. Never paste `script.py` or raw logs. On failure after 3 self-fix attempts, stop and report the error verbatim. If you need a decision you are not authorized to make (which origin, whether to remove the rig), use `contact_supervisor` with `reason: "need_decision"` and wait for the reply.
+
+## Record the stage you alone can observe
+
+After your final pass is verified, call
+`blender_build_advance { workspace, stage: "finalized", evidence: "<what you checked and the resulting scene facts>" }`.
+`blender_export_asset` refuses a build that has not reached `finalized` unless the caller explicitly passes `allowUnfinalized: true`; that flag is for a deliberate intermediate export, not for skipping your pass. If the transition is refused, read `blender_build_status` and report which stage is missing rather than forcing it.

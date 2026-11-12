@@ -67,6 +67,8 @@ const EXPECTED_TOOL_NAMES = [
 	"blender_job_status",
 	"blender_job_cancel",
 	"blender_usage_guess",
+	"blender_build_status",
+	"blender_build_advance",
 ];
 
 const EXPECTED_READ_ONLY_NAMES = [
@@ -104,7 +106,7 @@ test("core files import NO pi symbols or pi-manager-core", () => {
 // pi extension registers, and a silent drop here would make a tool vanish from
 // the MCP façade while still working in pi.
 test("core capability layer exports every Blender tool with valid shapes", () => {
-	assert.equal(BLENDER_TOOLS.length, 35);
+	assert.equal(BLENDER_TOOLS.length, 37);
 	assert.deepEqual(BLENDER_TOOL_NAMES, EXPECTED_TOOL_NAMES);
 
 	for (const tool of BLENDER_TOOLS) {

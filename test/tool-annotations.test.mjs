@@ -221,6 +221,18 @@ const EXPECTED_ANNOTATIONS = {
 		idempotentHint: true,
 		openWorldHint: true,
 	},
+	blender_build_status: {
+		readOnlyHint: true,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: false,
+	},
+	blender_build_advance: {
+		readOnlyHint: false,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: false,
+	},
 	blender_workspace_prune: {
 		readOnlyHint: false,
 		destructiveHint: true,
@@ -279,7 +291,7 @@ const EXPECTED_ANNOTATIONS = {
 
 test("all registered blender tools are enumerated", () => {
 	const blocks = toolBlocks();
-	assert.equal(blocks.length, 35, `expected 35 registered tools, found ${blocks.length}`);
+	assert.equal(blocks.length, 37, `expected 37 registered tools, found ${blocks.length}`);
 	const foundNames = blocks.map((b) => b.name).sort();
 	const expectedNames = Object.keys(EXPECTED_ANNOTATIONS).sort();
 	assert.deepEqual(foundNames, expectedNames);

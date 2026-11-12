@@ -1,7 +1,7 @@
 ---
 name: blender-worker
 description: Blender module worker — authors and runs one modules/<name>/script.py and reports back. Use one per module in pi-blender multi-part tasks.
-tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_branch_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_session_context, contact_supervisor
+tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_branch_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_read_only_python, blender_session_context, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file
