@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 
@@ -160,6 +161,7 @@ async function acquire(
 	cwd: string,
 	onSpawn?: (pid: number) => void,
 ): Promise<WarmWorker> {
+	cwd = resolvePath(cwd);
 	const worker = idle.pop();
 	if (worker) {
 		reused += 1;
@@ -188,7 +190,7 @@ export async function runWarmJob(options: WarmJobOptions): Promise<WarmJobResult
 		payload: options.payload,
 		scriptArgs: options.scriptArgs ?? [],
 		blendPath: options.blendPath ?? null,
-		cwd: options.cwd,
+		cwd: resolvePath(options.cwd),
 	};
 	return new Promise<WarmJobResult>((resolve, reject) => {
 		const cleanup = (healthy: boolean) => {

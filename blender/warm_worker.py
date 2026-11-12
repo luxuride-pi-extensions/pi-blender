@@ -24,7 +24,16 @@ def run_job(job):
 
     # A job inherits the worker's cwd otherwise, and a script that chdirs would
     # move every later job. Each job starts where its caller asked.
-    os.chdir(job.get("cwd") or os.getcwd())
+    try:
+        os.chdir(job.get("cwd") or os.getcwd())
+    except OSError as error:
+        return {
+            "id": job.get("id"),
+            "code": 1,
+            "stdout": "",
+            "stderr": f"Could not enter the job's cwd {job.get('cwd')!r}: {error}",
+            "pid": os.getpid(),
+        }
     before_path = list(sys.path)
     before_argv = list(sys.argv)
     before_modules = set(sys.modules)

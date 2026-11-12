@@ -902,6 +902,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		throw error;
 	}
 
+	let payload!: BranchRunPayload;
+	try {
 	const rawScript = await readFile(scriptPath, "utf-8");
 	let effectiveScriptPath = scriptPath;
 	if (!rawScript.includes(MODULE_PREAMBLE_MARKER)) {
@@ -1006,14 +1008,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const restoreCheckpoint = async (): Promise<boolean> => {
 		try {
 			await copyFile(checkpointPath, manifest.blendPath);
-			await utimes(manifest.blendPath, capturedAt, capturedAt);
-			await rm(checkpointPath, { force: true });
-			return true;
 		} catch {
 			return false;
 		}
+		await utimes(manifest.blendPath, capturedAt, capturedAt).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		return true;
 	};
-	let payload!: BranchRunPayload;
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
 			cwd: options.cwd,
@@ -1140,7 +1141,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				);
 			}
 		}
-		await releaseDirectLock?.();
 	}
 	if (directConflict) {
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
@@ -1285,6 +1285,15 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		warnings,
 		status: "staged",
 	};
+	} catch (error) {
+		if (direct && !payload) {
+			await rm(checkpointPath, { force: true }).catch(() => undefined);
+			await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		}
+		throw error;
+	} finally {
+		await releaseDirectLock?.();
+	}
 }
 
 /* ------------------------------------------------------------------ *

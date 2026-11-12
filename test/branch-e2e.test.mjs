@@ -1624,6 +1624,37 @@ raise RuntimeError("after save")
 });
 
 
+
+test("a setup failure releases the apply lock", { skip, timeout: 180_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		mkdirSync(join(ws.workspacePath, "modules", "broken", "script.py"), { recursive: true });
+		await assert.rejects(
+			module.blenderModuleRun({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				moduleName: "broken",
+				render: false,
+				direct: true,
+				timeoutSeconds: 60,
+			}),
+		);
+		rmSync(join(ws.workspacePath, "modules", "broken", "script.py"), { recursive: true, force: true });
+		writeScript(ws.workspacePath, "broken", ADD_CUBE);
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "broken",
+			render: false,
+			direct: true,
+			timeoutSeconds: 120,
+		});
+		assert.equal(result.changed, true, "a later direct run can still take the lock");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a direct run refuses a datablock a staged sibling owns", { skip, timeout: 180_000 }, async () => {
 	const ws = await makeWorkspace();
 	try {
