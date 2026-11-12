@@ -167,6 +167,12 @@ const EXPECTED_ANNOTATIONS = {
 		idempotentHint: false,
 		openWorldHint: false,
 	},
+	blender_reference_search: {
+		readOnlyHint: true,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: true,
+	},
 	blender_bridge_status: {
 		readOnlyHint: true,
 		destructiveHint: false,
@@ -291,7 +297,7 @@ const EXPECTED_ANNOTATIONS = {
 
 test("all registered blender tools are enumerated", () => {
 	const blocks = toolBlocks();
-	assert.equal(blocks.length, 37, `expected 37 registered tools, found ${blocks.length}`);
+	assert.equal(blocks.length, 38, `expected 38 registered tools, found ${blocks.length}`);
 	const foundNames = blocks.map((b) => b.name).sort();
 	const expectedNames = Object.keys(EXPECTED_ANNOTATIONS).sort();
 	assert.deepEqual(foundNames, expectedNames);
@@ -384,8 +390,9 @@ test("openWorldHint accurately distinguishes live Blender/external tools from wo
 		"blender_add_reference",
 		"blender_image_probe",
 	];
+	const networkTools = ["blender_reference_search"];
 
-	for (const name of liveTools) {
+	for (const name of [...liveTools, ...networkTools]) {
 		const block = blocks.find((b) => b.name === name);
 		assert.ok(block, `missing ${name}`);
 		const annotations = parseAnnotations(block);

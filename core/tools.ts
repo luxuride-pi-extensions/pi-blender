@@ -8,6 +8,7 @@
 import { Type } from "typebox";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
 import type { AssetExportOptions, CameraFrontAxis, CameraProfile, CameraShotKind, ImportFormat } from "../blender/types.js";
+import { searchReferenceSources, type ReferenceSource } from "../blender/reference-sources.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
 	blenderAddReference,
@@ -1595,10 +1596,24 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 	workspace: Type.String({
 		description: "Explicit workspace path for the Blender task.",
 	}),
-	path: Type.String({
-		description:
-			"Path to an existing image file on disk. It is COPIED into the workspace references/ directory, so later moves or deletions of the original do not break pending work. Supported: .png .jpg .jpeg .gif .webp .bmp",
-	}),
+	path: Type.Optional(
+		Type.String({
+			description:
+				"Path to an existing image file on disk. It is COPIED into the workspace references/ directory, so later moves or deletions of the original do not break pending work. Supported: .png .jpg .jpeg .gif .webp .bmp",
+		}),
+	),
+	url: Type.Optional(
+		Type.String({
+			description:
+				"HTTPS image URL on a CC0 host (cdn.polyhaven.com or dl.polyhaven.org), downloaded once and then copied in. Use blender_reference_search to find one. Pass either path or url, not both.",
+		}),
+	),
+	license: Type.Optional(
+		Type.String({ description: "Licence stated by the source, e.g. CC0-1.0. Recorded in the manifest." }),
+	),
+	credit: Type.Optional(
+		Type.String({ description: "Credit line required or recommended by the source. Recorded in the manifest." }),
+	),
 	caption: Type.String({
 		description:
 			"What this image depicts, in one or two sentences: the subject, the angle it is shot from, and anything a worker or critic would need to judge against it. Required — you cannot read the image yourself, so this text is the only thing that will convey its contents.",
@@ -1621,6 +1636,9 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 		cwd: context?.cwd ?? process.cwd(),
 		workspace: params.workspace,
 		path: params.path,
+		url: params.url,
+		license: params.license,
+		credit: params.credit,
 		caption: params.caption,
 		id: params.id,
 		suggestedView: params.suggestedView,
@@ -1631,6 +1649,34 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 		content: [{ type: "text", text: formatJsonResult(result) }],
 		details: result,
 	};
+	},
+};
+
+export const blenderReferenceSearchTool: CoreToolDefinition = {
+	name: "blender_reference_search",
+	label: "Blender Reference Search",
+	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+	description:
+		"Search CC0 reference catalogues (Poly Haven models/textures/HDRI, ambientCG materials) and return metadata, licence, credit and a preview URL. It does not download anything: choose a candidate and pass its preview URL to blender_add_reference, which fetches it once, records provenance and copies it into the workspace.",
+	parameters: Type.Object({
+		query: Type.String({ description: "Words to match against the asset name, id and tags." }),
+		source: Type.Optional(
+			Type.String({ enum: ["polyhaven", "ambientcg"], description: "Catalogue to search. Default polyhaven." }),
+		),
+		kind: Type.Optional(
+			Type.String({ enum: ["model", "texture", "hdri"], description: "Poly Haven asset type. Default model." }),
+		),
+		limit: Type.Optional(Type.Number({ description: "Maximum candidates (1–24, default 8).", minimum: 1, maximum: 24 })),
+	}),
+	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+		const candidates = await searchReferenceSources({
+			query: params.query,
+			source: params.source as ReferenceSource | undefined,
+			kind: params.kind as "model" | "texture" | "hdri" | undefined,
+			limit: params.limit,
+			signal: context?.signal,
+		});
+		return { content: [{ type: "text", text: formatJsonResult({ candidates }) }], details: { candidates } };
 	},
 };
 
@@ -2435,6 +2481,7 @@ export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderRecordIterationFactTool,
 	blenderExportAssetTool,
 	blenderAddReferenceTool,
+	blenderReferenceSearchTool,
 	blenderBridgeStatusTool,
 	blenderGeometryProbeTool,
 	blenderImageProbeTool,

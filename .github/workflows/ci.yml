@@ -137,15 +137,15 @@ jobs:
       #   a sibling checkout of manager-core; a sibling checkout of
       #   pi-manager-core.
       #   ...
-      #   # tests 75
-      #   # pass 26
+      #   # tests 80
+      #   # pass 31
       #   # fail 49
       #
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly thirteen files
-      # and 75 tests survive:
+      # not exist -- which is the state this step creates. Exactly fourteen files
+      # and 80 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
@@ -156,6 +156,7 @@ jobs:
       #   module-paths.test.mjs          7
       #   module-state.test.mjs          6
       #   preflight.test.mjs             2
+      #   reference-sources.test.mjs     5
       #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
       #   unchanged-routing.test.mjs     3
@@ -188,6 +189,7 @@ jobs:
             test/module-paths.test.mjs \
             test/module-state.test.mjs \
             test/preflight.test.mjs \
+            test/reference-sources.test.mjs \
             test/tool-params.test.mjs \
             test/tool-surface.test.mjs \
             test/unchanged-routing.test.mjs \
@@ -344,9 +346,10 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "75 tests ran, in 13 files: camera-plan, concurrency-budget,"
+            echo "80 tests ran, in 14 files: camera-plan, concurrency-budget,"
             echo "critic-calibration, headless-changed, live-ownership, module-paths,"
-            echo "module-state, preflight, tool-params, tool-surface,"
+            echo "reference-sources, preflight, tool-params, tool-surface,"
+            echo "module-state,"
             echo "unchanged-routing and windowless-tools."
             echo "Those are the only files measured to pass without a"
             echo "pi-manager-core checkout."

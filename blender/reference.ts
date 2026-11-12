@@ -1,4 +1,4 @@
-import { copyFile, mkdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, rm, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import type {
 	AddReferenceOptions,
@@ -7,6 +7,7 @@ import type {
 	BlenderWorkspaceManifest,
 } from "./types.js";
 import { nowIso } from "./utils.js";
+import { downloadReferenceImage } from "./reference-sources.js";
 import { getManifestPath, loadWorkspaceManifest, readManifest, updateManifest } from "./workspace.js";
 
 /** Extensions the manager and critics can actually reason about. */
@@ -27,6 +28,10 @@ function sanitizeReferenceId(raw: string): string {
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 64);
 	return cleaned.length > 0 ? cleaned : "reference";
+}
+
+async function cleanupDownloaded(path: string | undefined): Promise<void> {
+	if (path) await rm(path, { force: true }).catch(() => undefined);
 }
 
 function describeFailure(action: string, target: string, error: unknown): Error {
@@ -64,15 +69,39 @@ export function getReferencesDir(workspacePath: string): string {
  */
 export async function blenderAddReference(options: AddReferenceOptions): Promise<AddReferenceResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
+	const referencesDir = getReferencesDir(manifest.workspacePath);
+	await mkdir(referencesDir, { recursive: true });
 
-	const sourcePath = isAbsolute(options.path) ? options.path : resolve(options.cwd, options.path);
+	if (!options.path && !options.url) {
+		throw new Error("A reference needs either a local path or an HTTPS url.");
+	}
+	if (options.path && options.url) {
+		throw new Error("Pass either a local path or a url, not both.");
+	}
+	let downloaded: string | undefined;
+	let sourcePath: string;
+	try {
+		sourcePath = options.url
+			? (downloaded = await downloadReferenceImage(options.url, referencesDir, { signal: options.signal }))
+			: isAbsolute(options.path as string)
+				? (options.path as string)
+				: resolve(options.cwd, options.path as string);
+	} catch (error) {
+		throw describeFailure("download reference image", options.url ?? String(options.path), error);
+	}
 	const extension = extname(sourcePath).toLowerCase();
 	if (!REFERENCE_EXTENSIONS.has(extension)) {
+		await cleanupDownloaded(downloaded);
 		throw new Error(
-			`Reference "${options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
+			`Reference "${options.url ?? options.path}" is not a supported image. Supported: ${[...REFERENCE_EXTENSIONS].join(", ")}.`,
 		);
 	}
-	await assertReadableImage(sourcePath);
+	try {
+		await assertReadableImage(sourcePath);
+	} catch (error) {
+		await cleanupDownloaded(downloaded);
+		throw error;
+	}
 
 	const caption = options.caption.trim();
 	if (caption.length === 0) {
@@ -85,8 +114,6 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	}
 
 	const stem = sanitizeReferenceId(options.id ?? basename(sourcePath, extname(sourcePath)));
-	const referencesDir = getReferencesDir(manifest.workspacePath);
-	await mkdir(referencesDir, { recursive: true });
 
 	// Disambiguate rather than overwrite: re-adding the same id is how a user
 	// swaps in a corrected image, and silently replacing the old bytes would
@@ -108,8 +135,10 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 	try {
 		await copyFile(sourcePath, targetPath);
 	} catch (error) {
+		await cleanupDownloaded(downloaded);
 		throw describeFailure("copy reference image into the workspace", sourcePath, error);
 	}
+	await cleanupDownloaded(downloaded);
 
 	const reference: BlenderReference = {
 		id,
@@ -117,6 +146,9 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 		sourcePath,
 		caption,
 		suggestedView: options.suggestedView?.trim() || undefined,
+		sourceUrl: options.url,
+		license: options.license?.trim() || undefined,
+		credit: options.credit?.trim() || undefined,
 		addedAt: nowIso(),
 	};
 
