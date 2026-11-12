@@ -205,8 +205,32 @@ def fingerprint_material(material):
     return digest.hexdigest()
 
 
+def fingerprint_scene(scene):
+    """Render settings a module can change without touching a datablock."""
+    render = scene.render
+    view = scene.view_settings
+    return "|".join(
+        [
+            f"engine={render.engine}",
+            f"film={render.film_transparent}",
+            f"view={view.view_transform}",
+            f"look={view.look}",
+            f"exposure={view.exposure:.6f}",
+            f"gamma={view.gamma:.6f}",
+            f"unit={scene.unit_settings.scale_length:.6f}",
+        ]
+    )
+
+
+def _world_digest(world):
+    tree = getattr(world, "node_tree", None)
+    if tree is None:
+        return _rna_state(world)
+    return fingerprint_material(world)
+
+
 def snapshot(bpy):
-    """Hash every object, material and image in the current file."""
+    """Hash every datablock and render setting a module can change."""
     # The depsgraph update is what makes the fingerprints below truthful. A script
     # that sets obj.location has changed matrix_world only lazily, so reading it
     # without this returns the PREVIOUS transform -- and a moved object then
@@ -221,6 +245,10 @@ def snapshot(bpy):
         # Paint writes pixels in place, and those pixels are not reachable from
         # an object or a material hash by themselves.
         "images": {image.name: _image_digest(image) for image in bpy.data.images},
+        # A light rig changes the world even when no object travels; the world's
+        # node tree is where its colour and strength live.
+        "worlds": {world.name: _world_digest(world) for world in bpy.data.worlds},
+        "scene": fingerprint_scene(bpy.context.scene),
     }
 
 
@@ -232,7 +260,7 @@ def content_changed(before, after):
     """
     if before is None or after is None:
         return False
-    for kind in ("objects", "materials", "images"):
+    for kind in ("objects", "materials", "images", "worlds"):
         before_map = before.get(kind, {})
         after_map = after.get(kind, {})
         if set(before_map) != set(after_map):
@@ -240,4 +268,4 @@ def content_changed(before, after):
         for name, fingerprint in before_map.items():
             if after_map.get(name) != fingerprint:
                 return True
-    return False
+    return before.get("scene") != after.get("scene")

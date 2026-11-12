@@ -1176,7 +1176,9 @@ bsdf.inputs["Base Color"].default_value = (0.1, 0.4, 0.8, 1.0)
 		assert.equal(repainted.stateDigest, painted.stateDigest, "the carried material keeps the digest");
 		assert.equal(repainted.unchangedSinceLastRun, true, "and the rebuild is recognised as unchanged");
 		const manifest = await workspace.loadWorkspaceManifest(ws.root, ws.workspacePath);
-		const record = (manifest.branchRuns ?? []).find((run) => run.module === "glaze");
+		const record = (manifest.branchRuns ?? []).find(
+			(run) => run.module === "glaze" && run.changed,
+		);
 		assert.deepEqual(record?.touchedObjects, [], "nothing in the scene graph moved");
 		assert.deepEqual(record?.touchedMaterials, ["Glaze"], "the only change is the material's content");
 		assert.equal(painted.changed, true, "a material-only edit is still a change");
@@ -1463,4 +1465,32 @@ if green < 0.5:
 `);
 	const check = await branch.blenderBranchRun({ cwd: ws.root, workspace: ws.workspacePath, moduleName: "check", timeoutSeconds: 300 });
 	assert.equal(check.changed, false);
+});
+
+test("a world edit is reported as unmergeable rather than unchanged", { skip }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "light", `
+import bpy
+world = bpy.context.scene.world
+world.use_nodes = True
+background = world.node_tree.nodes["Background"]
+background.inputs["Strength"].default_value = 2.5
+`);
+		const run = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "light",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(run.changed, true, "a world edit is content");
+		assert.match(
+			(run.warnings ?? []).join("\n"),
+			/world settings.*headless apply/,
+			"and the result says the headless apply cannot carry it",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
 });
