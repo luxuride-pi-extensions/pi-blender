@@ -2269,7 +2269,7 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Report or remove old iteration renders that no module's newest render and no current critique depends on. With includeCheckpoints/includeBranches it also reports old whole-file checkpoints over the global budget and applied branch copies, each with exact files and bytes. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. The newest checkpoint of every module is always kept. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
+	"Report or remove old iteration renders that no module's newest render and no current critique depends on. With includeCheckpoints/includeBranches it also reports old whole-file checkpoints over the global budget and applied branch copies, each with exact files and bytes. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. The newest AND previous checkpoint of every module are always kept: compare and revert both need them. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
 	parameters: Type.Object({
 		workspace: Type.String({ description: "Explicit workspace path." }),
 		dryRun: Type.Optional(
@@ -2284,7 +2284,7 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		),
 		includeCheckpoints: Type.Optional(
 			Type.Boolean({
-				description: "Also plan old run checkpoints over the global budget, keeping each module's newest.",
+				description: "Also plan old run checkpoints over the global budget, keeping each module's newest and previous generation.",
 			}),
 		),
 		includeBranches: Type.Optional(

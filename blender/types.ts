@@ -166,7 +166,12 @@ export interface BlenderModuleRunRecord {
 }
 
 /** Where a staged branch run is in its life. */
-export type BranchRunStatus = "staged" | "applied" | "unchanged" | "conflict" | "failed";
+/**
+ * `running` covers the window between claiming an iteration and the script
+ * finishing: the branch file already exists then, so a prune must treat it as
+ * live work even though there is no result to apply.
+ */
+export type BranchRunStatus = "running" | "staged" | "applied" | "unchanged" | "conflict" | "failed";
 /** One generation's stored visual evidence, under modules/<name>/iterations/NN. */
 export interface ReviewPacket {
 	dir: string;

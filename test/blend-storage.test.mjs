@@ -127,6 +127,24 @@ test("a branch plan includes applied copies and never staged ones", async () => 
 	}
 });
 
+test("a branch claimed but not yet finished is live work, not history", async () => {
+	const root = mkdtempSync(join(tmpdir(), "blend-storage-"));
+	try {
+		const branch = join(root, "branch.blend");
+		writeFileSync(branch, "BLENDER");
+		const state = manifest(root, {
+			branchRuns: [
+				record(branch, "a", 1, 1),
+				record(branch, "a", 2, 2, { status: "running", at: new Date().toISOString() }),
+			],
+		});
+		const plan = await storage.planBlendStorage(state, { includeBranches: true });
+		assert.deepEqual(plan.branches, [], "the previous applied record must not expose the live branch file");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a staged record sharing the module's single branch file keeps it live", async () => {
 	const root = mkdtempSync(join(tmpdir(), "blend-storage-"));
 	try {

@@ -589,9 +589,10 @@ Start pi in any project dir. The extension:
   reflink-capable filesystem allocates nothing until one side changes, and a
   failed branch copy falls back to a normal copy. Byte counts are apparent
   sizes: a reflink's shared extents are counted in full for both files, which
-  overstates disk use but never understates it. Pruning is the only enforcement
-  point — a run never deletes evidence — and an applied branch file is
-  tombstoned only when the prune actually removes it.
+  overstates disk use but never understates it. Pruning is the only point
+  where the global budget is enforced; each run still windows its own checkpoint
+  history to five. An applied branch file is tombstoned only when the prune
+  actually removes it.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
   `modules/<name>/render.png` (with `resolution`/`samples` parity with

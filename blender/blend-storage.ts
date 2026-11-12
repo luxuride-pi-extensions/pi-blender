@@ -90,7 +90,10 @@ export async function planBlendStorage(
 	// path shared with a staged or unchanged record is live work, not history.
 	const liveBranchPaths = new Set(
 		(manifest.branchRuns ?? [])
-			.filter((run) => (run.status === "staged" || run.status === "unchanged") && !run.branchRetired)
+			.filter(
+			(run) =>
+				(run.status === "running" || run.status === "staged" || run.status === "unchanged") && !run.branchRetired,
+		)
 			.map((run) => run.branchPath),
 	);
 	for (const run of manifest.branchRuns ?? []) {
