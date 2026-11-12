@@ -24,9 +24,13 @@ test("tool-schema prose stays inside the measured budget", () => {
 	// repository already uses. The full text lives in the skills, not here.
 	const total = BLENDER_TOOLS.reduce((sum, tool) => sum + proseLength(tool), 0);
 	assert.ok(
-		total <= 14_400,
-		`tool-schema prose is ${total} characters; the budget is 14400. Move rules into the skill instead of the schema.`,
+		total <= 12_500,
+		`tool-schema prose is ${total} characters; the budget is 12500. Move rules into the skill instead of the schema.`,
 	);
+	for (const tool of BLENDER_TOOLS) {
+		const length = proseLength(tool);
+		assert.ok(length <= 800, `${tool.name} carries ${length} characters of schema prose; the per-tool cap is 800.`);
+	}
 });
 
 test("every trimmed description points at the skill that carries its rules", async () => {

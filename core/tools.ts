@@ -251,7 +251,7 @@ export const blenderWindowLayoutTool: CoreToolDefinition = {
 	openWorldHint: true,
 },
 	description:
-	'Read the live Blender UI window layout, screens, areas, space types, active object, and selection as JSON… Full rules: skill `blender-live-state`.',
+	'Read the live Blender UI layout and selection as JSON, or capture a byte-capped screenshot. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.Optional(
 		Type.String({
@@ -268,7 +268,7 @@ export const blenderWindowLayoutTool: CoreToolDefinition = {
 	screenshot: Type.Optional(
 		Type.Boolean({
 			description:
-				'Whether to capture a screenshot (default…',
+				'Whether to capture a screenshot. Defaults to false.',
 		}),
 	),
 	as_image: Type.Optional(
@@ -642,14 +642,14 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Run a workspace module: checkpoint model.blend as the run found it to modules/<name>/runs/NN/pre-NN.blend,… Full rules: skill `blender-modules`.',
+	'Run a workspace module: checkpoint model.blend, execute the script, and stage the branch for apply. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			'Module name (lowercase letters, digits,…',
+			'Module name (lowercase letters, digits, and underscores).',
 	}),
 	render: Type.Optional(
 		Type.Boolean({
@@ -797,14 +797,14 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Run a workspace module HEADLESSLY against its own private copy of model.blend… Full rules: skill `blender-modules`.',
+	'Run a workspace module HEADLESSLY against its own private copy of model.blend. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',
 	}),
 	moduleName: Type.String({
 		description:
-			'Module name (lowercase letters, digits,…',
+			'Module name (lowercase letters, digits, and underscores).',
 	}),
 	render: Type.Optional(
 		Type.Boolean({
@@ -1437,12 +1437,12 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Export the workspace blend to an interchange format: glb or gltf (materials, scene graph, modifiers… Full rules: skill `blender-create`.',
+	'Export the workspace blend to glb or gltf with its materials and scene graph. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
 	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
 	format: Type.Optional(
 		Type.String({
-			description: 'glb (default, single file), gltf (separate…',
+			description: 'glb (default, single file) or gltf (separate files).',
 			enum: ["glb", "gltf", "obj", "stl"],
 		}),
 	),
@@ -1534,7 +1534,7 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 	'Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
 	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
-	path: Type.String({ description: 'Path to the 3D asset file to import (obj,…' }),
+	path: Type.String({ description: 'Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx).' }),
 	format: Type.Optional(
 		Type.String({
 			description: 'Format of the asset: obj, stl, gltf, glb,…',
@@ -1795,7 +1795,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 	densityCap: Type.Optional(
 		Type.Number({
 			description:
-				'Face ceiling for the `sculpt` check\'s densit…',
+				'Face ceiling for the `sculpt` check\'s density budget.',
 		}),
 	),
 	tolerance: Type.Optional(
@@ -1960,7 +1960,7 @@ export const blenderReadOnlyPythonTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Run a Python measurement script in the LIVE Blender scene and get its stdout back, with mutating bpy… Full rules: skill `blender-live-state`.',
+	'Run a Python measurement script in the LIVE scene and get its stdout; mutating bpy operations are refused. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path for the Blender task.',

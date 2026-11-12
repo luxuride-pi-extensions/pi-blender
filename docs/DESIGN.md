@@ -42,11 +42,12 @@ docs/adr/                   architectural decision records (0001: do not rewrite
 
 ### Tool schema prose
 
-A tool description is a selector, not a manual. Each schema keeps the first
-sentence and a pointer (`Full rules: skill blender-…`); the complete text
-lives under `### blender_…` in the skill that owns the tool. `test/tool-schema-budget.test.mjs` holds the total to 14,400 characters and fails when a rule is
-added back to a schema instead of the skill. Parameter descriptions keep only
-their first sentence for the same reason.
+A tool description is a selector, not a manual. Each schema keeps a short
+selector and a pointer (`Full rules: skill blender-…`); the complete text lives
+under `### blender_…` in the skill that owns the tool. `test/tool-schema-budget.test.mjs`
+caps total schema prose at 12,500 characters and each tool at 800, and checks
+that the named skill documents that tool, so a rule cannot return to a schema
+instead of the skill. Parameter descriptions keep a short selector too.
 
 
 ## Flatpak fixes (vs. upstream)

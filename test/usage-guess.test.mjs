@@ -47,7 +47,7 @@ function scratchRoot() {
 	return mkdtempSync(join(base, "usage-guess-"));
 }
 
-test("sourceBlend is documented with its rig/lighting consequences stated explicitly in index.ts", () => {
+test("sourceBlend is documented with its rig/lighting consequences", () => {
 	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-modules/SKILL.md"), "utf-8");
 
 	// blender_workspace_init tool description must mention discarding default studio template rig / lighting

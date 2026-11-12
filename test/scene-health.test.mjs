@@ -64,17 +64,21 @@ function scratchRoot() {
 	return mkdtempSync(join(base, "health-"));
 }
 
-test("blender_scene_info schema documents content vs file-health split", () => {
-	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf8") + readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf8");
+test("blender_scene_info documents the content vs file-health split", () => {
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf8");
 	const start = toolsSource.indexOf('name: "blender_scene_info"');
 	assert.notEqual(start, -1, "blender_scene_info is registered in index.ts");
 	const block = toolsSource.slice(start, toolsSource.indexOf("pi.registerTool", start + 1));
 
-	// Split between content and file-health stated in description
+	const skill = readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf8");
+	const skillStart = skill.indexOf("### blender_scene_info");
+	assert.notEqual(skillStart, -1, "blender_scene_info is documented in blender-analyze");
+	const skillEnd = skill.indexOf("\n### ", skillStart + 4);
+	const documentation = skill.slice(skillStart, skillEnd === -1 ? undefined : skillEnd);
 	assert.match(
-		block,
+		documentation,
 		/scene content.*or file health|file-health/i,
-		"description must document the split between scene content and file-health categories",
+		"the skill must document the split between scene content and file-health categories",
 	);
 
 	// Both missingFiles and linkedLibraries are declared in category union

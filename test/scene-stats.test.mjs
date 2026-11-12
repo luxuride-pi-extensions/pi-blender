@@ -52,7 +52,8 @@ function scratchRoot() {
 }
 
 test("index.ts declares scene_stats as a blender_scene_info category without registering a new tool", () => {
-	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8") + readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8");
+	const toolsSource = readFileSync(join(REPO, "core/tools.ts"), "utf-8");
+	const skillSource = readFileSync(join(REPO, "blender/skills/blender-analyze/SKILL.md"), "utf-8");
 
 	// Acceptance criteria: No new top-level tool registered for scene stats
 	assert.equal(
@@ -69,15 +70,15 @@ test("index.ts declares scene_stats as a blender_scene_info category without reg
 
 	// Acceptance criteria: Description states whether counts are objects or unique data-blocks, and mesh evaluation
 	assert.ok(
-		/unique data-blocks/i.test(toolsSource),
+		/unique data-blocks/i.test(skillSource),
 		"index.ts tool description must state whether counts are objects or unique data-blocks",
 	);
 	assert.ok(
-		/un-evaluated.*mesh/i.test(toolsSource) || /base mesh/i.test(toolsSource),
+		/un-evaluated.*mesh/i.test(skillSource) || /base mesh/i.test(skillSource),
 		"index.ts tool description must indicate which mesh evaluation polycount reflects",
 	);
 	assert.ok(
-		/multi-scene/i.test(toolsSource) && /total/i.test(toolsSource),
+		/multi-scene/i.test(skillSource) && /total/i.test(skillSource),
 		"index.ts tool description must document multi-scene breakdown and total",
 	);
 });
