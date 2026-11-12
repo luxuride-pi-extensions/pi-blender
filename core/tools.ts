@@ -2144,7 +2144,7 @@ export const blenderGetPythonApiDocsTool: CoreToolDefinition = {
 			"The bpy identifier to look up (e.g. 'bpy.types.Modifier', 'bpy.ops.mesh.primitive_uv_sphere_add'), or a wildcard query (e.g. 'bpy.ops.mesh.*', 'bpy.types.*') to list available members.",
 	}),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderGetPythonApiDocs({
 		identifier: params.identifier,
 	});
@@ -2178,7 +2178,7 @@ export const blenderSearchApiDocsTool: CoreToolDefinition = {
 		}),
 	),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderSearchApiDocs({
 		query: params.query,
 		limit: params.limit,
@@ -2213,7 +2213,7 @@ export const blenderSearchManualDocsTool: CoreToolDefinition = {
 		}),
 	),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderSearchManualDocs({
 		query: params.query,
 		limit: params.limit,
@@ -2242,7 +2242,7 @@ export const blenderJobStatusTool: CoreToolDefinition = {
 		description: "The unique job identifier returned when the deferred job was dispatched.",
 	}),
 }),
-	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	execute: async (params, _context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderJobStatus({ jobId: params.jobId });
 	return {
 		content: [{ type: "text", text: formatJsonResult(result) }],
