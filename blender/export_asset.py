@@ -201,6 +201,152 @@ def _verify_textures(fmt, export_path, materials):
     return {"images": len(images), "textures": len(textures), "verified": True if uses_images else None}
 
 
+def _check(name, status, detail):
+    return {"name": name, "status": status, "detail": detail}
+
+
+def _mesh_objects(objects):
+    return [obj for obj in objects if obj.type == "MESH"]
+
+
+def _print_checks(objects, scene):
+    """Facts a slicer would reject, measured from the evaluated mesh.
+
+    Non-manifold edges and self-intersections are hard failures because every
+    slicer has to repair them differently. A non-unit scene scale is only a
+    warning: STL carries no units, so the operator may intend millimetres.
+    """
+    # Provided by Blender's own runtime, not by anything installed here.
+    # pi-lens-ignore: ast-grep:unresolved-import-python
+    import bmesh  # pyright: ignore[reportMissingImports]
+    from mathutils.bvhtree import BVHTree  # pyright: ignore[reportMissingImports]
+
+    checks = []
+    meshes = _mesh_objects(objects)
+    if not meshes:
+        return [_check("meshes", "fail", "the export contains no mesh objects")]
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    open_edges = 0
+    non_manifold = 0
+    folds = 0
+    negative = []
+    scaled = []
+    triangles = 0
+    trees = []
+    for obj in meshes:
+        if any(abs(value - 1.0) > 1e-4 for value in obj.scale):
+            scaled.append(obj.name)
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        try:
+            bm = bmesh.new()
+            bm.from_mesh(mesh)
+            bm.transform(obj.matrix_world)
+            triangles += sum(max(0, len(face.verts) - 2) for face in bm.faces)
+            open_edges += sum(1 for edge in bm.edges if edge.is_boundary)
+            non_manifold += sum(1 for edge in bm.edges if not edge.is_manifold)
+            if bm.faces and bm.calc_volume(signed=True) < 0:
+                negative.append(obj.name)
+            bm.faces.ensure_lookup_table()
+            trees.append(BVHTree.FromBMesh(bm))
+            bm.free()
+        finally:
+            evaluated.to_mesh_clear()
+
+    for index, tree in enumerate(trees):
+        for other in trees[index + 1 :]:
+            if tree.overlap(other):
+                folds += 1
+                break
+
+    checks.append(_check("manifold", "fail" if non_manifold else "pass",
+        f"{non_manifold} non-manifold edge(s); {open_edges} boundary edge(s)"))
+    checks.append(_check("selfIntersection", "fail" if folds else "pass",
+        f"{folds} mesh(es) with overlapping faces"))
+    checks.append(_check("winding", "fail" if negative else "pass",
+        "negative volume on: " + ", ".join(negative) if negative else "all shells enclose positive volume"))
+    checks.append(_check("scale", "warn" if scaled else "pass",
+        "unapplied object scale on: " + ", ".join(scaled) if scaled else "object scales are unit"))
+    unit = float(getattr(scene.unit_settings, "scale_length", 1.0))
+    checks.append(_check("units", "warn" if abs(unit - 1.0) > 1e-6 else "pass",
+        f"scene unit scale {unit}; STL carries no units, so state millimetres in the brief"))
+    checks.append(_check("triangles", "warn" if triangles > 500_000 else "pass",
+        f"{triangles} triangles"))
+    return checks
+
+
+def _gltf_checks(document, fmt, export_path, objects):
+    checks = []
+    meshes = document.get("meshes") or []
+    nodes = document.get("nodes") or []
+    materials = document.get("materials") or []
+    images = document.get("images") or []
+    accessors = document.get("accessors") or []
+    checks.append(_check("nodes", "fail" if not nodes else "pass", f"{len(nodes)} node(s)"))
+    checks.append(_check("meshes", "fail" if not meshes else "pass", f"{len(meshes)} mesh(es)"))
+    checks.append(_check("materials", "pass", f"{len(materials)} material(s)"))
+    checks.append(_check("images", "pass", f"{len(images)} image(s)"))
+    if fmt == "gltf":
+        for image in images:
+            uri = image.get("uri")
+            if uri and not uri.startswith("data:"):
+                path = os.path.join(os.path.dirname(export_path), unquote(uri))
+                checks.append(_check(f"image:{uri}", "pass" if os.path.exists(path) else "fail",
+                    "sidecar exists" if os.path.exists(path) else "sidecar is missing"))
+    else:
+        for index, image in enumerate(images):
+            if "bufferView" not in image:
+                checks.append(_check(f"image:{index}", "fail", "glb image is not embedded"))
+    if accessors:
+        invalid = [i for i, accessor in enumerate(accessors)
+                   if accessor.get("count", 0) < 0 or accessor.get("componentType") is None]
+        checks.append(_check("accessors", "fail" if invalid else "pass",
+            f"{len(accessors)} accessor(s)" if not invalid else f"invalid accessor(s): {invalid}"))
+    return checks
+
+
+def _engine_checks(objects, materials):
+    checks = []
+    textures = 0
+    largest = 0
+    for material in materials:
+        if not material.use_nodes or material.node_tree is None:
+            continue
+        for node in material.node_tree.nodes:
+            if node.type != "TEX_IMAGE" or node.image is None:
+                continue
+            textures += 1
+            largest = max(largest, int(node.image.size[0]), int(node.image.size[1]))
+    checks.append(_check("textures", "warn" if largest > 4096 else "pass",
+        f"{textures} texture node(s); largest {largest}px"))
+    checks.append(_check("materials", "warn" if len(materials) > 16 else "pass",
+        f"{len(materials)} material(s)"))
+    checks.append(_check("objects", "fail" if not _mesh_objects(objects) else "pass",
+        f"{len(_mesh_objects(objects))} mesh(es)"))
+    return checks
+
+
+def _validate_export(profile, fmt, export_path, objects, materials):
+    if profile == "none":
+        return None
+    if profile not in {"gltf", "print", "engine"}:
+        raise RuntimeError(f'Unsupported validation profile "{profile}". Supported: gltf, print, engine, none.')
+    if profile == "print":
+        checks = _print_checks(objects, bpy.context.scene)
+    elif profile == "engine":
+        checks = _engine_checks(objects, materials)
+    else:
+        if fmt not in {"glb", "gltf"}:
+            raise RuntimeError("the gltf validation profile needs glb or gltf; use print or engine for " + fmt)
+        checks = _gltf_checks(_read_gltf_json(export_path), fmt, export_path, objects)
+    return {
+        "profile": profile,
+        "ok": all(check["status"] != "fail" for check in checks),
+        "checks": checks,
+    }
+
+
 def handle_export(request, open_blend):
     """Write the blend's geometry to an interchange file.
 
@@ -288,7 +434,15 @@ def handle_export(request, open_blend):
         {material.name for material in exported_materials if material_summary(material)["procedural"]}
     )
     texture_report = _verify_textures(fmt, export_path, exported_materials)
+    exported_objects = [
+        obj for obj in bpy.data.objects if exported_names is None or obj.name in exported_names
+    ]
+    profile = str(request.get("validationProfile", "gltf")).lower()
+    validation = _validate_export(profile, fmt, export_path, exported_objects, exported_materials)
     warnings = []
+    if validation is not None and not validation["ok"]:
+        failed = [check["name"] for check in validation["checks"] if check["status"] == "fail"]
+        warnings.append("the export failed its " + profile + " validation: " + ", ".join(failed))
     if procedural_materials and fmt in {"glb", "gltf"}:
         warnings.append(
             "glTF exports image textures, not procedural nodes. These materials "
@@ -310,5 +464,6 @@ def handle_export(request, open_blend):
         "images": texture_report["images"],
         "textures": texture_report["textures"],
         "texturesVerified": texture_report["verified"],
+        "validation": validation,
         "warnings": warnings,
     }

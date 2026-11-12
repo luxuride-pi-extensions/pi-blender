@@ -711,6 +711,15 @@ Start pi in any project dir. The extension:
   stock Blender build, and a format that silently fails on one machine is worse
   than one not offered. glTF export applies modifiers, so the training geometry
   is the geometry that was rendered
+- validates the written file with `validationProfile`: `gltf` checks nodes,
+  meshes, accessors and embedded/sidecar images, `print` measures manifold
+  edges, self-intersection, winding and unit scale, and `engine` checks texture
+  size and material count. The checks are reported as structured pass/warn/fail
+  entries and a failed hard check also becomes a warning, so an export that
+  technically wrote a file cannot be mistaken for a printable or loadable one.
+  Khronos' `gltf-validator` is intentionally not a dependency: it is a Node CLI
+  with its own release cadence, and the checks above run inside the Blender
+  process that just wrote the file.
 - ranks a batch against itself with `blender_rank_assets`, reading
   `critique.log` for structure only — never for prose. An absolute threshold
   can say whether an asset is good enough; it cannot say whether it is the best

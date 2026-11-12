@@ -1467,6 +1467,15 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 				"Export a build that has not reached finalized. The build contract refuses an earlier export otherwise, because an intermediate state is not the asset.",
 		}),
 	),
+	validationProfile: Type.Optional(
+		Type.String({
+			description:
+				"Validation to run on the written file. gltf (default) checks nodes, meshes, accessors and images; print checks manifold edges, self-intersection, winding and unit scale; engine checks texture size and material count; none skips it.",
+			enum: ["gltf", "print", "engine", "none"],
+		}),
+	),
+		}),
+	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderExportAsset({
@@ -1478,7 +1487,19 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		name: params.name,
 		animations: params.animations,
 		allowUnfinalized: params.allowUnfinalized,
+		validationProfile: params.validationProfile as AssetExportOptions["validationProfile"],
 	});
+
+	const validationLines: string[] = [];
+	if (result.validation) {
+		const verdict = result.validation.ok ? "pass" : "FAILED";
+		validationLines.push(`Validation (${result.validation.profile}): ${verdict}.`);
+		for (const check of result.validation.checks) {
+			if (check.status !== "pass") {
+				validationLines.push(`  ${check.status}: ${check.name} — ${check.detail}`);
+			}
+		}
+	}
 
 	return {
 		content: [
@@ -1486,6 +1507,7 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 				type: "text",
 				text: [
 					`Exported ${result.format} to ${result.exportPath} (${result.bytes} bytes, ${result.meshCount} mesh(es)).`,
+					...validationLines,
 					...(result.warnings ?? []).map((warning) => `Warning: ${warning}`),
 				].join("\n"),
 			},

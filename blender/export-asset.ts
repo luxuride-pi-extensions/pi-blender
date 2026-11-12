@@ -48,6 +48,7 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 			outputDir: options.outputDir,
 			name: options.name,
 			animations: options.animations,
+		validationProfile: options.validationProfile ?? "gltf",
 		},
 		label: "export",
 		timeoutMs: options.timeoutMs,
