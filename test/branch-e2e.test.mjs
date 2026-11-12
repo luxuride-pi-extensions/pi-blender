@@ -1166,6 +1166,10 @@ test("a run that changed nothing reports changed:false, even after framing", { s
 		});
 		assert.equal(first.changed, true, "the first build changes content");
 		assert.equal(first.cameras?.[0]?.cameraName, "armCam", "framing still happens and is reported");
+		assert.ok(first.timings, "the run reports measured stage costs");
+		assert.ok(first.timings.launchMs >= 0 && first.timings.execMs >= 0, "launch and exec are measured");
+		assert.ok(first.timings.totalMs >= first.timings.execMs, "total includes the script it measured");
+		assert.equal(first.timings.renderMs, 0, "a run without a picture reports no render time");
 
 		const repeat = await module.blenderModuleRun({
 			cwd: ws.root,

@@ -592,6 +592,14 @@ Start pi in any project dir. The extension:
   ranking over a batch can say "best of these fifty". `blender_export_asset`
   writes `glb`/`gltf`/`obj`/`stl`, which is what makes an asset leave Blender at
   all; pass `objects` to keep the studio rig out of a dataset.
+  A headless run reports `timings` measured inside the process that
+  emitted the script (`launchMs` is the gap before the script starts,
+  `importMs`, `execMs`, `saveMs`, `renderMs`, `totalMs`); applies report the
+  same shape with `renderMs: 0`. The tool text opens with one line
+  ("2.5s launch, 0.1s exec, 41.0s render") so the manager does not need a
+  second call to attribute a slow iteration. `blender_iteration_state`
+  aggregates the successful runs per module.
+
   Renders and references are never pruned by a run. `blender_workspace_prune`
   reports or removes only renders in iterations at or below
   `latestIteration - keepIterations` (default 2), always keeps each module's

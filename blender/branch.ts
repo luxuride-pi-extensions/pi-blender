@@ -65,6 +65,7 @@ import {
 	RENDER_FILE,
 } from "./module-paths.js";
 import { fileExists, delay, formatBlenderFailure, getSavedViewCameraObjectName, nowIso, runBlenderJson } from "./utils.js";
+import type { RunTimings } from "./types.js";
 import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from "./workspace.js";
 
 const BRANCH_FILE = "branch.blend";
@@ -117,8 +118,10 @@ import math
 import os
 import shutil
 import sys
+import time
 import traceback
 
+process_started_at = time.time()
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
 
 # This run script is handed to Blender as a string rather than executed as a
@@ -146,6 +149,8 @@ from module_state import (
 from render_scene import compose_review_sheet, render_scene
 from validation import validate as validate_preflight
 
+imports_finished_at = time.time()
+
 branch_path = payload["branchPath"]
 workspace_path = payload["workspacePath"]
 iteration_path = payload["iterationPath"]
@@ -171,6 +176,7 @@ exit_code = 0
 previous_cwd = os.getcwd()
 os.chdir(workspace_path)
 
+exec_started_at = time.time()
 with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
     try:
         with open(script_path, encoding="utf-8") as handle:
@@ -181,6 +187,7 @@ with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stder
         traceback.print_exc()
     finally:
         os.chdir(previous_cwd)
+exec_finished_at = time.time()
 
 after = snapshot(bpy)
 delta = diff_snapshots(before, after)
@@ -557,8 +564,11 @@ camera_framing = _frame_module_camera(module_name, camera_plan)
 # Save before the preflight: a preflight that runs long must not turn a finished
 # build into a timeout with no branch file. Preflight only reads, so the saved
 # bytes are the bytes it measured.
+save_started_at = time.time()
+save_finished_at = save_started_at
 if exit_code == 0:
     bpy.ops.wm.save_mainfile()
+    save_finished_at = time.time()
     # A process-level render failure (crash, OOM, timeout) produces no JSON at
     # all, so the caller cannot tell "nothing was saved" from "the branch is on
     # disk and only the picture failed" without a marker written before the risky
@@ -652,6 +662,7 @@ render_request = payload.get("render")
 # to decode it on a question the fingerprint already answered. forceRender is the
 # caller's way to say the PICTURE inputs changed (view, resolution, engine), which
 # the content fingerprint deliberately does not cover.
+render_started_at = time.time()
 if exit_code == 0 and render_request and (changed or payload.get("forceRender")):
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
@@ -662,6 +673,17 @@ if exit_code == 0 and render_request and (changed or payload.get("forceRender"))
         render_result = render_scene(render_request)
     except Exception as exc:
         render_error = str(exc)
+render_finished_at = time.time()
+
+timings = {
+    "launchMs": 0,
+    "importMs": round((imports_finished_at - process_started_at) * 1000),
+    "execMs": round((exec_finished_at - exec_started_at) * 1000),
+    "saveMs": round((save_finished_at - save_started_at) * 1000),
+    "renderMs": round((render_finished_at - render_started_at) * 1000) if render_result else 0,
+    "totalMs": round((render_finished_at - process_started_at) * 1000),
+    "processStartedAt": round(process_started_at * 1000),
+}
 
 review_sheet = None
 if exit_code == 0 and render_result and payload.get("reviewSheet"):
@@ -768,6 +790,7 @@ print(json.dumps({
     "preflight": preflight,
     "reviewSheet": review_sheet,
     "reviewPacket": review_packet,
+    "timings": timings,
     "render": render_result,
     "renderError": render_error,
 }))
@@ -815,6 +838,7 @@ interface BranchRunPayload {
 	reviewSheet: ReviewSheetResult | null;
 	/** Stored visual evidence for this generation. */
 	reviewPacket: ReviewPacket | null;
+	timings: RunTimings & { processStartedAt: number };
 }
 
 interface BranchRenderPayload {
@@ -1057,6 +1081,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		return true;
 	};
+	const spawnAt = Date.now();
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
 			cwd: options.cwd,
@@ -1201,6 +1226,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
 	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
+	const timings = { ...payload.timings, launchMs: Math.max(0, payload.timings.processStartedAt - spawnAt) };
 	const warnings: string[] = [];
 	if (payload.touchedWorlds.length > 0) {
 		warnings.push(
@@ -1253,6 +1279,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		cameraPlan: payload.cameraPlan,
 		reviewSheet,
 		reviewPacket: payload.reviewPacket ?? undefined,
+		timings,
 	};
 
 	await updateManifest(
@@ -1277,6 +1304,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 						sequence,
 						exitCode: payload.exitCode,
 						status: "ok",
+						timings,
 						viaBranchApply: branchPath,
 						ownedObjects: payload.ownedObjects,
 						ownedMaterials: payload.ownedMaterials,
@@ -1331,6 +1359,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedMaterials: payload.ownedMaterials,
 		renderOutputPath,
 		renderError,
+		timings,
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
@@ -1472,9 +1501,12 @@ function buildBranchApplyScript(): string {
 import bpy
 import json
 import sys
+import time
 
+process_started_at = time.time()
 payload = json.loads(sys.argv[sys.argv.index("--") + 1])
 branches = payload["branches"]
+imports_finished_at = time.time()
 
 
 def probe(branch):
@@ -1620,11 +1652,24 @@ if aborted:
     for outcome in outcomes:
         outcome["applied"] = False
         outcome["missing"] = outcome["missing"] or [reason]
+save_started_at = time.time()
 if saved and not aborted:
     bpy.ops.wm.save_mainfile()
+save_finished_at = time.time()
 
 print("__PI_BLENDER_JSON_START__")
-print(json.dumps({"branches": outcomes}))
+print(json.dumps({
+    "branches": outcomes,
+    "timings": {
+        "launchMs": 0,
+        "importMs": round((imports_finished_at - process_started_at) * 1000),
+        "execMs": round((save_started_at - imports_finished_at) * 1000),
+        "saveMs": round((save_finished_at - save_started_at) * 1000),
+        "renderMs": 0,
+        "totalMs": round((save_finished_at - process_started_at) * 1000),
+        "processStartedAt": round(process_started_at * 1000),
+    },
+}))
 print("__PI_BLENDER_JSON_END__")
 `;
 }
@@ -1642,6 +1687,7 @@ interface BranchApplyOutcome {
 
 interface BranchApplyPayload {
 	branches: BranchApplyOutcome[];
+	timings: RunTimings & { processStartedAt: number };
 }
 
 const APPLY_LOCK_FILE = ".branch-apply.lock";
@@ -1739,6 +1785,7 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
  * from a bug.
  */
 export async function blenderBranchApply(options: BranchApplyOptions): Promise<BranchApplyResult> {
+	let applyTimings: RunTimings | undefined;
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
 
 	const staged = options.modules
@@ -1810,6 +1857,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		// per record, which let a second apply interleave between two records of
 		// this one and observe a fan-out that was only half merged.
 		const release = await acquireApplyLock(manifest.manifestPath, { signal: options.signal });
+		const applySpawnAt = Date.now();
 		try {
 			const payload = await runBlenderJson<BranchApplyPayload>({
 				cwd: options.cwd,
@@ -1830,6 +1878,10 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 				timeoutMs: (options.timeoutSeconds ?? DEFAULT_MODULE_TIMEOUT_SECONDS) * 1000,
 			});
 			outcomes = payload.branches;
+			applyTimings = {
+				...payload.timings,
+				launchMs: Math.max(0, payload.timings.processStartedAt - applySpawnAt),
+			};
 		} finally {
 			await release();
 		}
@@ -1921,6 +1973,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 					exitCode: 0,
 					status: "ok",
 					viaBranchApply: record.branchPath,
+					timings: applyTimings,
 				},
 			];
 		}
@@ -1949,7 +2002,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		}
 	}
 
-	return { workspacePath: manifest.workspacePath, blendPath: manifest.blendPath, applied, skipped, missing, liveBlenderMessage };
+	return { workspacePath: manifest.workspacePath, blendPath: manifest.blendPath, applied, skipped, missing, liveBlenderMessage, timings: applyTimings };
 }
 
 /**

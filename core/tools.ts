@@ -55,6 +55,19 @@ export function formatJsonResult(value: unknown): string {
 	return JSON.stringify(value, null, 2);
 }
 
+/** One line a manager can read without opening the timing object. */
+export function formatTimings(timings?: {
+	launchMs: number;
+	execMs: number;
+	saveMs?: number;
+	renderMs: number;
+	totalMs: number;
+}): string {
+	if (!timings) return "";
+	const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+	return `${seconds(timings.launchMs)} launch, ${seconds(timings.execMs)} exec, ${seconds(timings.renderMs)} render (${seconds(timings.totalMs)} total)`;
+}
+
 export const blenderWorkspaceInitTool: CoreToolDefinition = {
 	name: "blender_workspace_init",
 	label: "Blender Workspace Init",
@@ -923,8 +936,9 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},
@@ -965,8 +979,9 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},
