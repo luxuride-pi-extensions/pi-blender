@@ -1,4 +1,5 @@
 {
+  "_synthetic": true,
   "images": [
     { "id": "pass-hero", "truth": { "pass": true, "defects": [] } },
     { "id": "fail-seam", "truth": { "pass": false, "defects": ["seam"] } },
@@ -10,42 +11,42 @@
       "run": 1,
       "pass": true,
       "defects": [],
-      "axes": { "accuracy": 8, "geometry": 8, "materials": 8, "completeness": 8, "quality": 8, "validity": 8 }
+      "axes": { "accuracy": 2, "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
     },
     {
       "id": "pass-hero",
       "run": 2,
       "pass": true,
       "defects": [],
-      "axes": { "accuracy": 8, "geometry": 8, "materials": 8, "completeness": 8, "quality": 8, "validity": 8 }
+      "axes": { "accuracy": 2, "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
     },
     {
       "id": "fail-seam",
       "run": 1,
       "pass": false,
       "defects": ["seam"],
-      "axes": { "accuracy": 4, "geometry": 4, "materials": 4, "completeness": 4, "quality": 4, "validity": 4 }
+      "axes": { "geometry": 1, "materials": 1, "completeness": 1, "quality": 1, "validity": 1 }
     },
     {
       "id": "fail-seam",
       "run": 2,
-      "pass": true,
-      "defects": [],
-      "axes": { "accuracy": 6, "geometry": 6, "materials": 6, "completeness": 6, "quality": 6, "validity": 6 }
+      "pass": false,
+      "defects": ["seam"],
+      "axes": { "geometry": 2, "materials": 2, "completeness": 2, "quality": 2, "validity": 2 }
     },
     {
       "id": "fail-scale",
       "run": 1,
       "pass": false,
       "defects": ["wrong_scale"],
-      "axes": { "accuracy": 3, "geometry": 3, "materials": 3, "completeness": 3, "quality": 3, "validity": 3 }
+      "axes": { "accuracy": 0, "geometry": 0, "materials": 0, "completeness": 0, "quality": 0, "validity": 0 }
     },
     {
       "id": "fail-scale",
       "run": 2,
-      "pass": false,
-      "defects": ["wrong_scale"],
-      "axes": { "accuracy": 3, "geometry": 3, "materials": 3, "completeness": 3, "quality": 3, "validity": 3 }
+      "pass": true,
+      "defects": [],
+      "axes": { "accuracy": 2, "geometry": 0, "materials": 0, "completeness": 0, "quality": 0, "validity": 0 }
     }
   ]
 }

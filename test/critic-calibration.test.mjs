@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,9 +14,12 @@ test("the calibration script reports axis spread, agreement and false passes", (
 	const report = JSON.parse(output);
 	assert.equal(report.images, 3);
 	assert.equal(report.reviews, 6);
-	assert.equal(report.axes.accuracy.mean, 5.33);
-	assert.equal(report.axes.accuracy.stddev, 0.3333);
-	assert.equal(report.axes.accuracy.variance, 0.3333);
+	assert.equal(report.axes.accuracy.images, 2, "the image without an accuracy score is skipped, not zero-filled");
+	assert.equal(report.axes.accuracy.mean, 1.5);
+	assert.equal(report.axes.accuracy.stddev, 0.7071);
+	assert.equal(report.axes.accuracy.variance, 0.5);
+	assert.equal(report.axes.geometry.images, 3);
+	assert.equal(report.axes.geometry.stddev, 0.2887);
 	assert.equal(report.pass.agreement, 0.8333);
 	assert.equal(report.defects.recall, 0.75);
 	assert.equal(report.falsePass.rate, 0.25);
@@ -25,7 +28,7 @@ test("the calibration script reports axis spread, agreement and false passes", (
 test("the human table prints one row per axis", () => {
 	const output = execFileSync(process.execPath, [script, fixture], { encoding: "utf8" });
 	assert.match(output, /images 3, reviews 6/);
-	assert.match(output, /accuracy\s+0\.33/);
+	assert.match(output, /accuracy\s+0\.70/);
 	assert.match(output, /false-pass rate 0\.25/);
 });
 
@@ -44,4 +47,5 @@ test("the fixture is labelled consistently", () => {
 	}
 	assert.ok(report.images.filter((image) => image.truth.pass).length >= 1);
 	assert.ok(report.images.filter((image) => !image.truth.pass).length >= 1);
+	assert.equal(report._synthetic, true);
 });

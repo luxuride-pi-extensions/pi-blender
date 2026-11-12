@@ -20,7 +20,15 @@ function round(value, digits = 4) {
 }
 
 export function calibrate(report) {
-	const images = new Map((report.images ?? []).map((image) => [image.id, image]));
+	if (!report || typeof report !== "object" || !Array.isArray(report.images) || !Array.isArray(report.reviews)) {
+		throw new Error("calibration report must be an object with images[] and reviews[] arrays");
+	}
+	for (const image of report.images) {
+		if (!image || typeof image.id !== "string" || !image.truth || typeof image.truth.pass !== "boolean" || !Array.isArray(image.truth.defects)) {
+			throw new Error(`image ${image?.id ?? "(no id)"} needs a truth.pass boolean and a truth.defects array`);
+		}
+	}
+	const images = new Map(report.images.map((image) => [image.id, image]));
 	const reviews = (report.reviews ?? []).filter((review) => images.has(review.id));
 	const byImage = new Map();
 	for (const review of reviews) {
@@ -31,21 +39,21 @@ export function calibrate(report) {
 
 	const axes = {};
 	for (const axis of AXES) {
-		const perImage = [];
+		const means = [];
+		const spreads = [];
 		for (const list of byImage.values()) {
 			const scores = list.map((review) => review.axes?.[axis]).filter((score) => typeof score === "number");
 			const average = mean(scores);
-			if (average !== null) perImage.push(average);
+			if (average === null) continue;
+			means.push(average);
+			spreads.push(stddev(scores));
 		}
-		const spread = perImage.map((_value, imageIndex) => {
-			const list = [...byImage.values()][imageIndex];
-			return stddev(list.map((review) => review.axes?.[axis]).filter((score) => typeof score === "number"));
-		});
+		const meanSquare = mean(spreads.map((value) => value ** 2));
 		axes[axis] = {
-			images: perImage.length,
-			mean: round(mean(perImage), 2),
-			variance: round(mean(spread.map((value) => value ** 2))),
-			stddev: round(mean(spread)),
+			images: means.length,
+			mean: round(mean(means), 2),
+			variance: round(meanSquare),
+			stddev: round(meanSquare === null ? null : Math.sqrt(meanSquare)),
 		};
 	}
 
@@ -97,14 +105,17 @@ function main() {
 		console.error("usage: node scripts/critic-calibration.mjs <report.json> [--json]");
 		process.exit(2);
 	}
-	let report;
+	let result;
 	try {
-		report = JSON.parse(readFileSync(resolve(path), "utf8"));
+		const report = JSON.parse(readFileSync(resolve(path), "utf8"));
+		if (report?._synthetic) {
+			console.error("synthetic format fixture — arithmetic only, not calibration evidence");
+		}
+		result = calibrate(report);
 	} catch (error) {
 		console.error(`could not read the calibration report at ${path}: ${error instanceof Error ? error.message : String(error)}`);
 		process.exit(2);
 	}
-	const result = calibrate(report);
 	if (process.argv.includes("--json")) {
 		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 		return;

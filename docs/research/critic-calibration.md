@@ -11,7 +11,7 @@ Vision-language judges are sensitive to prompt wording, image order and
 sampling. A critic that always says "seven" looks stable in production because
 nothing contradicts it. The failure that matters is a **false pass**: an image
 with a real defect that the critic sends on. The second failure is **axis
-drift**: the same defect costs two points on Monday and five on Tuesday, so the
+drift**: the same defect costs one grade on Monday and two on Tuesday, so the
 five-iteration budget means different things on different days.
 
 This is the same reliability problem reported for LLM judges
@@ -21,7 +21,8 @@ to a six-axis render critique rather than free-form pairwise preference.
 ## Golden set
 
 Fifteen to twenty images are enough to see a broken axis and too few to
-publish a claim. Each item needs:
+publish a claim: at thirty verdicts a 95% interval on agreement is roughly
+±0.1, so treat these bands as triage, not proof. Each item needs:
 
 - a render (or review sheet) that a human has looked at;
 - `truth.pass` — would a human send this to the next stage?;
@@ -51,7 +52,7 @@ For each image, run the critic two or three times with the production prompt
       "run": 1,
       "pass": false,
       "defects": ["seam"],
-      "axes": { "accuracy": 2, "geometry": 3, "materials": 2, "completeness": 3, "quality": 2, "validity": 2 }
+      "axes": { "accuracy": 2, "geometry": 1, "materials": 2, "completeness": 1, "quality": 2, "validity": 2 }
     }
   ]
 }
@@ -65,20 +66,24 @@ node scripts/critic-calibration.mjs test/fixtures/critic-calibration.json
 
 The script prints per-axis mean, standard deviation and variance across runs,
 pass agreement with the human label, defect recall, and the estimated
-false-pass rate. `--json` prints only the machine-readable report.
+false-pass rate. `--json` prints only the machine-readable report. The axes are
+the production integers 0–2 (`blender/critique.ts`), not a 0–10 scale.
 
 ## What counts as calibrated
 
-These are starting thresholds for a six-axis critic, not a law:
+These are starting thresholds for a six-axis critic, not a law. The 0.85 pass
+agreement sits at the >80% human-judge agreement reported in Zheng et al.;
+the spread and false-pass bands are engineering defaults on the 0–2 axis with
+no external precedent, and should be re-tuned from the first real run.
 
 | Signal | Healthy | Investigate |
 | --- | --- | --- |
-| Axis standard deviation (same image) | ≤ 0.75 points | > 1.5 points |
+| Axis standard deviation (same image) | ≤ 0.25 points (0–2 axis) | ≥ 0.75 points |
 | Pass agreement | ≥ 0.85 | < 0.7 |
 | Defect recall | ≥ 0.8 | < 0.6 |
 | False-pass rate (failures called pass) | ≤ 0.1 | > 0.2 |
 
-A critic that scores every failure at 0 and every pass at 10 is stable but not
+A critic that scores every failure at 0 and every pass at 2 is stable but not
 discriminating; check that **pass variance** is non-zero before celebrating
 agreement. Conversely, high variance on one axis with stable others usually
 means that axis's prompt text is carrying two different questions.

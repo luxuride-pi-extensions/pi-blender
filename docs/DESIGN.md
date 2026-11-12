@@ -550,6 +550,11 @@ Start pi in any project dir. The extension:
   without `/blender`. Every `blender-*` skill routes authoring to a
   `blender-worker` module, so the skills and the gate agree. Note this is a
   nudge rather than a boundary: `bash` remains available.
+- **critic reliability is measured, not assumed.** The six-axis rubric is
+  calibrated against a labelled golden set; method, sample size and starting
+  thresholds live in
+  [docs/research/critic-calibration.md](research/critic-calibration.md). The
+  numbers are triage bands, not a gate.
 - `blender_set_mode` switches the live viewport to OBJECT, POSE, EDIT_MESH,
   EDIT_ARMATURE, SCULPT, TEXTURE_PAINT, VERTEX_PAINT, WEIGHT_PAINT,
   FACE_PAINT, or UV (edit mode + viewport UV editor overlay). With no watch
