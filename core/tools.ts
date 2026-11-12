@@ -1474,8 +1474,6 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 			enum: ["gltf", "print", "engine", "none"],
 		}),
 	),
-		}),
-	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderExportAsset({

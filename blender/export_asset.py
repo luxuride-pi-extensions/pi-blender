@@ -234,6 +234,7 @@ def _print_checks(objects, scene):
     scaled = []
     triangles = 0
     trees = []
+    face_verts = []
     for obj in meshes:
         if any(abs(value - 1.0) > 1e-4 for value in obj.scale):
             scaled.append(obj.name)
@@ -249,7 +250,9 @@ def _print_checks(objects, scene):
             if bm.faces and bm.calc_volume(signed=True) < 0:
                 negative.append(obj.name)
             bm.faces.ensure_lookup_table()
-            trees.append(BVHTree.FromBMesh(bm))
+            if bm.faces:
+                trees.append(BVHTree.FromBMesh(bm))
+                face_verts.append([{vert.index for vert in face.verts} for face in bm.faces])
             bm.free()
         finally:
             evaluated.to_mesh_clear()
@@ -257,6 +260,13 @@ def _print_checks(objects, scene):
     for index, tree in enumerate(trees):
         for other in trees[index + 1 :]:
             if tree.overlap(other):
+                folds += 1
+                break
+        # A joined mesh hides two interpenetrating shells from the cross-object
+        # loop. Adjacent faces share vertices and are not a fold; a pair with no
+        # shared vertex and overlapping triangles is.
+        for first, second in tree.overlap(tree):
+            if first < second and face_verts[index][first].isdisjoint(face_verts[index][second]):
                 folds += 1
                 break
 
@@ -317,6 +327,9 @@ def _engine_checks(objects, materials):
             if node.type != "TEX_IMAGE" or node.image is None:
                 continue
             textures += 1
+            # `size` is (0, 0) until the image is loaded; reading one pixel
+            # forces the load so an 8K map is not reported as 0 px.
+            node.image.pixels[0]
             largest = max(largest, int(node.image.size[0]), int(node.image.size[1]))
     checks.append(_check("textures", "warn" if largest > 4096 else "pass",
         f"{textures} texture node(s); largest {largest}px"))
@@ -332,13 +345,15 @@ def _validate_export(profile, fmt, export_path, objects, materials):
         return None
     if profile not in {"gltf", "print", "engine"}:
         raise RuntimeError(f'Unsupported validation profile "{profile}". Supported: gltf, print, engine, none.')
+    if profile == "gltf" and fmt not in {"glb", "gltf"}:
+        # A caller that leaves the default on an STL has not asked for glTF
+        # checks; the format has no glTF to inspect.
+        return None
     if profile == "print":
         checks = _print_checks(objects, bpy.context.scene)
     elif profile == "engine":
         checks = _engine_checks(objects, materials)
     else:
-        if fmt not in {"glb", "gltf"}:
-            raise RuntimeError("the gltf validation profile needs glb or gltf; use print or engine for " + fmt)
         checks = _gltf_checks(_read_gltf_json(export_path), fmt, export_path, objects)
     return {
         "profile": profile,
@@ -437,7 +452,8 @@ def handle_export(request, open_blend):
     exported_objects = [
         obj for obj in bpy.data.objects if exported_names is None or obj.name in exported_names
     ]
-    profile = str(request.get("validationProfile", "gltf")).lower()
+    default_profile = "print" if fmt in {"obj", "stl"} else "gltf"
+    profile = str(request.get("validationProfile") or default_profile).lower()
     validation = _validate_export(profile, fmt, export_path, exported_objects, exported_materials)
     warnings = []
     if validation is not None and not validation["ok"]:
