@@ -988,7 +988,16 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const reference = options.referenceId
 		? (manifest.references ?? []).find((entry) => entry.id === options.referenceId)
 		: undefined;
-	let payload: BranchRunPayload;
+	// A direct run mutates model.blend for the whole run, so it takes the same
+	// lock an apply takes. Without it a concurrent apply or second direct run
+	// opens the same file, and the last save wins with the other work missing.
+	const releaseDirectLock = direct ? await acquireApplyLock(manifest.manifestPath, { signal: options.signal }) : undefined;
+	let directConflict: Error | undefined;
+	const restoreCheckpoint = async () => {
+		await copyFile(checkpointPath, manifest.blendPath).catch(() => undefined);
+		await rm(checkpointPath, { force: true }).catch(() => undefined);
+	};
+	let payload!: BranchRunPayload;
 	try {
 		payload = await runBlenderJson<BranchRunPayload>({
 			cwd: options.cwd,
@@ -1047,23 +1056,52 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		if (branchSaved) {
+			if (direct) {
+				await restoreCheckpoint();
+				await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+				throw new Error(
+					`${(error as Error).message}\nmodel.blend was rolled back to the pre-run checkpoint; the failed run left no changes.`,
+				);
+			}
 			throw new Error(
 				`${(error as Error).message}\nThe branch was saved before the render failed and is intact at ${branchPath}.`,
 			);
 		}
 		throw error;
+	} finally {
+		if (direct && payload) {
+			// The run has already saved model.blend. A staged sibling that touches
+			// the same datablocks would have been refused before the run by the
+			// branch path; here the only safe equivalent is to roll back and say so.
+			const mine = new Set([...payload.applyObjects, ...payload.removedObjects]);
+			const others = contestableStagedRuns(manifest).filter((run) => run.module !== moduleName);
+			const clash = others.find((run) => recordOwnedDatablocks(run).some((name) => mine.has(name)));
+			if (clash) {
+				await restoreCheckpoint();
+				directConflict = new Error(
+					`Direct run for "${moduleName}" touched ${[...mine].filter((name) => recordOwnedDatablocks(clash).includes(name)).join(", ")}, ` +
+						`which staged module "${clash.module}" also owns. model.blend was rolled back; apply or discard that branch first.`,
+				);
+			}
+		}
+		await releaseDirectLock?.();
+	}
+	if (directConflict) {
+		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		throw directConflict;
 	}
 
 	if (payload.exitCode !== 0) {
 		if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
-		await rm(checkpointPath, { force: true }).catch(() => undefined);
+		if (direct) await restoreCheckpoint();
+		else await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw new Error(
 			formatBlenderFailure({
 				streams: { stdout: payload.stdout, stderr: payload.stderr },
 				subject:
 					`Module "${moduleName}" ${direct ? "direct run" : "branch run"} failed (exit ${payload.exitCode}). ` +
-					`${direct ? "model.blend was left as the script failed before saving; do not trust it without checking." : `model.blend was NOT touched — this ran headlessly against ${branchPath}, which has been removed.`} ` +
+					`${direct ? "model.blend was rolled back to the pre-run checkpoint, so the failed run left no changes." : `model.blend was NOT touched — this ran headlessly against ${branchPath}, which has been removed.`} ` +
 					`Nothing to revert.\n` +
 					`Script that ran: ${effectiveScriptPath}\nSource: ${scriptPath}`,
 			}),

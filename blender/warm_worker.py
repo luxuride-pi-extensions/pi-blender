@@ -10,6 +10,7 @@ does in a one-shot process.
 import contextlib
 import io
 import json
+import os
 import runpy
 import sys
 import traceback
@@ -20,6 +21,13 @@ PREFIX = "__PI_WARM__"
 def run_job(job):
     # pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
     import bpy  # pyright: ignore[reportMissingImports]
+
+    # A job inherits the worker's cwd otherwise, and a script that chdirs would
+    # move every later job. Each job starts where its caller asked.
+    os.chdir(job.get("cwd") or os.getcwd())
+    before_path = list(sys.path)
+    before_argv = list(sys.argv)
+    before_modules = set(sys.modules)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     blend_path = job.get("blendPath")
@@ -39,6 +47,11 @@ def run_job(job):
     except BaseException:
         code = 1
         stderr.write(traceback.format_exc())
+    finally:
+        sys.path[:] = before_path
+        sys.argv[:] = before_argv
+        for name in set(sys.modules) - before_modules:
+            sys.modules.pop(name, None)
     return {
         "id": job.get("id"),
         "code": code,

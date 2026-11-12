@@ -121,6 +121,18 @@ function spawnWorker(
 	child.stderr.on("data", (chunk: string) => {
 		if (worker.pending) worker.pending.output += chunk;
 	});
+	// Death between idle.pop() and the write is a supported case; without these
+	// listeners Node raises an unhandled 'error' and the caller's promise never
+	// settles.
+	const failPending = (error: Error) => {
+		const pending = worker.pending;
+		if (!pending) return;
+		worker.pending = null;
+		clearTimeout(pending.timer);
+		pending.reject(error);
+	};
+	child.stdin.on("error", (error) => failPending(error instanceof Error ? error : new Error(String(error))));
+	child.on("error", (error) => failPending(error));
 	child.on("exit", (code, signal) => {
 		live.delete(worker);
 		idle = idle.filter((entry) => entry !== worker);
@@ -151,6 +163,7 @@ async function acquire(
 	const worker = idle.pop();
 	if (worker) {
 		reused += 1;
+		if (worker.child.pid) onSpawn?.(worker.child.pid);
 		return worker;
 	}
 	return spawnWorker(command, args, cwd, onSpawn);
@@ -175,6 +188,7 @@ export async function runWarmJob(options: WarmJobOptions): Promise<WarmJobResult
 		payload: options.payload,
 		scriptArgs: options.scriptArgs ?? [],
 		blendPath: options.blendPath ?? null,
+		cwd: options.cwd,
 	};
 	return new Promise<WarmJobResult>((resolve, reject) => {
 		const cleanup = (healthy: boolean) => {

@@ -1573,6 +1573,87 @@ _bm.free()
 	}
 });
 
+
+test("a branch run and its apply run through the warm pool", { skip, timeout: 240_000 }, async () => {
+	const ws = await makeWorkspace();
+	process.env.PI_BLENDER_WARM_POOL = "1";
+	try {
+		writeScript(ws.workspacePath, "warm", ADD_CUBE);
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "warm",
+			render: false,
+			timeoutSeconds: 120,
+		});
+		assert.equal(result.changed, true);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.ok(names.includes("Mug"), "the warm-run branch was merged");
+	} finally {
+		delete process.env.PI_BLENDER_WARM_POOL;
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a failed direct run rolls model.blend back to its checkpoint", { skip, timeout: 180_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "failing", `
+import bpy
+bpy.ops.mesh.primitive_cube_add()
+bpy.context.object.name = "Doomed"
+bpy.ops.wm.save_mainfile()
+raise RuntimeError("after save")
+`);
+		await assert.rejects(
+			module.blenderModuleRun({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				moduleName: "failing",
+				render: false,
+				direct: true,
+				timeoutSeconds: 120,
+			}),
+			/rolled back/,
+		);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.equal(names.includes("Doomed"), false, "the saved run was rolled back");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+
+test("a direct run refuses a datablock a staged sibling owns", { skip, timeout: 180_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "sibling", ADD_CUBE);
+		await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "sibling",
+			render: false,
+			timeoutSeconds: 120,
+		});
+		writeScript(ws.workspacePath, "direct", ADD_CUBE);
+		await assert.rejects(
+			module.blenderModuleRun({
+				cwd: ws.root,
+				workspace: ws.workspacePath,
+				moduleName: "direct",
+				render: false,
+				direct: true,
+				timeoutSeconds: 120,
+			}),
+			/rolled back/,
+		);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.equal(names.includes("Mug"), false, "the conflicting direct save was rolled back");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a direct module run saves model.blend without a branch", { skip, timeout: 180_000 }, async () => {
 	const ws = await makeWorkspace();
 	try {
