@@ -6,7 +6,7 @@ const branch = readFileSync(new URL("../blender/branch.ts", import.meta.url), "u
 const module = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
 
 test("an unchanged branch is not applied and its render is reused", () => {
-	assert.match(branch, /render_request and \(changed or payload\.get\("forceRender"\)\)/);
+	assert.match(branch, /render_attempted = exit_code == 0 and bool\(render_request\) and bool\(changed or payload\.get\("forceRender"\)\)/);
 	assert.match(branch, /reason: "unchanged"/);
 	assert.match(branch, /mark\(record\.sequence, "unchanged"\)/);
 });
