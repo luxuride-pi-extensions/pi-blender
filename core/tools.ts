@@ -2269,7 +2269,7 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	"Report or remove old iteration renders that no module's newest render and no current critique depends on. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. Checkpoints keep their own retention policy. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
+	"Report or remove old iteration renders that no module's newest render and no current critique depends on. With includeCheckpoints/includeBranches it also reports old whole-file checkpoints over the global budget and applied branch copies, each with exact files and bytes. Dry run by default: nothing is deleted until `dryRun: false`. Copied references are counted and never deleted, because nothing here can prove one is unused. The newest checkpoint of every module is always kept. This runs outside the module loop on purpose: a run must not delete the evidence a critic is reading.",
 	parameters: Type.Object({
 		workspace: Type.String({ description: "Explicit workspace path." }),
 		dryRun: Type.Optional(
@@ -2282,6 +2282,16 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 				description: "How many of the newest iterations to keep. Default 2, minimum 1.",
 			}),
 		),
+		includeCheckpoints: Type.Optional(
+			Type.Boolean({
+				description: "Also plan old run checkpoints over the global budget, keeping each module's newest.",
+			}),
+		),
+		includeBranches: Type.Optional(
+			Type.Boolean({
+				description: "Also plan applied branch copies whose checkpoint is the revert subject.",
+			}),
+		),
 	}),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 		const result = await blenderWorkspacePrune({
@@ -2289,6 +2299,8 @@ export const blenderWorkspacePruneTool: CoreToolDefinition = {
 			workspace: params.workspace,
 			dryRun: params.dryRun,
 			keepIterations: params.keepIterations,
+			includeCheckpoints: params.includeCheckpoints,
+			includeBranches: params.includeBranches,
 		});
 		return {
 			content: [{ type: "text", text: result.note }],

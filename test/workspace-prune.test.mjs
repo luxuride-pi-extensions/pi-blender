@@ -149,3 +149,65 @@ test("protects the render a critique judged even when it has no module", async (
   const dry = await blenderWorkspacePrune({ cwd: root, workspace: workspacePath });
   assert.ok(dry.kept.some((entry) => entry.path === judged), "a module-less judged render is still evidence");
 });
+
+test("reports checkpoint and branch storage by kind, and keeps each module's newest checkpoint", async () => {
+  const { workspacePath, manifestPath } = makeWorkspace("blend-storage");
+  const old = addFile(workspacePath, "modules/a/runs/01/pre-01.blend", "a1");
+  const newest = addFile(workspacePath, "modules/a/runs/02/pre-02.blend", "a2");
+  const only = addFile(workspacePath, "modules/b/runs/01/pre-01.blend", "b1");
+  const branch = addFile(workspacePath, "modules/a/branch-01.blend", "branch");
+  const model = addFile(workspacePath, "model.blend", "model");
+  const run = (module, iteration, sequence, status, checkpointPath, branchPath) => ({
+    module,
+    iteration,
+    sequence,
+    status,
+    at: "2026-01-01T00:00:00.000Z",
+    touchedObjects: [],
+    touchedMaterials: [],
+    addedObjects: [],
+    removedObjects: [],
+    applyObjects: [],
+    branchPath,
+    checkpointPath,
+    scriptPath: join(workspacePath, "modules", module, "script.py"),
+  });
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({
+      version: 2,
+      workspacePath,
+      blendPath: model,
+      manifestPath,
+      latestIteration: 4,
+      renderOutputs: [],
+      references: [],
+      branchRuns: [
+        run("a", 1, 1, "applied", old, branch),
+        run("a", 2, 2, "applied", newest, join(workspacePath, "modules/a/branch-02.blend")),
+        run("b", 1, 3, "applied", only, join(workspacePath, "modules/b/branch-01.blend")),
+      ],
+      moduleRuns: [],
+    }),
+  );
+  const previous = process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB;
+  process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB = "0";
+  try {
+    const dry = await blenderWorkspacePrune({ cwd: workspacePath, workspace: workspacePath, includeCheckpoints: true, includeBranches: true });
+    assert.equal(dry.dryRun, true);
+    assert.deepEqual(dry.checkpoints, { files: 1, bytes: 2 }, "only the non-newest checkpoint is over budget");
+    assert.equal(dry.branches.files, 1, "the applied branch whose file exists is a candidate");
+    assert.equal(dry.wouldRemove.find((entry) => entry.kind === "checkpoint")?.path, old);
+    assert.equal(dry.wouldRemove.find((entry) => entry.kind === "branch")?.path, branch);
+    assert.match(dry.note, /checkpoints 1\/2 bytes/);
+    const applied = await blenderWorkspacePrune({ cwd: workspacePath, workspace: workspacePath, dryRun: false, includeCheckpoints: true, includeBranches: true });
+    assert.equal(applied.dryRun, false);
+    assert.equal(readFileSync(newest, "utf8"), "a2", "the newest checkpoint survives");
+    const next = JSON.parse(readFileSync(manifestPath, "utf8"));
+    assert.equal(next.branchRuns[0].branchRetired, true);
+    assert.equal(next.branchRuns[0].retiredAt !== undefined, true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB;
+    else process.env.PI_BLENDER_CHECKPOINT_BUDGET_MB = previous;
+  }
+});

@@ -104,7 +104,7 @@ export interface WorkspacePruneResult {
 	cutoff: number;
 	/** Always retained, with the reason each one is protected. */
 	kept: { path: string; reason: string }[];
-	wouldRemove: { path: string; bytes: number; module?: string; iteration: number }[];
+	wouldRemove: { path: string; bytes: number; module?: string; iteration: number; kind?: "render" | "checkpoint" | "branch" }[];
 	/** Removable bytes grouped by the module that produced them. */
 	byModule: { module: string; files: number; bytes: number }[];
 	totalBytes: number;
@@ -115,6 +115,8 @@ export interface WorkspacePruneResult {
 		retained: true;
 		reason: string;
 	};
+	checkpoints: { files: number; bytes: number };
+	branches: { files: number; bytes: number };
 	note: string;
 }
 
@@ -237,6 +239,9 @@ export interface BlenderBranchRunRecord {
 	stateDigest?: string;
 	status: BranchRunStatus;
 	appliedAt?: string;
+	/** Set when an applied branch file was deleted; the record remains history. */
+	branchRetired?: boolean;
+	retiredAt?: string;
 	conflicts?: BranchConflict[];
 	renderOutputPath?: string | null;
 	/** Content fingerprint result; false means the branch is the base it copied. */

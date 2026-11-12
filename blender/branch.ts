@@ -24,6 +24,7 @@
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { copyBlendFile, settleBlendStorage } from "./blend-storage.js";
 import { dirname, join } from "node:path";
 import { getBlenderAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
@@ -867,7 +868,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const direct = options.direct === true;
 	const branchPath = direct ? manifest.blendPath : getBranchBlendPath(manifest.workspacePath, moduleName);
 	const capturedAt = new Date();
-	if (!direct) await copyFile(manifest.blendPath, branchPath);
+	if (!direct) await copyBlendFile(manifest.blendPath, branchPath);
 
 	// The revert checkpoint must describe the state this run REPLACES. Copying
 	// the branch rather than re-reading model.blend makes it the SAME read: an
@@ -887,7 +888,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		}
 	}
 	try {
-		await copyFile(branchPath, checkpointPath);
+		await copyBlendFile(branchPath, checkpointPath);
 		// The checkpoint's mtime is the revert guard's clock, and copyFile stamps
 		// it when the copy FINISHES, after the read it represents. Dating it to
 		// the read closes that window: a run that applied while the bytes were
@@ -1249,6 +1250,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		},
 		{ signal: options.signal },
 	);
+	await settleBlendStorage(manifest.manifestPath, await loadWorkspaceManifest(options.cwd, options.workspace).catch(() => manifest));
 
 	return {
 		workspacePath: manifest.workspacePath,
@@ -1860,6 +1862,8 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			];
 		}
 	}, { signal: options.signal });
+
+	await settleBlendStorage(manifest.manifestPath, await loadWorkspaceManifest(options.cwd, options.workspace).catch(() => manifest));
 
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an

@@ -579,8 +579,15 @@ Start pi in any project dir. The extension:
   `latestIteration - keepIterations` (default 2), always keeps each module's
   newest render and the render its latest critique was judged from, reports
   per-module byte counts, and never deletes copied references. It is a dry run
-  unless `dryRun: false` is passed; run checkpoints keep their own
-  `DEFAULT_CHECKPOINT_RETENTION = 5` history.
+  unless `dryRun: false` is passed. With `includeCheckpoints` it also plans old
+  run checkpoints against a workspace-wide budget
+  (`PI_BLENDER_CHECKPOINT_BUDGET_MB`, default 2048) while keeping each module's
+  newest; with `includeBranches` it plans applied branch copies. Checkpoints are
+  copied with `COPYFILE_FICLONE`, so a reflink-capable filesystem allocates
+  nothing until one side changes, and a failed branch copy falls back to a
+  normal copy. An applied branch file is retired immediately with
+  `branchRetired` on its record: the checkpoint is the revert subject, so the
+  branch is history rather than live state.
   work: one `modules/<name>/script.py` per object or concern, a per-run
   checkpoint (`modules/<name>/runs/NN/pre-NN.blend`), optional live render to
   `modules/<name>/render.png` (with `resolution`/`samples` parity with

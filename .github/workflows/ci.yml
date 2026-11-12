@@ -169,7 +169,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the twelve core-free suites
+      - name: typecheck and the thirteen core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -178,6 +178,7 @@ jobs:
           mkdir -p "$PI_AGENT_DIR"
           npm run typecheck
           node --test \
+            test/blend-storage.test.mjs \
             test/camera-plan.test.mjs \
             test/concurrency-budget.test.mjs \
             test/generations.test.mjs \
@@ -278,7 +279,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations -e camera-plan \
-                          -e live-ownership -e module-state -e preflight -e tool-surface)
+                          -e live-ownership -e module-state -e preflight -e tool-surface -e blend-storage)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
