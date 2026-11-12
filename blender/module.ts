@@ -148,6 +148,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		liveBlenderMessage: applyResult.liveBlenderMessage,
 		cameras: branchResult.cameras,
 		cameraPlan: branchResult.cameraPlan,
+		preflight: branchResult.preflight,
 		reviewSheet: branchResult.reviewSheet,
 		warnings: branchResult.cameraPlan.warnings.length ? branchResult.cameraPlan.warnings : undefined,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
