@@ -713,6 +713,13 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	direct: Type.Optional(
+		Type.Boolean({
+			description:
+				"Headless path only. Save model.blend in place instead of writing a branch and applying it, halving the Blender processes for a model no one else is editing. Other staged branches are not merged. Default false.",
+			default: false,
+		}),
+	),
 	forceRender: Type.Optional(
 		Type.Boolean({
 			description:
@@ -758,6 +765,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		frameSubject: params.frameSubject as "module" | "apply" | undefined,
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
+		direct: params.direct,
 		forceRender: params.forceRender,
 		referenceId: params.referenceId,
 		resolution: params.resolution,

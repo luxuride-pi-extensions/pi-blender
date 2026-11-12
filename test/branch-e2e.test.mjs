@@ -1572,3 +1572,30 @@ _bm.free()
 		rmSync(ws.root, { recursive: true, force: true });
 	}
 });
+
+test("a direct module run saves model.blend without a branch", { skip, timeout: 180_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "direct", ADD_CUBE);
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "direct",
+			render: false,
+			direct: true,
+			timeoutSeconds: 120,
+		});
+		assert.equal(result.executionMode, "headless-direct");
+		assert.equal(result.changed, true);
+		const names = await objectNames(ws.root, ws.blendPath);
+		assert.ok(names.includes("Mug"), "the object was saved into model.blend");
+		const branchPath = branch.getBranchBlendPath(ws.workspacePath, "direct");
+		assert.equal(existsSync(branchPath), false, "no branch file was written");
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		const record = (manifest.branchRuns ?? []).find((run) => run.module === "direct");
+		assert.equal(record.status, "applied");
+		assert.equal(manifest.moduleRuns.at(-1).viaBranchApply, ws.blendPath);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});

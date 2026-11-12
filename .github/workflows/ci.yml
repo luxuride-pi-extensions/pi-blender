@@ -464,7 +464,7 @@ jobs:
       # headless-bridge-e2e (long-running, each launches many Blender
       # processes). One invocation and one guard: a split would let one step
       # go green while the other skipped.
-      - name: probes, object detail, scene, import, usage and shading paths must not skip
+      - name: probes, object detail, scene, import, usage, shading and warm-pool paths must not skip
         if: ${{ steps.token.outputs.has_token == '1' }}
         env:
           PI_MANAGER_CORE_DIR: ${{ github.workspace }}/projects/pi-manager-core
@@ -478,14 +478,15 @@ jobs:
             test/scene-health.test.mjs \
             test/scene-stats.test.mjs \
             test/usage-guess.test.mjs \
-            test/shading-snippets.test.mjs 2>&1)"; then
+            test/shading-snippets.test.mjs \
+            test/warm-pool.test.mjs 2>&1)"; then
             printf '%s\n' "$out"
             exit 1
           fi
           printf '%s\n' "$out"
           if ! printf '%s' "$out" | grep -q "ℹ skipped 0"; then
             echo "::error title=Blender tests skipped despite a real Blender::At" \
-              "least one of the eight suites skipped. detectBlender() did not" \
+              "least one of the nine suites skipped. detectBlender() did not" \
               "find the unpacked build, or one suite looked on the wrong" \
               "channel, and this job verified less than it claims."
             exit 1

@@ -864,9 +864,10 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	// against the state it was briefed on is correct against that state even if
 	// a sibling has been applied since, which is what makes concurrent branches
 	// meaningful rather than a race.
-	const branchPath = getBranchBlendPath(manifest.workspacePath, moduleName);
+	const direct = options.direct === true;
+	const branchPath = direct ? manifest.blendPath : getBranchBlendPath(manifest.workspacePath, moduleName);
 	const capturedAt = new Date();
-	await copyFile(manifest.blendPath, branchPath);
+	if (!direct) await copyFile(manifest.blendPath, branchPath);
 
 	// The revert checkpoint must describe the state this run REPLACES. Copying
 	// the branch rather than re-reading model.blend makes it the SAME read: an
@@ -882,7 +883,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		// refusals, never lose a sibling's work.
 		await utimes(checkpointPath, capturedAt, capturedAt);
 	} catch (error) {
-		await rm(branchPath, { force: true }).catch(() => undefined);
+		if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
 		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw error;
@@ -1041,7 +1042,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		const branchSaved = existsSync(join(runDir, BRANCH_SAVED_MARKER));
 		await rm(join(runDir, BRANCH_SAVED_MARKER), { force: true }).catch(() => undefined);
 		if (!branchSaved) {
-			await rm(branchPath, { force: true }).catch(() => undefined);
+			if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
 			await rm(checkpointPath, { force: true }).catch(() => undefined);
 		}
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
@@ -1054,15 +1055,16 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	}
 
 	if (payload.exitCode !== 0) {
-		await rm(branchPath, { force: true }).catch(() => undefined);
+		if (!direct) await rm(branchPath, { force: true }).catch(() => undefined);
 		await rm(checkpointPath, { force: true }).catch(() => undefined);
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw new Error(
 			formatBlenderFailure({
 				streams: { stdout: payload.stdout, stderr: payload.stderr },
 				subject:
-					`Module "${moduleName}" branch run failed (exit ${payload.exitCode}). model.blend was NOT touched — this ran ` +
-					`headlessly against ${branchPath}, which has been removed. Nothing to revert.\n` +
+					`Module "${moduleName}" ${direct ? "direct run" : "branch run"} failed (exit ${payload.exitCode}). ` +
+					`${direct ? "model.blend was left as the script failed before saving; do not trust it without checking." : `model.blend was NOT touched — this ran headlessly against ${branchPath}, which has been removed.`} ` +
+					`Nothing to revert.\n` +
 					`Script that ran: ${effectiveScriptPath}\nSource: ${scriptPath}`,
 			}),
 		);
@@ -1110,6 +1112,8 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		scriptPath,
 		checkpointPath,
 		at: nowIso(),
+		status: direct ? "applied" : "staged",
+		appliedAt: direct ? nowIso() : undefined,
 		touchedObjects: payload.touchedObjects,
 		touchedMaterials: payload.touchedMaterials,
 		applyImages: payload.applyImages,
@@ -1120,7 +1124,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
 		preflight: payload.preflight ?? undefined,
-		status: "staged",
 		renderOutputPath,
 		changed: payload.changed,
 		reused: renderSkipped,
@@ -1136,6 +1139,24 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		manifest.manifestPath,
 		(current) => {
 			current.branchRuns = appendBranchRun(current, record);
+			if (direct) {
+				current.moduleRuns = [
+					...(current.moduleRuns ?? []),
+					{
+						name: moduleName,
+						iteration,
+						checkpointPath,
+						at: record.at,
+						sequence,
+						exitCode: payload.exitCode,
+						status: "ok",
+						viaBranchApply: branchPath,
+						ownedObjects: payload.ownedObjects,
+						ownedMaterials: payload.ownedMaterials,
+						stateDigest: payload.stateDigest ?? undefined,
+					},
+				];
+			}
 			if (renderOutputPath) {
 				current.renderOutputs.push({
 					path: renderOutputPath,

@@ -267,6 +267,8 @@ export interface BranchRunOptions {
 	render?: boolean;
 	/** Also render the plan's other shots into one review sheet. Implies render. */
 	reviewSheet?: boolean;
+	/** Headless only: save model.blend in place instead of branch+apply. */
+	direct?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
 	/** Reference id to include in the stored comparison sheet. */
@@ -1550,6 +1552,8 @@ export interface ModuleRunOptions {
 	render?: boolean;
 	/** Also render the plan's other shots into one review sheet. Implies render. */
 	reviewSheet?: boolean;
+	/** Save model.blend in place instead of writing a branch and applying it. */
+	direct?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
 	/** Reference id to include in the stored comparison sheet. */
@@ -1604,7 +1608,7 @@ export interface ModuleRunResult {
 	 * the state before it. `headless-apply` is also what happens whenever no
 	 * window is open, which after /blender stopped opening one is the DEFAULT.
 	 */
-	executionMode: "live-session" | "headless-apply";
+	executionMode: "live-session" | "headless-apply" | "headless-direct";
 	/** Present when the run was a headless branch apply; what the live session did about it. */
 	liveBlenderMessage?: string;
 	/**

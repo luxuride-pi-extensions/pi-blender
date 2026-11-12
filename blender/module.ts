@@ -108,9 +108,47 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		frameSubject: options.frameSubject,
 		cameraDistance: options.cameraDistance,
 		reviewSheet: options.reviewSheet,
+		direct: options.direct,
 		forceRender: options.forceRender,
 		referenceId: options.referenceId,
 	});
+
+	if (options.direct) {
+		// The run saved model.blend in place, so there is nothing to merge and no
+		// second Blender process. The branch runner recorded the companion run.
+		return {
+			workspacePath: branchResult.workspacePath,
+			blendPath: branchResult.blendPath,
+			module: branchResult.module,
+			moduleDir: branchResult.moduleDir,
+			scriptPath: branchResult.scriptPath,
+			iteration: branchResult.iteration,
+			checkpointPath: branchResult.checkpointPath,
+			createdCheckpoint: true,
+			stdout: branchResult.stdout.trim(),
+			exitCode: branchResult.exitCode,
+			renderOutputPath: branchResult.renderOutputPath,
+			resolvedEngine: branchResult.resolvedEngine,
+			renderError: branchResult.renderError,
+			changed: branchResult.changed,
+			executionMode: "headless-direct",
+			cameras: branchResult.cameras,
+			cameraPlan: branchResult.cameraPlan,
+			preflight: branchResult.preflight,
+			reviewSheet: branchResult.reviewSheet,
+			reused: branchResult.reused,
+			warnings:
+				branchResult.cameraPlan.warnings.length || branchResult.warnings?.length
+					? [...branchResult.cameraPlan.warnings, ...(branchResult.warnings ?? [])]
+					: undefined,
+			reviewPacket: branchResult.reviewPacket,
+			...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
+				iteration: branchResult.iteration,
+				sequence: branchResult.sequence,
+				stateDigest: branchResult.stateDigest,
+			})),
+		};
+	}
 
 	// A single staged branch cannot contest itself, so a conflict here would mean
 	// the conflict rule is wrong rather than that the operator must choose. It is
@@ -504,6 +542,7 @@ export function applySuccessfulRun(
 		ownedObjects?: string[];
 		ownedMaterials?: string[];
 		stateDigest?: string;
+		viaBranchApply?: string;
 	},
 	renderOutput?: { path: string; view: string } | null,
 ): void {
@@ -518,6 +557,7 @@ export function applySuccessfulRun(
 			sequence: record.sequence,
 			exitCode: record.exitCode,
 			status: "ok",
+			viaBranchApply: record.viaBranchApply,
 			ownedObjects: record.ownedObjects,
 			ownedMaterials: record.ownedMaterials,
 			stateDigest: record.stateDigest,
