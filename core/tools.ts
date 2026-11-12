@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
 import type { AssetExportOptions, CameraFrontAxis, CameraProfile, CameraShotKind, ImportFormat } from "../blender/types.js";
 import { searchReferenceSources, type ReferenceSource } from "../blender/reference-sources.js";
+import { formatTimings } from "../blender/timings.js";
 import type { CoreToolDefinition, CoreToolContext, CoreToolResult } from "./types.js";
 import {
 	blenderAddReference,
@@ -54,6 +55,7 @@ import { blenderCompare } from "../blender/compare.js";
 export function formatJsonResult(value: unknown): string {
 	return JSON.stringify(value, null, 2);
 }
+
 
 export const blenderWorkspaceInitTool: CoreToolDefinition = {
 	name: "blender_workspace_init",
@@ -777,8 +779,9 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},
@@ -923,8 +926,9 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},
@@ -965,8 +969,9 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		signal: context?.signal,
 	});
 
+	const timing = formatTimings(result.timings);
 	return {
-		content: [{ type: "text", text: formatJsonResult(result) }],
+		content: [{ type: "text", text: timing ? `${timing}\n${formatJsonResult(result)}` : formatJsonResult(result) }],
 		details: result,
 	};
 	},

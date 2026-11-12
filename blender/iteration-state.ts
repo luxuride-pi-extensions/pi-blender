@@ -132,6 +132,21 @@ export async function blenderIterationState(options: {
       ? judgedRun.stateDigest !== laterRun.stateDigest
       : undefined;
 
+  const timed = (manifest.moduleRuns ?? []).filter(
+    (run) => run.name === moduleName && run.status === "ok" && run.timings,
+  );
+  const timings = timed.length
+    ? {
+        runs: timed.length,
+        launchMs: timed.reduce((sum, run) => sum + (run.timings?.launchMs ?? 0), 0),
+        importMs: timed.reduce((sum, run) => sum + (run.timings?.importMs ?? 0), 0),
+        execMs: timed.reduce((sum, run) => sum + (run.timings?.execMs ?? 0), 0),
+        saveMs: timed.reduce((sum, run) => sum + (run.timings?.saveMs ?? 0), 0),
+        renderMs: timed.reduce((sum, run) => sum + (run.timings?.renderMs ?? 0), 0),
+        totalMs: timed.reduce((sum, run) => sum + (run.timings?.totalMs ?? 0), 0),
+      }
+    : undefined;
+
   return {
     workspacePath: manifest.workspacePath,
     blendPath: manifest.blendPath,
@@ -169,5 +184,6 @@ export async function blenderIterationState(options: {
     fixLanded,
     knownFacts: manifest.iterationNotes?.[moduleName] ?? [],
     wasteGuard: resolveWasteGuard({ budgetUsed, runs, verdict, previousScore: previousVerdict?.score, fixLanded }),
+    timings,
   };
 }

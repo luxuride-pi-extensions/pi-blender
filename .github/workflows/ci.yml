@@ -144,12 +144,12 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly fourteen files
+      # not exist -- which is the state this step creates. Exactly fifteen files
       # and 80 tests survive:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
-      #   critic-calibration.test.mjs    4
+      #   critic-calibration.test.mjs    5
       #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
       #   live-ownership.test.mjs        3
@@ -157,6 +157,7 @@ jobs:
       #   module-state.test.mjs          6
       #   preflight.test.mjs             2
       #   reference-sources.test.mjs     5
+      #   run-timings.test.mjs           3
       #   tool-params.test.mjs           5
       #   tool-surface.test.mjs          3
       #   unchanged-routing.test.mjs     3
@@ -190,13 +191,14 @@ jobs:
             test/module-state.test.mjs \
             test/preflight.test.mjs \
             test/reference-sources.test.mjs \
+            test/run-timings.test.mjs \
             test/tool-params.test.mjs \
             test/tool-surface.test.mjs \
             test/unchanged-routing.test.mjs \
             test/windowless-tools.test.mjs
 
       # ----------------------------------------------------------------------
-      # STEP 1b: the other 22 files, in a layout where the core CAN be found.
+      # STEP 1b: the other 21 files, in a layout where the core CAN be found.
       #
       # This is where the bulk of pi-blender's suite belongs, and it needs the
       # same checkout step 2 does -- so it is here, after that checkout, not
@@ -282,7 +284,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations -e camera-plan \
-                          -e live-ownership -e module-state -e preflight -e tool-surface)
+                          -e live-ownership -e module-state -e preflight -e run-timings -e tool-surface)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
@@ -346,9 +348,9 @@ jobs:
           {
             echo "### Most of this repository's suite was NOT verified"
             echo
-            echo "80 tests ran, in 14 files: camera-plan, concurrency-budget,"
+            echo "80 tests ran, in 15 files: camera-plan, concurrency-budget,"
             echo "critic-calibration, headless-changed, live-ownership, module-paths,"
-            echo "reference-sources, preflight, tool-params, tool-surface,"
+            echo "reference-sources, run-timings, preflight, tool-params, tool-surface,"
             echo "module-state,"
             echo "unchanged-routing and windowless-tools."
             echo "Those are the only files measured to pass without a"

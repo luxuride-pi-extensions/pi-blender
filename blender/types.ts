@@ -169,6 +169,8 @@ export interface BlenderModuleRunRecord {
 	ownedObjects?: string[];
 	/** Materials this module owns, for the same reason. */
 	ownedMaterials?: string[];
+	/** Measured stage costs, when the run or apply reported them. */
+	timings?: RunTimings;
 	/** Content hash of the state this run left in model.blend, when it produced one. */
 	stateDigest?: string;
 }
@@ -250,6 +252,8 @@ export interface BlenderBranchRunRecord {
 	 * question. Equal digests mean the module wrote the same bytes again.
 	 */
 	stateDigest?: string;
+	/** Measured stage costs for this run. */
+	timings?: RunTimings;
 	status: BranchRunStatus;
 	appliedAt?: string;
 	/** Set when an applied branch file was deleted; the record remains history. */
@@ -357,6 +361,16 @@ export interface PreflightResult {
 	checks: Record<string, PreflightCheck>;
 }
 
+/** Measured stages of one headless run; never inferred from file timestamps. */
+export interface RunTimings {
+	launchMs: number;
+	importMs: number;
+	execMs: number;
+	saveMs: number;
+	renderMs: number;
+	totalMs: number;
+}
+
 export interface BranchRunResult {
 	workspacePath: string;
 	blendPath: string;
@@ -412,6 +426,8 @@ export interface BranchRunResult {
 	warnings?: string[];
 	/** Structural checks measured before the render. */
 	preflight?: PreflightResult;
+	/** Measured cost of each stage of this run. */
+	timings?: RunTimings;
 }
 
 export interface BranchApplyOptions {
@@ -424,6 +440,8 @@ export interface BranchApplyOptions {
 }
 
 export interface BranchApplyResult {
+	/** Measured cost of each stage of the apply. */
+	timings?: RunTimings;
 	workspacePath: string;
 	blendPath: string;
 	applied: Array<{ module: string; iteration: number; appended: string[]; removed: string[]; cameras: BranchCameraFraming[] }>;
@@ -1524,6 +1542,16 @@ export interface IterationState {
 	fixLanded?: boolean;
 	knownFacts: IterationProbeFact[];
 	wasteGuard: IterationWasteGuard;
+	/** Sum of measured stages over the module's successful runs. */
+	timings?: {
+		runs: number;
+		launchMs: number;
+		importMs: number;
+		execMs: number;
+		saveMs: number;
+		renderMs: number;
+		totalMs: number;
+	};
 }
 
 export interface IterationStateResult extends IterationState {}
@@ -1684,6 +1712,8 @@ export interface ModuleRunResult {
 	preflight?: PreflightResult;
 	/** Behaviour the caller should know about, e.g. options this path ignored. */
 	warnings?: string[];
+	/** Measured cost of each stage, on the headless paths that report one. */
+	timings?: RunTimings;
 	/**
 	 * Content hash of the datablocks this run applied. Comparing it with the
 	 * previous run's is how a caller learns that an iteration changed nothing,
