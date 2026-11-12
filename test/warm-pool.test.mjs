@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -31,6 +31,7 @@ async function blenderAvailable() {
 
 const available = await blenderAvailable();
 const skip = available ? false : "Blender is not installed";
+const warm = await loadTs(fileURLToPath(new URL("../blender/warm-pool.ts", import.meta.url)));
 
 function job(source, extra = {}) {
 	return runBlenderJson({
@@ -132,16 +133,27 @@ if os.path.realpath(os.getcwd()) != os.path.realpath(expected):
 });
 
 test("overlapping jobs get separate workers", { skip, timeout: 180_000 }, async () => {
+	// Bypasses runBlenderProcess on purpose: the point is the pool's own
+	// acquire(), which the local headless gate would otherwise serialise.
+	const { resolveBlenderArgv } = await loadTs(fileURLToPath(new URL("../launch.ts", import.meta.url)));
+	const { command, args } = await resolveBlenderArgv();
+	const dir = mkdtempSync(join(process.cwd(), ".warm-overlap-"));
+	const scriptPath = join(dir, "job.py");
+	writeFileSync(scriptPath, 'import time\ntime.sleep(1)\n', "utf-8");
 	process.env.PI_BLENDER_WARM_POOL = "1";
 	resetWarmPoolForTests();
 	try {
-		await Promise.all([job("import time\ntime.sleep(1)"), job("import time\ntime.sleep(1)")]);
-		const stats = warmPoolStats();
+		await Promise.all([
+			warm.runWarmJob({ command, args, cwd: dir, scriptPath, payload: {}, timeoutMs: 60_000 }),
+			warm.runWarmJob({ command, args, cwd: dir, scriptPath, payload: {}, timeoutMs: 60_000 }),
+		]);
+		const stats = warm.warmPoolStats();
 		assert.equal(stats.spawned, 2, JSON.stringify(stats));
 		assert.equal(stats.reused, 0, JSON.stringify(stats));
 	} finally {
 		resetWarmPoolForTests();
 		delete process.env.PI_BLENDER_WARM_POOL;
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
