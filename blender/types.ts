@@ -344,6 +344,8 @@ export interface BranchRunResult {
 	reviewSheet?: ReviewSheetResult;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
+	/** Content the headless apply does not carry, such as world or scene settings. */
+	warnings?: string[];
 }
 
 export interface BranchApplyOptions {

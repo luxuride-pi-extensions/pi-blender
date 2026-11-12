@@ -189,7 +189,10 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		cameraPlan: branchResult.cameraPlan,
 		reviewSheet: branchResult.reviewSheet,
 		reused: branchResult.reused,
-		warnings: branchResult.cameraPlan.warnings.length ? branchResult.cameraPlan.warnings : undefined,
+		warnings:
+			branchResult.cameraPlan.warnings.length || branchResult.warnings?.length
+				? [...branchResult.cameraPlan.warnings, ...(branchResult.warnings ?? [])]
+				: undefined,
 		...(await compareWithPreviousDigest(options.cwd, options.workspace, moduleName, {
 			iteration: branchResult.iteration,
 			sequence: branchResult.sequence,

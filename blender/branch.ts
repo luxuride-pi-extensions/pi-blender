@@ -656,6 +656,8 @@ print(json.dumps({
     "changed": changed,
     "touchedObjects": touched_objects,
     "touchedMaterials": touched_materials,
+    "touchedWorlds": delta.get("touchedWorlds") or [],
+    "sceneChanged": bool(delta.get("sceneChanged")),
     "applyImages": apply_images,
     "addedObjects": delta["addedObjects"],
     "removedObjects": removed_objects,
@@ -681,6 +683,8 @@ interface BranchRunPayload {
 	changed: boolean;
 	touchedObjects: string[];
 	touchedMaterials: string[];
+	touchedWorlds: string[];
+	sceneChanged: boolean;
 	applyImages: string[];
 	addedObjects: string[];
 	removedObjects: string[];
@@ -957,6 +961,17 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
 	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
+	const warnings: string[] = [];
+	if (payload.touchedWorlds.length > 0) {
+		warnings.push(
+			`this run changed world settings (${payload.touchedWorlds.join(", ")}); the headless apply merges objects, materials and images only. Use a live session to keep them.`,
+		);
+	}
+	if (payload.sceneChanged) {
+		warnings.push(
+			"this run changed scene render settings; the headless apply does not merge them. Use a live session to keep them.",
+		);
+	}
 	if (renderRequested && !renderOutputPath && !renderSkipped) {
 		// The path is stable per module, so a failed render would otherwise leave
 		// the PREVIOUS iteration's picture where a critic expects this one.
@@ -1047,6 +1062,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		reviewSheet,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
+		warnings,
 		status: "staged",
 	};
 }
