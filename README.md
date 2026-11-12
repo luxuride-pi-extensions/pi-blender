@@ -6,13 +6,15 @@ vision-informed iteration, render loop) in stock pi, with fixes for a
 
 ## Tools
 
-Registered tools (`blender_*`, 35). Usage detail, per-tool notes and the
+Registered tools (`blender_*`, 37). Usage detail, per-tool notes and the
 verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Tool | What it does |
 |---|---|
 | `blender_workspace_init` | create a workspace blend (`template: "studio"` rig by default) |
-| `blender_workspace_prune` | report/remove old iteration renders; dry run by default, references never deleted |
+| `blender_build_status` | build stage, history and the stages that may follow |
+| `blender_build_advance` | record a stage the extension cannot observe (finalizer → finalized) with evidence |
+| `blender_workspace_prune` | report/remove old renders, checkpoints and applied branches; dry run by default, references and newest checkpoints kept |
 | `blender_execute_python` | run bpy Python in live Blender, optionally saving |
 | `blender_read_only_python` | inline read-only Python that cannot touch the file |
 | `blender_session_context` | current workspace, mode, selection, last render |

@@ -1,3 +1,4 @@
+import { recordBuildStage } from "./build-state.js";
 import { appendFile } from "node:fs/promises";
 import type { CritiqueLogOptions, CritiqueLogResult, CritiqueVerdict } from "./types.js";
 import { nowIso } from "./utils.js";
@@ -250,6 +251,9 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 	].join("\n");
 
 	await appendFile(critiqueLogPath, logBlock, "utf-8");
+	await recordBuildStage(manifest.manifestPath, "critiqued", `module ${moduleName} iteration ${iteration}`, {
+		actor: "blender-critic",
+	});
 
 	return {
 		workspacePath: manifest.workspacePath,

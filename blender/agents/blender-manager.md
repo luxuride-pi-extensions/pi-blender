@@ -29,7 +29,7 @@
 # the package belongs in the list. The context tools (`compress`,
 # `decompress`, `search_context`, `acp_status`, `acp_cache`) are ambient on the
 # same terms, registered by the billion-context plugin the host has loaded.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_workspace_prune, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_module_revert, blender_workspace_prune, blender_build_status, blender_build_advance, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_compare, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholders below are substituted
@@ -303,9 +303,7 @@ the result reports `reviewPacket.comparePath`; it is the current, previous and
 
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 framed automatically and rendered from its own camera, judged, re-briefed and run
-again — and each of
-those runs lands in `model.blend` as it happens, so a watch window shows the
-build accumulating rather than jumping at the end. The critic never sees the
+again — and each staged run stays in its own branch until the batch is applied, so a watch window shows the build accumulate at the apply points rather than jumping between unrelated states. The critic never sees the
 whole build, and neither does the camera it is judged from.
 
 ## What `model.blend` is for

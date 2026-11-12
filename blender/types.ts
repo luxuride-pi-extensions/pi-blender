@@ -515,6 +515,16 @@ export interface WorkspaceOwner {
 	claimedAt: string;
 }
 
+export interface WorkspaceBuildState {
+	stage: "intake" | "planned" | "staged" | "applied" | "merged" | "critiqued" | "finalized" | "exported";
+	history: Array<{
+		stage: WorkspaceBuildState["stage"];
+		at: string;
+		actor: string;
+		evidence?: string;
+	}>;
+}
+
 export interface BlenderWorkspaceManifest {
 	version: 1 | 2;
 	workspaceId: string;
@@ -524,6 +534,8 @@ export interface BlenderWorkspaceManifest {
 	createdAt: string;
 	updatedAt: string;
 	latestIteration: number;
+	/** Absent on workspaces created before the build contract existed. */
+	build?: WorkspaceBuildState;
 	template: string;
 	sourceBlendPath?: string;
 	/**
@@ -1345,6 +1357,8 @@ export interface AssetExportOptions {
 	name?: string;
 	/** Include animation data (glTF only). */
 	animations?: boolean;
+	/** Export a build that has not reached the finalize stage. */
+	allowUnfinalized?: boolean;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 }

@@ -14,6 +14,7 @@ export { blenderBridgeStatus } from "./status.js";
 export { blenderGeometryProbe } from "./geometry-probe.js";
 export { blenderImageProbe } from "./image-probe.js";
 export { blenderReadOnlyPython } from "./readonly.js";
+export { blenderBuildAdvance, blenderBuildStatus } from "./build-state.js";
 export { blenderModuleRevert, blenderModuleRun } from "./module.js";
 export {
 	blenderBranchApply,

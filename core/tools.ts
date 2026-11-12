@@ -13,6 +13,8 @@ import {
 	blenderAddReference,
 	blenderBranchApply,
 	blenderBranchRun,
+	blenderBuildAdvance,
+	blenderBuildStatus,
 	blenderBridgeStatus,
 	blenderExecutePython,
 	blenderExportAsset,
@@ -1459,6 +1461,12 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 			description: "Include animation data (glTF only). Default false.",
 		}),
 	),
+	allowUnfinalized: Type.Optional(
+		Type.Boolean({
+			description:
+				"Export a build that has not reached finalized. The build contract refuses an earlier export otherwise, because an intermediate state is not the asset.",
+		}),
+	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderExportAsset({
@@ -1469,6 +1477,7 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 		outputDir: params.outputDir,
 		name: params.name,
 		animations: params.animations,
+		allowUnfinalized: params.allowUnfinalized,
 	});
 
 	return {
@@ -2339,6 +2348,54 @@ export const blenderJobCancelTool: CoreToolDefinition = {
 	},
 };
 
+
+export const blenderBuildStatusTool: CoreToolDefinition = {
+	name: "blender_build_status",
+	label: "Blender Build Status",
+	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+	description:
+		"Read the build contract's current stage and history. The stage advances only when the extension observes the work: a branch run stages, a batch apply merges, a logged critique critiques, and the finalizer advances to finalized with evidence. Export refuses a build that never reached finalized unless allowUnfinalized is passed.",
+	parameters: Type.Object({
+		workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+	}),
+	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+		const result = await blenderBuildStatus({
+			cwd: context?.cwd ?? process.cwd(),
+			workspace: params.workspace,
+			signal: context?.signal,
+		});
+		return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+	},
+};
+
+export const blenderBuildAdvanceTool: CoreToolDefinition = {
+	name: "blender_build_advance",
+	label: "Blender Build Advance",
+	annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+	description:
+		"Advance the build contract to a stage the extension cannot observe by itself, with evidence. The finalizer uses it to move a merged, critiqued build to finalized; intake/planned may be recorded by the manager. A second finalize is a duplicate record rather than a second build; the export gate still refuses an unfinalized export.",
+	parameters: Type.Object({
+		workspace: Type.String({ description: "Explicit workspace path for the Blender task." }),
+		stage: Type.String({
+			enum: ["intake", "planned", "finalized"],
+			description: "Stage to record. Normally finalized.",
+		}),
+		evidence: Type.String({ description: "What was checked or produced for this stage." }),
+		actor: Type.Optional(Type.String({ description: "Who performed it. Defaults to blender-manager." })),
+	}),
+	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+		const result = await blenderBuildAdvance({
+			cwd: context?.cwd ?? process.cwd(),
+			workspace: params.workspace,
+			stage: params.stage as any,
+			evidence: params.evidence,
+			actor: params.actor,
+			signal: context?.signal,
+		});
+		return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+	},
+};
+
 export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderWorkspaceInitTool,
 	blenderWorkspacePruneTool,
@@ -2375,6 +2432,8 @@ export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderJobStatusTool,
 	blenderJobCancelTool,
 	blenderUsageGuessTool,
+	blenderBuildStatusTool,
+	blenderBuildAdvanceTool,
 ];
 
 export const BLENDER_TOOL_NAMES = BLENDER_TOOLS.map((t) => t.name);

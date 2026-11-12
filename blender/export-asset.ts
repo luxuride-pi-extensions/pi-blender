@@ -8,6 +8,7 @@
  * headless there is no session holding the file open.
  */
 
+import { buildExportGate, readBuildState, recordBuildStage } from "./build-state.js";
 import { existsSync } from "node:fs";
 import { requestBridge } from "./bridge.js";
 import type { AssetExportOptions, AssetExportResult, ExportFormat } from "./types.js";
@@ -18,6 +19,8 @@ const EXPORT_FORMATS: ExportFormat[] = ["glb", "gltf", "obj", "stl"];
 
 export async function blenderExportAsset(options: AssetExportOptions): Promise<AssetExportResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
+	const gate = buildExportGate(manifest, options.allowUnfinalized === true);
+	if (gate) throw new Error(gate);
 	const format = (options.format ?? "glb").toLowerCase() as ExportFormat;
 	if (!EXPORT_FORMATS.includes(format)) {
 		throw new Error(
@@ -59,6 +62,13 @@ export async function blenderExportAsset(options: AssetExportOptions): Promise<A
 		throw new Error(
 			`Blender reported the ${result.format} export at ${result.exportPath} but no file is there. The exporter returned success and wrote nothing, so nothing was exported.`,
 		);
+	}
+
+	if (manifest.build && readBuildState(manifest).stage !== "exported") {
+		await recordBuildStage(manifest.manifestPath, "exported", options.name ?? result.exportPath, {
+			actor: "blender-manager",
+			signal: options.signal,
+		});
 	}
 
 	return {

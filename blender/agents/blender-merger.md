@@ -1,7 +1,7 @@
 ---
 name: blender-merger
 description: Blender merge worker — authors and runs one modules/merge/script.py that joins the parts built by sibling modules into one coherent model (join, weld, armature bind, hierarchy). Use once, after every part module exists, and only when the parts actually need merging.
-tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_session_context, contact_supervisor
+tools: read, write, edit, grep, find, ls, bash, blender_module_run, blender_scene_info, blender_geometry_probe, blender_execute_python, blender_bridge_status, blender_session_context, blender_build_status, blender_build_advance, contact_supervisor
 # Point this at the installed extension directory for YOUR machine. There is no
 # `~` or env-var expansion for this field (pi-subagents only resolves `.`/`..`
 # style relative paths), so an absolute path is required. The copy of this file

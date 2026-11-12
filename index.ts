@@ -60,6 +60,7 @@ import { BLENDER_TOOLS } from "./core/tools.js";
 import { requestLiveBlenderShutdown } from "./blender/bridge.js";
 import { isLiveBridgeAlive, requestWatchWindowLaunch, restartBridgeSupervisor } from "./launch.js";
 import { getBlenderBridgeDir, getManagerPrompt } from "./config.js";
+import { blenderToolRefusal } from "./blender/agent-policy.js";
 import { loadManagerCore } from "./manager-core.js";
 
 /**
@@ -221,6 +222,11 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	// Retention is a workspace-level decision: which evidence may go is the
 	// manager's call, and the dry run keeps it inspectable before it is.
 	"blender_workspace_prune",
+	// The build contract is the manager's ledger; the finalizer advances the
+	// stage it alone can observe. Both remain visible so a stuck build says
+	// where it stopped instead of looking finished.
+	"blender_build_status",
+	"blender_build_advance",
 	// The manager is the serialization point: workers stage with
 	// blender_branch_run, and the manager applies the batch once with
 	// blender_branch_apply after every staged run for the batch is in. A
@@ -232,6 +238,9 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_bridge_status",
 	"blender_log_critique",
 	"blender_rank_assets",
+	// The manager composes the comparison sheet it hands a fresh critic, so it
+	// needs the same compare tool the critic has.
+	"blender_compare",
 	"blender_iteration_state",
 	// Writing a measured fact back is authoring the loop's memory, not the
 	// asset, so the manager may record what its own probes established.
@@ -283,6 +292,27 @@ const lazyTools = core.createLazyToolGate({
  * as a policy callback: which agents a manager may spawn, and which words the
  * refusal uses, are this extension's alone. See pi-manager-core.
  */
+/**
+ * Enforce the Blender capability bundle for child roles. The user's session has
+ * no active agent and is unrestricted; a `blender-*` child is checked against
+ * the same tool list its definition declares, at call time.
+ */
+function registerBlenderCapabilityGate(pi: ExtensionAPI): void {
+	pi.on("tool_call", (event, ctx) => {
+		let agent: string | null = null;
+		try {
+			agent = core.readActiveAgentName(ctx.getSystemPrompt());
+		} catch {
+			if (event.toolName.startsWith("blender_")) {
+				return { block: true, reason: "The active agent could not be identified, so Blender tools are refused. Report the prompt-parsing failure instead of bypassing the capability bundles." };
+			}
+			return;
+		}
+		const refusal = blenderToolRefusal(agent, event.toolName);
+		if (refusal) return { block: true, reason: refusal };
+	});
+}
+
 const managerMode = core.createManagerMode({
 	// The Set is spread rather than passed: the core takes a readonly array,
 	// and a Set is an iterable, not one. Spreading here keeps the single
@@ -358,6 +388,7 @@ const injectBlenderContext = core.createContextInjection({
 });
 
 export default function piBlenderExtension(pi: ExtensionAPI) {
+	registerBlenderCapabilityGate(pi);
 	for (const tool of BLENDER_TOOLS) {
 		pi.registerTool({
 			defaultActive: tool.defaultActive ?? false,

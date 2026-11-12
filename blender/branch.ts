@@ -31,6 +31,7 @@ import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { mergeCameraPlan } from "./camera-plan.js";
 import { collectModuleOwnership } from "./generations.js";
+import { recordBuildStage } from "./build-state.js";
 import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
@@ -1298,6 +1299,13 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		{ signal: options.signal },
 	);
 
+	await recordBuildStage(
+		manifest.manifestPath,
+		direct ? "applied" : "staged",
+		`module ${moduleName} iteration ${iteration}`,
+		{ signal: options.signal },
+	);
+
 	return {
 		workspacePath: manifest.workspacePath,
 		blendPath: manifest.blendPath,
@@ -1922,6 +1930,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// The live session is reloaded only when one is actually up. A headless-only
 	// workspace has nothing to reload, and a failed reload must not fail an
 	// apply that already landed on disk.
+	if (applied.length > 0) {
+		await recordBuildStage(
+			manifest.manifestPath,
+			"merged",
+			`applied ${applied.map((entry) => entry.module).join(", ")}`,
+			{ signal: options.signal },
+		);
+	}
+
 	let liveBlenderMessage = "model.blend updated. No live Blender session is running, so nothing was reloaded.";
 	if (applied.length > 0 && isLiveBridgeAlive()) {
 		try {

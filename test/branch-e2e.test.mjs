@@ -29,6 +29,7 @@ const module = await loadTs(`${fileURLToPath(new URL("../blender/module.ts", imp
 const render = await loadTs(`${fileURLToPath(new URL("../blender/render.ts", import.meta.url))}`);
 const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
 const png = await loadTs(`${fileURLToPath(new URL("../blender/png.ts", import.meta.url))}`);
+const exportAsset = await loadTs(`${fileURLToPath(new URL("../blender/export-asset.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
 async function blenderAvailable() {
@@ -1711,6 +1712,69 @@ test("a direct module run saves model.blend without a branch", { skip, timeout: 
 		const record = (manifest.branchRuns ?? []).find((run) => run.module === "direct");
 		assert.equal(record.status, "applied");
 		assert.equal(manifest.moduleRuns.at(-1).viaBranchApply, ws.blendPath);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("the build contract follows the operations that record it", { skip, timeout: 240_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "body", ADD_CUBE);
+		await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "body",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		const manifestPath = join(ws.workspacePath, "blender-workspace.json");
+		let manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		assert.equal(manifest.build?.stage, "staged");
+
+		await branch.blenderBranchApply({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			modules: ["body"],
+			timeoutSeconds: 300,
+		});
+		manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		assert.equal(manifest.build?.stage, "merged");
+
+		await exportAsset.blenderExportAsset({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			format: "glb",
+			name: "contract",
+			allowUnfinalized: true,
+		});
+		manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		assert.equal(manifest.build?.stage, "exported");
+		const historyAfterExport = manifest.build.history.length;
+
+		await exportAsset.blenderExportAsset({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			format: "glb",
+			name: "contract-again",
+			allowUnfinalized: true,
+		});
+		manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		assert.equal(manifest.build.history.length, historyAfterExport, "a second export is not a second build");
+
+		// Changing your mind after an export demotes the stage instead of throwing
+		// after the branch has already landed.
+		writeScript(ws.workspacePath, "body", ADD_CUBE.replace("Mug", "Mug2"));
+		const again = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "body",
+			render: false,
+			timeoutSeconds: 300,
+		});
+		assert.equal(again.status, "staged");
+		manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		assert.equal(manifest.build?.stage, "staged", "a post-export change re-opens the build");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
