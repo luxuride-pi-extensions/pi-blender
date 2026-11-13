@@ -111,6 +111,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		reviewSheet: options.reviewSheet,
 		direct: options.direct,
 		forceRender: options.forceRender,
+		forcePreflight: options.forcePreflight,
 		referenceId: options.referenceId,
 	});
 
@@ -137,6 +138,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			cameras: branchResult.cameras,
 			cameraPlan: branchResult.cameraPlan,
 			preflight: branchResult.preflight,
+			preflightOverridden: branchResult.preflightOverridden,
 			reviewSheet: branchResult.reviewSheet,
 			reused: branchResult.reused,
 			warnings:
@@ -152,6 +154,34 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		};
 	}
 
+	if (branchResult.blocked) {
+		return {
+			workspacePath: branchResult.workspacePath,
+			blendPath: branchResult.blendPath,
+			module: branchResult.module,
+			moduleDir: branchResult.moduleDir,
+			scriptPath: branchResult.scriptPath,
+			iteration: branchResult.iteration,
+			checkpointPath: branchResult.checkpointPath,
+			createdCheckpoint: true,
+			stdout: branchResult.stdout.trim(),
+			exitCode: branchResult.exitCode,
+			renderOutputPath: null,
+			changed: false,
+			preflight: branchResult.preflight,
+			preflightOverridden: branchResult.preflightOverridden,
+			blocked: true,
+			executionMode: "headless-apply",
+			cameras: branchResult.cameras,
+			cameraPlan: branchResult.cameraPlan,
+			reviewSheet: branchResult.reviewSheet,
+			warnings: [
+				`preflight blocked: ${branchResult.preflight?.blockers.join("; ") ?? "structural check failed"}; model.blend was not touched`,
+				...branchResult.cameraPlan.warnings,
+			],
+		};
+	}
+
 	// A single staged branch cannot contest itself, so a conflict here would mean
 	// the conflict rule is wrong rather than that the operator must choose. It is
 	// still reported rather than applied blindly: a merge that silently skipped
@@ -160,6 +190,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		cwd: options.cwd,
 		workspace: options.workspace,
 		modules: [moduleName],
+		forcePreflight: options.forcePreflight === true,
 		signal: options.signal,
 	});
 	const skipped = applyResult.skipped.filter((entry) => entry.module === moduleName);
@@ -182,6 +213,8 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			resolvedEngine: branchResult.resolvedEngine,
 			renderError: branchResult.renderError,
 			changed: false,
+			preflight: branchResult.preflight,
+			preflightOverridden: branchResult.preflightOverridden,
 			executionMode: "headless-apply",
 			liveBlenderMessage: applyResult.liveBlenderMessage,
 			cameras: branchResult.cameras,
@@ -230,6 +263,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		cameras: branchResult.cameras,
 		cameraPlan: branchResult.cameraPlan,
 		preflight: branchResult.preflight,
+		preflightOverridden: branchResult.preflightOverridden,
 		reviewSheet: branchResult.reviewSheet,
 		reused: branchResult.reused,
 		warnings:

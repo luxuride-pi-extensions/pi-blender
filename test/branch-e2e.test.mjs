@@ -1587,7 +1587,33 @@ _bm.free()
 		assert.ok(result.preflight, "a headless run reports a preflight");
 		assert.equal(result.preflight.blocking, true);
 		assert.ok(result.preflight.blockers.includes("nonManifold"), JSON.stringify(result.preflight.blockers));
-		assert.ok(result.renderOutputPath, "a structural failure does not discard the render");
+		assert.equal(result.blocked, true, "a blocking preflight stops the run");
+		assert.equal(result.renderOutputPath, null, "no render is spent on a run that cannot pass");
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+		const blocked = manifest.branchRuns.at(-1);
+		assert.equal(blocked.status, "blocked", "the staged branch records the block");
+		assert.ok(!manifest.moduleRuns.some((run) => run.viaBranchApply === blocked.branchPath), "a blocked branch is not applied");
+
+		const refused = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["open"] });
+		assert.match(refused.skipped[0]?.reason ?? "", /preflight blocked/);
+		const overriddenApply = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["open"], forcePreflight: true });
+		assert.equal(overriddenApply.applied.length, 1, "an explicit apply override lands the branch");
+		const appliedManifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+		assert.equal(appliedManifest.branchRuns.find((run) => run.iteration === blocked.iteration).preflightOverridden, true);
+
+		const forced = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "open",
+			cameraProfile: "print",
+			forcePreflight: true,
+			timeoutSeconds: 300,
+		});
+		assert.ok(forced.renderOutputPath, "the override renders");
+		assert.equal(forced.preflightOverridden, true);
+		const after = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+		const overridden = after.branchRuns.find((run) => run.iteration === forced.iteration);
+		assert.equal(overridden.preflightOverridden, true, "the manifest records the override");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}

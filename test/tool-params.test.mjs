@@ -129,6 +129,7 @@ test("module_run names the camera options only the headless path honours", () =>
 		"reviewSheet",
 		"direct",
 		"forceRender",
+		"forcePreflight",
 		"referenceId",
 		"resolution",
 		"samples",
