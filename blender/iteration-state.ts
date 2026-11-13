@@ -111,6 +111,10 @@ export async function blenderIterationState(options: {
 
   const budgetUsed = manifest.critiqueCounts?.[moduleName] ?? 0;
   const runs = collectRuns(manifest, moduleName);
+  const newestBranchRun = (manifest.branchRuns ?? [])
+    .filter((run) => run.module === moduleName)
+    .sort((a, b) => b.sequence - a.sequence)[0];
+  const blocked = newestBranchRun?.status === "blocked" ? newestBranchRun : undefined;
 
   let entries: CritiqueVerdictRecord[] = [];
   try {
@@ -160,6 +164,9 @@ export async function blenderIterationState(options: {
     },
     lastRun: runs[0]
       ? { iteration: runs[0].iteration, stateDigest: runs[0].stateDigest, executionMode: runs[0].executionMode }
+      : undefined,
+    lastBlocked: blocked
+      ? { iteration: blocked.iteration, blockers: blocked.preflight?.blockers ?? [] }
       : undefined,
     lastVerdict: verdict
       ? {

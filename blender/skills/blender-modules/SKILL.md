@@ -134,6 +134,7 @@ Run a workspace module: checkpoint model.blend as the run found it to modules/<n
 - **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
 - **direct** — Headless path only. Save model.blend in place instead of writing a branch and applying it, halving the Blender processes for a model no one else is editing. Other staged branches are not merged. Default false.
 - **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
+- **forcePreflight** — Override a blocking preflight. The default marks the run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. Use only for a known false positive.
 - **referenceId** — Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.
 - **resolution.x** — Render width in pixels.
 - **resolution.y** — Render height in pixels.
@@ -156,6 +157,7 @@ Run a workspace module HEADLESSLY against its own private copy of model.blend (m
 - **cameraDistance** — Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.
 - **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
 - **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
+- **forcePreflight** — Override a blocking preflight. The default marks the run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. Use only for a known false positive.
 - **referenceId** — Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.
 - **resolution.x** — Render width in pixels.
 - **resolution.y** — Render height in pixels.
@@ -164,6 +166,7 @@ Run a workspace module HEADLESSLY against its own private copy of model.blend (m
 - **timeoutSeconds** — Execution timeout in seconds.
 
 ### blender_branch_apply
+- **forcePreflight** — Override a blocking preflight. The default marks the run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. Use only for a known false positive.
 
 Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. The whole batch is pre-flighted first, merged by one headless Blender process and saved once, so concurrent module runs cannot interleave through a half-applied fan-out. A module whose datablocks are contested by another STAGED branch is REPORTED AND SKIPPED, never auto-merged: its changes stay in its own branch blend and the apply says which modules and which object conflicted, because silently picking a winner is how a half-built asset gets presented as finished. A branch whose blend is missing from disk is reported in `missing` and does not stop the rest of the batch. Each successful apply is recorded as a module run, so blender_module_revert can restore the state it replaced.
 

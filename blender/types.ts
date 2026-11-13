@@ -181,7 +181,7 @@ export interface BlenderModuleRunRecord {
  * finishing: the branch file already exists then, so a prune must treat it as
  * live work even though there is no result to apply.
  */
-export type BranchRunStatus = "running" | "staged" | "applied" | "unchanged" | "conflict" | "failed";
+export type BranchRunStatus = "running" | "staged" | "blocked" | "applied" | "unchanged" | "conflict" | "failed";
 /** One generation's stored visual evidence, under modules/<name>/iterations/NN. */
 export interface ReviewPacket {
 	dir: string;
@@ -279,6 +279,8 @@ export interface BlenderBranchRunRecord {
 	reviewPacket?: ReviewPacket;
 	/** Structural checks measured before this run's render. */
 	preflight?: PreflightResult;
+	/** True when a blocking preflight was explicitly overridden. */
+	preflightOverridden?: boolean;
 }
 
 export interface BranchRunOptions {
@@ -293,6 +295,8 @@ export interface BranchRunOptions {
 	direct?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
+	/** Render and apply even when preflight blocks the run. */
+	forcePreflight?: boolean;
 	/** Reference id to include in the stored comparison sheet. */
 	referenceId?: string;
 	view?: string;
@@ -398,6 +402,10 @@ export interface BranchRunResult {
 	addedObjects: string[];
 	removedObjects: string[];
 	applyObjects: string[];
+	/** True when a blocking preflight stopped the render. */
+	blocked?: boolean;
+	/** True when a blocking preflight was explicitly overridden. */
+	preflightOverridden?: boolean;
 	/** Everything this module owns after this run; carried into the next run. */
 	ownedObjects: string[];
 	/** Materials this module owns after this run; carried into the next run. */
@@ -435,6 +443,8 @@ export interface BranchApplyOptions {
 	workspace: string;
 	/** Modules to apply, in any order; conflicts are computed over all staged runs. */
 	modules: string[];
+	/** Apply a branch whose preflight blocked it. */
+	forcePreflight?: boolean;
 	timeoutSeconds?: number;
 	signal?: AbortSignal;
 }
@@ -1518,6 +1528,8 @@ export interface IterationState {
 	presentThreshold: number;
 	budget: { used: number; max: number; remaining: number; exhausted: boolean };
 	lastRun?: { iteration: number; stateDigest?: string; executionMode: "branch" | "live" };
+	/** Newest branch a blocking preflight stopped; the loop must address these first. */
+	lastBlocked?: { iteration: number; blockers: string[] };
 	lastVerdict?: {
 		iteration?: number;
 		verdict: CritiqueVerdict;
@@ -1638,6 +1650,8 @@ export interface ModuleRunOptions {
 	direct?: boolean;
 	/** Render even when the content fingerprint says nothing changed. */
 	forceRender?: boolean;
+	/** Render and save even when preflight blocks the run. */
+	forcePreflight?: boolean;
 	/** Reference id to include in the stored comparison sheet. */
 	referenceId?: string;
 	view?: string;
@@ -1680,6 +1694,10 @@ export interface ModuleRunResult {
 	 * headless run would report every real edit as unchanged.
 	 */
 	changed: boolean;
+	/** True when a blocking preflight stopped the run before it was saved. */
+	blocked?: boolean;
+	/** True when a blocking preflight was explicitly overridden. */
+	preflightOverridden?: boolean;
 	/**
 	 * Where the script actually ran.
 	 *

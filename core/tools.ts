@@ -732,6 +732,13 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	forcePreflight: Type.Optional(
+		Type.Boolean({
+			description:
+				'Override block.',
+			default: false,
+		}),
+	),
 	referenceId: Type.Optional(
 		Type.String({
 			description:
@@ -772,6 +779,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 		reviewSheet: params.reviewSheet,
 		direct: params.direct,
 		forceRender: params.forceRender,
+		forcePreflight: params.forcePreflight,
 		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
@@ -880,6 +888,13 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 			default: false,
 		}),
 	),
+	forcePreflight: Type.Optional(
+		Type.Boolean({
+			description:
+				'Override block.',
+			default: false,
+		}),
+	),
 	referenceId: Type.Optional(
 		Type.String({
 			description:
@@ -919,6 +934,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 		cameraDistance: params.cameraDistance,
 		reviewSheet: params.reviewSheet,
 		forceRender: params.forceRender,
+		forcePreflight: params.forcePreflight,
 		referenceId: params.referenceId,
 		resolution: params.resolution,
 		samples: params.samples,
@@ -953,6 +969,12 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		description:
 			'Module names to apply.',
 	}),
+	forcePreflight: Type.Optional(
+		Type.Boolean({
+			description: 'Override block.',
+			default: false,
+		}),
+	),
 	timeoutSeconds: Type.Optional(
 		Type.Number({
 			description: 'Timeout for the whole apply batch in seconds.',
@@ -965,6 +987,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 		cwd: context?.cwd ?? process.cwd(),
 		workspace: params.workspace,
 		modules: params.modules,
+		forcePreflight: params.forcePreflight,
 		timeoutSeconds: params.timeoutSeconds,
 		signal: context?.signal,
 	});

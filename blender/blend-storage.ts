@@ -92,7 +92,7 @@ export async function planBlendStorage(
 		(manifest.branchRuns ?? [])
 			.filter(
 			(run) =>
-				(run.status === "running" || run.status === "staged" || run.status === "unchanged") && !run.branchRetired,
+				(run.status === "running" || run.status === "staged" || run.status === "blocked" || run.status === "unchanged") && !run.branchRetired,
 		)
 			.map((run) => run.branchPath),
 	);
@@ -172,7 +172,7 @@ export async function removeBlendStorage(candidates: BlendStorageCandidate[]): P
 export async function retireAppliedBranches(manifestPath: string, manifest: BlenderWorkspaceManifest): Promise<number> {
 	const live = new Set(
 		(manifest.branchRuns ?? [])
-			.filter((run) => run.status === "staged" || run.status === "unchanged")
+			.filter((run) => run.status === "staged" || run.status === "blocked" || run.status === "unchanged")
 			.map((run) => run.branchPath),
 	);
 	const retired: string[] = [];

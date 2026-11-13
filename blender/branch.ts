@@ -604,6 +604,10 @@ if exit_code == 0:
             "checks": {"preflight": {"status": "warn", "reason": str(exc)}},
         }
 
+force_preflight = bool(payload.get("forcePreflight"))
+preflight_blocked = bool(preflight and preflight.get("blocking") and not force_preflight)
+preflight_overridden = bool(preflight and preflight.get("blocking") and force_preflight)
+
 cameras = [camera_framing] if camera_framing is not None else []
 camera_plan_report = dict(camera_plan)
 camera_plan_report["resolved"] = camera_framing
@@ -665,7 +669,7 @@ render_request = payload.get("render")
 # caller's way to say the PICTURE inputs changed (view, resolution, engine), which
 # the content fingerprint deliberately does not cover.
 render_started_at = time.time()
-render_attempted = exit_code == 0 and bool(render_request) and bool(changed or payload.get("forceRender"))
+render_attempted = exit_code == 0 and bool(render_request) and not preflight_blocked and bool(changed or payload.get("forceRender"))
 if render_attempted:
     if not render_request.get("cameraName") and cameras:
         render_request["cameraName"] = cameras[0]["cameraName"]
@@ -795,6 +799,8 @@ print(json.dumps({
     "cameras": cameras,
     "cameraPlan": camera_plan_report,
     "preflight": preflight,
+    "blocked": preflight_blocked,
+    "preflightOverridden": preflight_overridden,
     "reviewSheet": review_sheet,
     "reviewPacket": review_packet,
     "timings": timings,
@@ -811,6 +817,10 @@ interface BranchRunPayload {
 	exitCode: number;
 	/** Content fingerprint diff, the same definition the live bridge reports. */
 	changed: boolean;
+	/** True when a blocking preflight stopped the render and apply. */
+	blocked: boolean;
+	/** True when a blocking preflight was explicitly overridden. */
+	preflightOverridden: boolean;
 	touchedObjects: string[];
 	touchedMaterials: string[];
 	touchedWorlds: string[];
@@ -1121,6 +1131,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				ownedMaterials: priorOwnership.materials,
 				cameraPlan,
 				forceRender,
+				forcePreflight: options.forcePreflight === true,
 				reviewSheet: options.reviewSheet === true,
 				render: renderRequested
 					? {
@@ -1221,6 +1232,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
 		throw directConflict;
 	}
+	if (direct && payload.blocked) {
+		const restored = await restoreCheckpoint();
+		await releaseReservedIteration(manifest.manifestPath, iteration).catch(() => undefined);
+		throw new Error(
+			`Preflight blocked "${moduleName}": ${payload.preflight?.blockers.join("; ") ?? "structural check failed"}. ` +
+				(restored ? "model.blend was rolled back." : `model.blend could NOT be rolled back; the checkpoint is kept at ${checkpointPath}.`),
+		);
+	}
 
 	// The render already happened in the run process, against the branch blend
 	// this record describes. An explicit view names itself; otherwise the label
@@ -1266,7 +1285,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		scriptPath,
 		checkpointPath,
 		at: nowIso(),
-		status: direct ? "applied" : "staged",
+		status: direct ? "applied" : payload.blocked ? "blocked" : "staged",
 		appliedAt: direct ? nowIso() : undefined,
 		touchedObjects: payload.touchedObjects,
 		touchedMaterials: payload.touchedMaterials,
@@ -1278,6 +1297,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedMaterials: payload.ownedMaterials,
 		stateDigest: payload.stateDigest ?? undefined,
 		preflight: payload.preflight ?? undefined,
+		preflightOverridden: payload.preflightOverridden === true,
 		renderOutputPath,
 		changed: payload.changed,
 		reused: renderSkipped,
@@ -1335,12 +1355,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		{ signal: options.signal },
 	);
 
-	await recordBuildStage(
-		manifest.manifestPath,
-		direct ? "applied" : "staged",
-		`module ${moduleName} iteration ${iteration}`,
-		{ signal: options.signal },
-	);
+	if (!payload.blocked) {
+		await recordBuildStage(
+			manifest.manifestPath,
+			direct ? "applied" : "staged",
+			`module ${moduleName} iteration ${iteration}`,
+			{ signal: options.signal },
+		);
+	}
 
 	return {
 		workspacePath: manifest.workspacePath,
@@ -1372,12 +1394,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		cameras: payload.cameras,
 		cameraPlan: payload.cameraPlan,
 		preflight: payload.preflight ?? undefined,
+		blocked: payload.blocked === true,
+		preflightOverridden: payload.preflightOverridden === true,
 		reviewSheet: payload.reviewSheet ?? undefined,
 		reviewPacket: payload.reviewPacket ?? undefined,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		warnings,
-		status: "staged",
+		status: direct ? "applied" : payload.blocked ? "blocked" : "staged",
 	};
 	} catch (error) {
 		await removeRunningBranchRun(manifest.manifestPath, moduleName, sequence).catch(() => undefined);
@@ -1824,6 +1848,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// already on disk and this decision cannot undo it.
 	const allStaged = contestableStagedRuns(manifest);
 
+	const blocked: BlenderBranchRunRecord[] = [];
 	const applied: BranchApplyResult["applied"] = [];
 	const skipped: BranchApplyResult["skipped"] = [];
 	const missing: string[] = [];
@@ -1836,6 +1861,15 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 	// a vanished branch is a reason not to open model.blend at all, and finding
 	// it after the save would report work that did land as if it had not.
 	for (const record of staged) {
+		if (record.preflight?.blocking && !options.forcePreflight) {
+			blocked.push(record);
+			skipped.push({
+				module: record.module,
+				conflicts: [],
+				reason: `preflight blocked: ${record.preflight.blockers.join("; ")} (pass forcePreflight to override)`,
+			});
+			continue;
+		}
 		const conflicts = findRecordConflicts(record, allStaged.filter((run) => run !== record));
 		if (conflicts.length > 0) {
 			contested.push({ record, conflicts });
@@ -1937,6 +1971,7 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 		};
 
 		for (const record of unchanged) mark(record.sequence, "unchanged");
+		for (const record of blocked) mark(record.sequence, "blocked");
 		for (const { record, conflicts } of contested) mark(record.sequence, "conflict", conflicts);
 		for (const record of absent) {
 			mark(record.sequence, "failed", [
@@ -1956,7 +1991,10 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			if (!outcome?.applied) continue;
 			mark(record.sequence, "applied");
 			const target = current.branchRuns?.find((run) => run.sequence === record.sequence);
-			if (target) target.appliedAt = batchAt;
+			if (target) {
+				target.appliedAt = batchAt;
+				if (record.preflight?.blocking && options.forcePreflight === true) target.preflightOverridden = true;
+			}
 			applied.push({
 				module: record.module,
 				iteration: record.iteration,
@@ -2030,7 +2068,7 @@ export function contestableStagedRuns(
 	for (const run of manifest.branchRuns ?? []) {
 		// A failed or conflicted attempt proved nothing about the module's state,
 		// so it does not supersede a branch that is still waiting to be applied.
-		if (run.status !== "staged" && run.status !== "applied" && run.status !== "unchanged") continue;
+		if (run.status !== "staged" && run.status !== "blocked" && run.status !== "applied" && run.status !== "unchanged") continue;
 		newest.set(run.module, Math.max(newest.get(run.module) ?? 0, run.sequence));
 	}
 	for (const run of manifest.moduleRuns ?? []) {
@@ -2038,7 +2076,7 @@ export function contestableStagedRuns(
 		newest.set(run.name, Math.max(newest.get(run.name) ?? 0, run.sequence));
 	}
 	return (manifest.branchRuns ?? []).filter(
-		(run) => run.status === "staged" && run.sequence >= (newest.get(run.module) ?? run.sequence),
+		(run) => (run.status === "staged" || run.status === "blocked") && run.sequence >= (newest.get(run.module) ?? run.sequence),
 	);
 }
 
