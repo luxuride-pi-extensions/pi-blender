@@ -736,11 +736,13 @@ if exit_code == 0 and packet_dir and render_result:
             review_sheet["path"] = current_review
             packet["reviewSheet"] = review_sheet
         previous_dir = payload.get("previousPacketDir")
+        previous_iteration = payload.get("iteration") - 1
         if previous_dir:
+            previous_iteration = int(os.path.basename(previous_dir.rstrip(os.sep)) or previous_iteration)
             for candidate in ("review.png", "render.png"):
                 previous_file = os.path.join(previous_dir, candidate)
                 if os.path.exists(previous_file):
-                    panel_files.append({"name": f"previous {payload.get('iteration') - 1}", "label": f"PREVIOUS - ITERATION {payload.get('iteration') - 1}", "file": previous_file})
+                    panel_files.append({"name": f"previous {previous_iteration}", "label": f"PREVIOUS - ITERATION {previous_iteration}", "file": previous_file})
                     break
         reference_path = payload.get("referencePath")
         if reference_path and os.path.exists(reference_path):

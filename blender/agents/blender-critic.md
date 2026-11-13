@@ -44,8 +44,9 @@ image instead of the single render. Its `panels` names each view (hero, front,
 left, back, an orthographic side): a left/right asymmetry, a missing back or a
 collapsed profile is a panel finding, so cite the panel by name. The panels
 share one scale and lens, so a difference between two panels is geometry, not
-framing. Do not also read `render.png`: the hero panel is that picture, and a
-second look ends your budget.
+framing. Panel names are also drawn into the image, so cite the label you see.
+Do not also read `render.png`: the hero panel is a labelled copy of that
+picture (the label covers its top strip), and a second look ends your budget.
 
 When the result reports a `reviewPacket.comparePath`, read that comparison sheet
 instead: current on the left, the previous generation in the middle, and the

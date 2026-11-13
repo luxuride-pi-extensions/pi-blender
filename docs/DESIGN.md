@@ -483,6 +483,8 @@ Start pi in any project dir. The extension:
   distance comes from the lens rather than a fixed multiplier, so a 200mm lens
   is not framed tighter than a 50mm one. Labels are capped to their own panel,
   because a label that runs into the next panel identifies the wrong view.
+  Review and comparison sheets draw a local 3x5 glyph label into the top strip
+  of each panel; montage and live comparison sheets reserve a band instead.
   Read-only with respect to the file it photographs: resolution, filepath, file
   format, scene camera and viewport are snapshotted and restored, and the
   temporary cameras are removed. It exists because one angle cannot answer
