@@ -474,7 +474,7 @@ def _frame_module_camera(module, plan):
 
 
 
-def _render_review_sheet(plan, framing, render_request):
+def _render_review_sheet(plan, framing, render_request, label_prefix=""):
     """Render the plan's remaining shots and tile them beside the hero render.
 
     The hero image is the already-rendered picture, not a fourth render: the
@@ -500,6 +500,7 @@ def _render_review_sheet(plan, framing, render_request):
         "file": render_request["outputPath"],
         "cameraName": framing["cameraName"],
         "shot": shots[0].get("kind", "hero"),
+        "label": f"{label_prefix} {shots[0].get('name', 'hero')}".strip(),
         "distance": distance,
         "lensMm": lens,
         "orthoScale": ortho_scale,
@@ -533,6 +534,7 @@ def _render_review_sheet(plan, framing, render_request):
                 "file": panel_path,
                 "cameraName": camera_name,
                 "shot": shot.get("kind", name),
+                "label": f"{label_prefix} {name}".strip(),
                 "distance": distance,
                 "lensMm": lens,
                 "orthoScale": ortho_scale,
@@ -695,7 +697,7 @@ if exit_code == 0 and render_result and payload.get("reviewSheet"):
         review_sheet = {"error": "no mesh bounds to frame a review sheet", "panels": []}
     else:
         try:
-            review_sheet = _render_review_sheet(camera_plan, camera_framing, render_request)
+            review_sheet = _render_review_sheet(camera_plan, camera_framing, render_request, module_name)
         except Exception as exc:
             stale = os.path.join(os.path.dirname(render_request["outputPath"]), "review.png")
             if os.path.exists(stale):
@@ -725,7 +727,7 @@ if exit_code == 0 and packet_dir and render_result:
             "removedObjects": removed_objects,
             "reference": None,
         }
-        panel_files = [{"name": "current", "file": current_render}]
+        panel_files = [{"name": "current", "label": f"CURRENT - ITERATION {payload.get('iteration')}", "file": current_render}]
         current_review = os.path.join(packet_dir, "review.png")
         if review_sheet and review_sheet.get("path") and os.path.exists(review_sheet["path"]):
             shutil.copyfile(review_sheet["path"], current_review)
@@ -738,13 +740,13 @@ if exit_code == 0 and packet_dir and render_result:
             for candidate in ("review.png", "render.png"):
                 previous_file = os.path.join(previous_dir, candidate)
                 if os.path.exists(previous_file):
-                    panel_files.append({"name": f"previous {payload.get('iteration') - 1}", "file": previous_file})
+                    panel_files.append({"name": f"previous {payload.get('iteration') - 1}", "label": f"PREVIOUS - ITERATION {payload.get('iteration') - 1}", "file": previous_file})
                     break
         reference_path = payload.get("referencePath")
         if reference_path and os.path.exists(reference_path):
             reference_copy = os.path.join(packet_dir, "reference" + os.path.splitext(reference_path)[1])
             shutil.copyfile(reference_path, reference_copy)
-            panel_files.append({"name": "reference", "file": reference_copy})
+            panel_files.append({"name": "reference", "label": "REFERENCE - NOT A GENERATION", "file": reference_copy})
             packet["reference"] = {"path": reference_copy, "caption": payload.get("referenceCaption")}
         compare_path = None
         # A reference is not a baseline: on a first generation the sheet would

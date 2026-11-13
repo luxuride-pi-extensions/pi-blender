@@ -115,6 +115,82 @@ def render_scene(payload):
         },
     }
 
+# A 3x5 font drawn with NumPy. Sheet labels have to survive headless Blender,
+# which has no reliable text API before a render, and a critic must not need the
+# JSON sidecar to know which panel it is looking at.
+_FONT = {
+    "A": ("111", "101", "111", "101", "101"),
+    "B": ("110", "101", "110", "101", "110"),
+    "C": ("111", "100", "100", "100", "111"),
+    "D": ("110", "101", "101", "101", "110"),
+    "E": ("111", "100", "110", "100", "111"),
+    "F": ("111", "100", "110", "100", "100"),
+    "G": ("111", "100", "101", "101", "111"),
+    "H": ("101", "101", "111", "101", "101"),
+    "I": ("111", "010", "010", "010", "111"),
+    "J": ("001", "001", "001", "101", "111"),
+    "K": ("101", "101", "110", "101", "101"),
+    "L": ("100", "100", "100", "100", "111"),
+    "M": ("101", "111", "111", "101", "101"),
+    "N": ("101", "111", "111", "111", "101"),
+    "O": ("111", "101", "101", "101", "111"),
+    "P": ("111", "101", "111", "100", "100"),
+    "Q": ("111", "101", "101", "111", "001"),
+    "R": ("111", "101", "110", "101", "101"),
+    "S": ("111", "100", "111", "001", "111"),
+    "T": ("111", "010", "010", "010", "010"),
+    "U": ("101", "101", "101", "101", "111"),
+    "V": ("101", "101", "101", "101", "010"),
+    "W": ("101", "101", "111", "111", "101"),
+    "X": ("101", "101", "010", "101", "101"),
+    "Y": ("101", "101", "010", "010", "010"),
+    "Z": ("111", "001", "010", "100", "111"),
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "001", "010", "010"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+    "-": ("000", "000", "111", "000", "000"),
+    ".": ("000", "000", "000", "000", "010"),
+    ":": ("000", "010", "000", "010", "000"),
+    "/": ("001", "001", "010", "100", "100"),
+}
+
+
+def _draw_label(pixels, text, scale=2):
+    """Draw an uppercase label into the top strip of a panel."""
+    height, width, _channels = pixels.shape
+    strip = min(height, 6 * scale + 6)
+    # Blender image buffers are bottom-up, so the visual top strip is the last
+    # rows of the array. Drawing into rows 0..strip would put the label at the
+    # bottom of the saved PNG.
+    top_row = height - strip
+    pixels[top_row:height, :, :3] = 0.02
+    x = 6
+    for character in str(text).upper():
+        glyph = _FONT.get(character)
+        if glyph is None:
+            x += 4 * scale
+            continue
+        for row, line in enumerate(glyph):
+            for column, bit in enumerate(line):
+                if bit != "1":
+                    continue
+                bottom = top_row + 3 + (4 - row) * scale
+                left = x + column * scale
+                if bottom + scale > height or left + scale > width:
+                    continue
+                pixels[bottom : bottom + scale, left : left + scale, :3] = 0.95
+        x += 4 * scale
+        if x >= width - 6:
+            break
+
+
 def compose_review_sheet(panels, output_path, columns=2, gutter=8):
     """Tile rendered panels into one sheet without leaving Blender.
 
@@ -122,8 +198,10 @@ def compose_review_sheet(panels, output_path, columns=2, gutter=8):
     the extension does not already have. Panels are loaded as scene-linear
     pixels and written back through an sRGB image, which is the round trip a
     saved PNG takes; reading and writing the same buffer keeps the colours the
-    renders had. A panel that cannot be read is reported by name, not silently
-    replaced with a blank tile.
+    renders had. Each panel carries a drawn label: the tool result also names
+    the panels, but a critic that reads only the image must still know which
+    generation and shot it is looking at. A panel that cannot be read is
+    reported by name, not silently replaced with a blank tile.
     """
     # pi-lens-ignore: ast-grep:unresolved-import-python (NumPy ships with Blender)
     import numpy as np  # pyright: ignore[reportMissingImports]
@@ -160,6 +238,7 @@ def compose_review_sheet(panels, output_path, columns=2, gutter=8):
         top = (panel_height - target_height) // 2
         left = (panel_width - target_width) // 2
         tile[top : top + target_height, left : left + target_width] = pixels
+        _draw_label(tile, panel.get("label") or panel.get("name") or "")
         resized.append((panel, tile))
     loaded = resized
     rows = (len(loaded) + columns - 1) // columns

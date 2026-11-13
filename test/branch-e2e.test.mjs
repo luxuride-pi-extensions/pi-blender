@@ -1006,6 +1006,17 @@ test("a review sheet renders the plan's other angles in the same run", { skip },
 		}
 		const sheetImage = png.decodePng(readFileSync(sheet.path));
 		assert.equal(sheetImage.width, 1304);
+		// The JSON names the panels, but the critic's contract is one image. A
+		// blank header would make current and previous indistinguishable.
+		let labelPixels = 0;
+		for (let y = 8; y < 28; y += 1) {
+			for (let x = 8; x < 648; x += 1) {
+				const offset = (y * sheetImage.width + x) * 4;
+				const luma = 0.2126 * sheetImage.pixels[offset] + 0.7152 * sheetImage.pixels[offset + 1] + 0.0722 * sheetImage.pixels[offset + 2];
+				if (luma > 200) labelPixels += 1;
+			}
+		}
+		assert.ok(labelPixels > 30, `the first panel header is drawn (${labelPixels} bright pixels)`);
 		const tiles = result.reviewSheet.panels.map((panel) => {
 			const image = png.decodePng(readFileSync(panel.file));
 			let sum = 0;
