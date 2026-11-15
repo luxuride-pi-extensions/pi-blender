@@ -119,6 +119,31 @@ test("the README states both halves of the split", () => {
   assert.match(readme, /LICENSING\.md/, "README must link the reasoning");
 });
 
+test("the bundled Blender documentation keeps its own license", () => {
+  // The one part of the tarball this repository does not own: API entries cut
+  // from Blender's GPL-3.0-or-later docstrings, and manual excerpts under
+  // CC BY-SA 4.0, indexed at runtime by blender/doc-grounding.ts. Aggregation is
+  // permitted; calling the aggregate MIT is not, so the carve-out is asserted in
+  // every place a reader of the tarball would look.
+  const notice = read("docs/reference/NOTICE");
+  assert.match(notice, /CC BY-SA 4\.0/, "NOTICE must name the manual's license");
+  assert.match(notice, /GPL-3\.0-or-later/, "NOTICE must name the API docs' license");
+  assert.match(notice, /COPYING\.GPL-3\.0/, "NOTICE must point at the GPL text");
+  assert.match(notice, /Neither directory is MIT/i, "NOTICE must state the carve-out explicitly");
+
+  const gpl = read("docs/reference/COPYING.GPL-3.0");
+  assert.match(gpl, /GNU GENERAL PUBLIC LICENSE/, "the GPL text ships with the GPL material");
+  assert.match(gpl, /Version 3, 29 June 2007/, "that text must be GPL-3");
+
+  const readme = read("README.md");
+  assert.match(readme, /docs\/reference\/api\//, "README must name the GPL directory");
+  assert.match(readme, /docs\/reference\/manual\//, "README must name the CC BY-SA directory");
+
+  const doc = read("LICENSING.md");
+  assert.match(doc, /Third-party material/, "LICENSING.md must carry the carve-out section");
+  assert.match(doc, /docs\/reference\/api\//, "LICENSING.md must name the GPL directory");
+});
+
 test("LICENSING.md records the Blender-side requirement and its source", () => {
   const doc = read("LICENSING.md");
   assert.match(doc, /GPL-3\.0-or-later/, "LICENSING.md must name the required license");

@@ -163,5 +163,9 @@ Its Python half is **not** MIT and is not in this package. `live-bridge.py`, the
 headless run scripts and everything else that imports `bpy` live in
 [@luxuride-pi/blender-bridge](https://github.com/luxuride-pi-extensions/pi-blender-bridge),
 which is GPL-3.0-or-later because Blender's own license requires it — see
-[LICENSING.md](LICENSING.md) for the reasoning and the citations. That package is
-a dependency, so installing this one still gets you a working Blender.
+[LICENSING.md](LICENSING.md) for the reasoning and the citations.
+
+Two directories are **not** ours and are **not** MIT: `docs/reference/api/` is
+GPL-3.0-or-later (Blender's source docstrings) and `docs/reference/manual/` is
+CC BY-SA 4.0 (the Blender Manual). They ship because the agent cites them at
+runtime — see [docs/reference/NOTICE](docs/reference/NOTICE).
