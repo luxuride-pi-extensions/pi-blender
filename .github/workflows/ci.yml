@@ -59,7 +59,13 @@ jobs:
       # (allow-git = none, allow-remote = none), so declaring it would make
       # `npm ci` fail for every consumer instead of fetching anything. The
       # release asset is the artifact, and this is where the suites look for it.
-      PI_BLENDER_BRIDGE_ASSETS_DIR: ${{ runner.temp }}/blender-bridge
+      #
+      # github.workspace/.. and not runner.temp: the job-level `env` context
+      # does not include `runner` at all ("Unrecognized named-value: 'runner'",
+      # which GitHub reports as a workflow-file error and a run with zero jobs),
+      # and it must stay OUTSIDE $GITHUB_WORKSPACE anyway, because
+      # actions/checkout's `clean: true` wipes the workspace contents.
+      PI_BLENDER_BRIDGE_ASSETS_DIR: ${{ github.workspace }}/../blender-bridge
     steps:
       # THIS REPOSITORY FIRST, ON PURPOSE, AND NOT BY ACCIDENT.
       #
@@ -95,10 +101,10 @@ jobs:
       # immutable where a branch is not.
       - name: fetch the blender-bridge package
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/bridge.tgz" \
+          curl -fsSL -o /tmp/bridge.tgz \
             https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
-          tar xzf "$RUNNER_TEMP/bridge.tgz" -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
+          tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           # Fails here, with a plain "no such file", rather than inside a suite
           # that would otherwise report a resolution bug in config.ts.
           test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
@@ -416,6 +422,11 @@ jobs:
     name: real Blender probes (headless)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Same reason as the `test` job, and the same expression: this job runs
+      # the probes that were .py files in this repository until the license
+      # split, and they are now the bridge package's test/ directory.
+      PI_BLENDER_BRIDGE_ASSETS_DIR: ${{ github.workspace }}/../blender-bridge
     steps:
       - uses: actions/checkout@v5
 
@@ -426,6 +437,15 @@ jobs:
 
       - name: install pi-blender
         run: npm ci --legacy-peer-deps
+
+      - name: fetch the blender-bridge package
+        run: |
+          curl -fsSL -o /tmp/bridge.tgz \
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
+          mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
+          tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/test/preflight.py"
 
       - name: install the fonts the import fixtures measure
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
