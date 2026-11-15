@@ -665,6 +665,33 @@ duplicate is not a blocker, so the overridden record does not read
 instead. Other non-blocking `warnings` belong in the critic's brief as facts to
 confirm, not as reasons to skip it.
 
+## The render is measured before it is judged
+
+Every headless result that produced a render carries `renderFacts`, and the same
+object is written into that generation's `packet.json` next to the preflight: the
+numbers you read are the numbers the critic reads. It holds `exposure` (luma
+percentiles and the clipped fractions over the subject only), `palette` (the
+dominant subject colours, largest share first), `subjectCoverage`,
+`flatMaterial`, `clipped`, `nearMonochrome` and the probe's own `warnings`. It is
+measured on the saved file, against the backdrop that render actually used, so
+it describes the picture rather than the scene you think you built.
+
+Read it BEFORE you spawn a critic, for the same reason you read `preflight`.
+`flatMaterial` means one shade covers most of the subject; `nearMonochrome` means
+every colour in it is near-neutral. Together they are the signature of a surface
+that was never assigned and painted — a white default material is a modelling
+failure, not a taste question, and no critic verdict will fix it. Send it back to
+the worker with the palette and coverage numbers as the brief. `clipped: true`
+means the highlight or shadow detail there cannot be judged from this image, so
+fix the lighting or the exposure before paying for a look that has to say "I
+cannot see it".
+
+A `renderFacts` warning that the backdrop was not flat means the world is a
+gradient or an environment rather than one colour, so `subjectCoverage` should be
+treated as approximate. `renderFacts` is absent when rendering was disabled, when
+the render failed, or when a reused generation was recorded before these facts
+existed; absence is not a clean bill of health, it only means nobody measured
+this one.
 
 ## Image budget
 

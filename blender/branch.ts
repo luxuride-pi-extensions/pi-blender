@@ -32,6 +32,8 @@ import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { mergeCameraPlan } from "./camera-plan.js";
 import { collectModuleOwnership } from "./generations.js";
 import { recordBuildStage } from "./build-state.js";
+import { blenderImageProbe } from "./image-probe.js";
+import { renderFactsFromProbe, type RenderBackdrop } from "./render-facts.js";
 import { mapBackgroundRenderEngine } from "./render.js";
 import { parseLockHolderPid, pidIsRunning } from "./liveness.js";
 import { reclaimLockIfUnchanged } from "./lock-reclaim.js";
@@ -45,6 +47,7 @@ import type {
 	BranchCameraFraming,
 	BranchConflict,
 	PreflightResult,
+	RenderFacts,
 	ResolvedCameraPlan,
 	ReferenceCompleteness,
 	ReviewPacket,
@@ -83,6 +86,16 @@ const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
 /** Extra budget a render may take beyond the script's own timeout. */
 const RENDER_TIMEOUT_MS = 360_000;
 const BRANCH_SAVED_MARKER = "branch-saved";
+/**
+ * How far a pixel may sit from the measured backdrop and still count as backdrop.
+ *
+ * Not zero: every rendered pixel carries a step of anti-aliasing and dither, and
+ * the backdrop is most of the frame. At zero tolerance the whole backdrop reads
+ * as subject and every run reports a subject covering the entire image.
+ */
+const RENDER_BACKDROP_TOLERANCE = 0.02;
+/** The run packet a critic and a manager read for one generation. */
+const PACKET_FILE = "packet.json";
 
 /**
  * The module's branch blend: its private copy of model.blend.
@@ -144,6 +157,7 @@ function measuredBackdrop(render: unknown): [number, number, number] | undefined
  */
 function buildBranchRunScript(): string {
 	return `
+import array
 import contextlib
 import io
 import json
@@ -696,6 +710,60 @@ state_digest = compute_state_digest(after, owned_objects, owned_materials)
 # the geometry the critic judged; re-solving it against the merged scene would
 # silently disagree with that picture.
 
+def _render_backdrop(path):
+    """The colour the saved render puts behind its subject, in the PNG's own scale.
+
+    This has to be read back from the file, not taken from the world. The studio
+    world is linear 0.05 and the saved image holds it as display 0.23, so a
+    measurement handed the scene value would treat the whole backdrop as subject
+    -- off by a view transform, not by a rounding error.
+
+    Only the outermost one-pixel ring is read, and it is reduced to its modal
+    colour rather than its mean: a flat world fills that ring edge to edge, so
+    its colour is the mode by construction, while a subject that reaches the
+    frame edge cannot outvote a whole ring. The second return value is how much
+    of the ring the mode holds, because that is the only honest answer for a
+    gradient or environment world -- it has no single backdrop colour, and the
+    caller needs to say so rather than be handed a plausible average.
+    """
+    image = bpy.data.images.load(path, check_existing=False)
+    try:
+        # Non-Color keeps the stored bytes as floats 0..1, the same scale a PNG
+        # decoder reads; a color-managed read would apply a transfer curve on top
+        # of the one the render already baked in.
+        image.colorspace_settings.name = "Non-Color"
+        width, height = image.size
+        buffer = array.array("f", bytes(16 * width * height))
+        image.pixels.foreach_get(buffer)
+    finally:
+        bpy.data.images.remove(image)
+
+    offsets = [x * 4 for x in range(width)]
+    offsets += [((height - 1) * width + x) * 4 for x in range(width)]
+    for y in range(1, height - 1):
+        offsets.append(y * width * 4)
+        offsets.append((y * width + width - 1) * 4)
+
+    # The palette in image-probe.ts quantises to 16 steps per channel; matching
+    # that here keeps one round-off of anti-aliasing or dither inside one bucket
+    # instead of splitting a flat backdrop into two near-identical modes.
+    counts = {}
+    totals = {}
+    for offset in offsets:
+        key = (
+            int(round(buffer[offset] * 15)),
+            int(round(buffer[offset + 1] * 15)),
+            int(round(buffer[offset + 2] * 15)),
+        )
+        counts[key] = counts.get(key, 0) + 1
+        running = totals.get(key) or [0.0, 0.0, 0.0]
+        totals[key] = [running[0] + buffer[offset], running[1] + buffer[offset + 1], running[2] + buffer[offset + 2]]
+    mode = max(counts, key=lambda bucket: counts[bucket])
+    held = counts[mode]
+    colour = [round(value / held, 4) for value in totals[mode]]
+    return colour, round(held / max(1, len(offsets)), 4)
+
+
 # Render inside the SAME process that just authored the branch. The branch
 # blend is saved above, so this is the file the apply will merge and the image
 # the critic will judge; spawning a second Blender only to open the file again
@@ -718,6 +786,21 @@ if render_attempted:
     # Blender crash.
     try:
         render_result = render_scene(render_request)
+        # What the image shows behind its subject is measured now, while the scene
+        # that produced it is still open: the colour is the render's, not the
+        # world's, and a film-transparent render has an alpha channel instead.
+        film_transparent = bool(bpy.context.scene.render.film_transparent)
+        render_result["filmTransparent"] = film_transparent
+        if not film_transparent:
+            # A backdrop that could not be read is a warning on the picture, never
+            # a failed render: the image is already saved and still shows the work.
+            try:
+                backdrop, backdrop_uniform = _render_backdrop(render_result["outputPath"])
+            except Exception as exc:
+                render_result["backdropError"] = str(exc)
+            else:
+                render_result["background"] = backdrop
+                render_result["backgroundUniform"] = backdrop_uniform
     except Exception as exc:
         render_error = str(exc)
 render_finished_at = time.time()
@@ -904,6 +987,14 @@ interface BranchRenderPayload {
 	resolvedEngine: string;
 	requestedEngine: string | string[] | null;
 	resolution: { x: number; y: number; percentage: number };
+	/** The saved image's own backdrop colour, 0..1 per channel; absent when the film is transparent. */
+	background?: [number, number, number];
+	/** True when the render kept an alpha channel instead of a backdrop. */
+	filmTransparent?: boolean;
+	/** Share of the frame's border ring the backdrop colour holds, 0..1. */
+	backgroundUniform?: number;
+	/** Why the backdrop could not be read off the saved image. */
+	backdropError?: string;
 }
 
 /**
@@ -1321,19 +1412,14 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	}
 
 	// Silhouette agreement with the paired reference, measured on each planned
-	// view. The split needs a backdrop for each side, and this package has none at
-	// run time: the payload carries no world colour, and DESIGN.md is explicit that
-	// a backdrop is a value the caller states rather than one the probe infers.
-	// Work already parked for it: issue #133 (PR #144, branch
-	// `issue-133-render-facts`) reads the saved PNG's border ring inside the branch
-	// run and records it as `payload.render.background` (0..1 per channel) with
-	// `payload.render.backgroundUniform` (the mode's share of that ring).
-	// `measuredBackdrop` below is the seam that consumes those two keys, so when
-	// they land the opaque case measures with no new surface and no second reading
-	// of the ring here. Until then an opaque render is NOT measured: the views stay
-	// out of `referenceCompleteness` and a warning says why, because splitting
-	// against a guessed black would score the studio. Alpha renders and alpha
-	// references measure today.
+	// view. The split needs a backdrop for each side: this run measures the saved
+	// render's border ring (#133) and records it as `payload.render.background`
+	// (0..1 per channel) with `payload.render.backgroundUniform`, so an opaque
+	// render is split against the file's own backdrop rather than a guessed black
+	// that would score the studio. `measuredBackdrop` below consumes those two
+	// keys and refuses anything under MIN_BACKDROP_UNIFORMITY, so a gradient world
+	// skips the measurement instead of contaminating it; an alpha render and an
+	// alpha reference are split on alpha and need no colour at all.
 	let referenceCompleteness: ReferenceCompleteness | undefined;
 	if (reference) {
 		const views: { name: string; path: string }[] = [];
@@ -1360,6 +1446,43 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 			}
 		}
 	}
+	// Material and exposure are decidable before anybody looks at the picture, and
+	// a look spent on a grey default surface is a look wasted: the critic reports
+	// "flat lighting" on a modelling failure and the loop spends the next
+	// iteration on the wrong problem. Measured once here, carried on the record,
+	// and written into the packet the manager and the critic already read.
+	let renderFacts: RenderFacts | undefined;
+	if (renderSkipped) {
+		// A reused picture carries the facts the run that took it measured. Re-probing
+		// the same file would produce the same numbers, and a generation whose record
+		// predates these facts has none -- inventing them is not an option.
+		renderFacts = previousRenderRun?.renderFacts;
+	} else if (renderOutputPath) {
+		try {
+			renderFacts = await measureRenderFacts({
+				cwd: options.cwd,
+				workspace: manifest.workspacePath,
+				renderOutputPath,
+				render: payload.render,
+			});
+		} catch (error) {
+			// The render succeeded; only its measurement did not. A missing fact is a
+			// warning on this run, never a discarded picture.
+			warnings.push(
+				`the render could not be measured (${(error as Error).message}); judge this picture without material or exposure facts.`,
+			);
+		}
+	}
+	if (payload.render?.backdropError) {
+		warnings.push(
+			`the render's backdrop could not be read from the saved image (${payload.render.backdropError}); the subject mask was measured against black and may cover the whole frame.`,
+		);
+	}
+	if (renderFacts && !(await attachRenderFacts(payload.reviewPacket, renderFacts))) {
+		warnings.push(
+			"the run's packet.json could not be updated with the measured render facts; they are in this result only, and a reader of the packet will not see them.",
+		);
+	}
 
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
@@ -1385,6 +1508,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		preflight: payload.preflight ?? undefined,
 		preflightOverridden: payload.preflightOverridden === true,
 		renderOutputPath,
+		renderFacts,
 		changed: payload.changed,
 		reused: renderSkipped,
 		renderKey,
@@ -1476,6 +1600,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		ownedMaterials: payload.ownedMaterials,
 		renderOutputPath,
 		renderError,
+		renderFacts,
 		timings,
 		resolvedEngine: payload.render?.resolvedEngine,
 		cameras: payload.cameras,
@@ -1500,6 +1625,55 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		throw error;
 	} finally {
 		await releaseDirectLock?.();
+	}
+}
+
+/**
+ * Measure the saved render, so a critic is handed numbers instead of a guess.
+ *
+ * The backdrop comes from the run process rather than from here: the render's
+ * world is measured against the file it produced, and only that process knows
+ * which world it was and whether the film had an alpha channel.
+ */
+async function measureRenderFacts(options: {
+	cwd: string;
+	workspace: string;
+	renderOutputPath: string;
+	render: BranchRenderPayload | null | undefined;
+}): Promise<RenderFacts> {
+	const backdrop: RenderBackdrop = {
+		background: options.render?.background,
+		filmTransparent: options.render?.filmTransparent,
+		backgroundUniform: options.render?.backgroundUniform,
+	};
+	const probe = await blenderImageProbe({
+		cwd: options.cwd,
+		workspace: options.workspace,
+		path: options.renderOutputPath,
+		background: backdrop.background,
+		tolerance: RENDER_BACKDROP_TOLERANCE,
+	});
+	return renderFactsFromProbe(probe, backdrop);
+}
+
+/**
+ * Add the measured facts to the run's packet.json.
+ *
+ * The packet is written inside the Blender process, before the image exists to
+ * be measured, so the facts land here afterwards. A manager reads the packet,
+ * not this result: a fact that lives only in the return value is a fact the
+ * reader who decides whether to spend a critic never sees.
+ */
+async function attachRenderFacts(packet: ReviewPacket | null | undefined, facts: RenderFacts): Promise<boolean> {
+	if (!packet?.dir) return false;
+	const path = join(packet.dir, PACKET_FILE);
+	try {
+		const record = JSON.parse(await readFile(path, "utf-8")) as Record<string, unknown>;
+		record.renderFacts = facts;
+		await writeFile(path, `${JSON.stringify(record, null, 2)}\n`, "utf-8");
+		return true;
+	} catch {
+		return false;
 	}
 }
 

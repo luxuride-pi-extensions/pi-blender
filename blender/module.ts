@@ -141,6 +141,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			preflightOverridden: branchResult.preflightOverridden,
 			reviewSheet: branchResult.reviewSheet,
 			reused: branchResult.reused,
+			renderFacts: branchResult.renderFacts,
 			warnings:
 				branchResult.cameraPlan.warnings.length || branchResult.warnings?.length
 					? [...branchResult.cameraPlan.warnings, ...(branchResult.warnings ?? [])]
@@ -221,6 +222,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 			cameraPlan: branchResult.cameraPlan,
 			reviewSheet: branchResult.reviewSheet,
 			reused: branchResult.reused,
+			renderFacts: branchResult.renderFacts,
 			warnings: [
 			"no fingerprint-visible change; model.blend was not rewritten",
 			...branchResult.cameraPlan.warnings,
@@ -273,6 +275,7 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 		preflightOverridden: branchResult.preflightOverridden,
 		reviewSheet: branchResult.reviewSheet,
 		reused: branchResult.reused,
+		renderFacts: branchResult.renderFacts,
 		warnings:
 			branchResult.cameraPlan.warnings.length || branchResult.warnings?.length
 				? [...branchResult.cameraPlan.warnings, ...(branchResult.warnings ?? [])]
