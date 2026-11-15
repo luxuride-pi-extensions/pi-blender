@@ -60,6 +60,30 @@ The `/blender` command engages manager mode over these tools; child agents
 pi install npm:@luxuride-pi/blender
 ```
 
+### The Blender-side package comes separately
+
+The Python this extension loads into Blender is its own package,
+[`@luxuride-pi/blender-bridge`](https://github.com/luxuride-pi-extensions/pi-blender-bridge)
+(GPL-3.0-or-later — [why](LICENSING.md)), and it has to be on disk before the
+first `blender_*` tool call:
+
+```bash
+# beside the extension, which is the second place the resolver looks
+git clone --depth 1 https://github.com/luxuride-pi-extensions/pi-blender-bridge \
+  ~/.pi/agent/extensions/pi-blender-bridge
+```
+
+Resolution order is `node_modules` (if you installed the package yourself),
+then a sibling checkout, then `~/.pi/agent/extensions/{blender-bridge,pi-blender-bridge}`;
+`PI_BLENDER_BRIDGE_ASSETS_DIR=/path/to/package` overrides all of it and is
+authoritative — a wrong path is an error, not a silent fallback.
+
+It is not an npm dependency on purpose: npm 12 refuses to fetch anything that is
+not a registry artifact (`allow-git` and `allow-remote` default to `none`), so a
+git or tarball spec would make `npm ci`/`npm install` fail for every consumer
+rather than fetch the package. Rather than force every user to change npm
+policy, the two packages stay installable separately.
+
 The child agents above must also exist in `$PI_AGENT_DIR/agents`. The
 extension ships its agent templates, so install them once from the installed
 copy:
@@ -132,4 +156,12 @@ Bump the version *before* tagging; the tag is not the place to bump.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE)
+[MIT](LICENSE) — the extension: the TypeScript, the tool surface, the skills and
+the agent prompts.
+
+Its Python half is **not** MIT and is not in this package. `live-bridge.py`, the
+headless run scripts and everything else that imports `bpy` live in
+[@luxuride-pi/blender-bridge](https://github.com/luxuride-pi-extensions/pi-blender-bridge),
+which is GPL-3.0-or-later because Blender's own license requires it — see
+[LICENSING.md](LICENSING.md) for the reasoning and the citations. That package is
+a dependency, so installing this one still gets you a working Blender.

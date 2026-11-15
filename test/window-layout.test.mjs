@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { loadTs } from "./paths.mjs";
+import { BRIDGE_ASSETS_DIR, loadTs } from "./paths.mjs";
 
 const REPO = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const load = (name) => loadTs(join(REPO, name));
@@ -176,7 +176,7 @@ const hasBlender = await (async () => {
 
 test("as_json returns layout, areas, active object and selection; asserts no image payload", { skip: !hasBlender }, async () => {
 	const { command, args } = await launch.resolveBlenderArgv();
-	const scriptPath = join(REPO, "blender", "live-bridge.py");
+	const scriptPath = join(BRIDGE_ASSETS_DIR, "live-bridge.py");
 	const stdout = execFileSync(
 		command,
 		[...args, "--background", "--python", scriptPath, "--", JSON.stringify({ type: "window-layout", as_json: true }), "--serve"],
@@ -221,7 +221,7 @@ test("downscale_image_to_size_limit downscales with pixel_size awareness and sta
 import sys, os, tempfile, json
 import bpy, imbuf
 
-sys.path.insert(0, ${JSON.stringify(join(REPO, "blender"))})
+sys.path.insert(0, ${JSON.stringify(BRIDGE_ASSETS_DIR)})
 from importlib import import_module
 bridge_mod = import_module("live-bridge")
 downscale_func = bridge_mod.downscale_image_to_size_limit

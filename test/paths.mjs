@@ -145,6 +145,54 @@ function resolveJiti() {
 export const JITI = resolveJiti();
 
 /**
+ * The GPL-3.0 bridge package: the Python that runs inside Blender.
+ *
+ * Mirrors the resolution in config.ts, because a test that finds the Python by a
+ * path the extension would never use proves nothing about the install. What is
+ * deliberately NOT mirrored is the fallback list's last two entries
+ * (~/.pi/agent/extensions/...): the suite must not silently test against
+ * whatever happens to be installed on the developer's machine when the checkout
+ * under test is missing its sibling.
+ *
+ * `PI_BLENDER_BRIDGE_ASSETS_DIR` wins, so the launch harness can stage a
+ * deliberately broken package.
+ */
+function resolveBridgePackageDir() {
+	const explicit = process.env.PI_BLENDER_BRIDGE_ASSETS_DIR?.trim();
+	const candidates = [
+		explicit,
+		// The development layout: the two checkouts side by side, which is what
+		// ~/.pi/agent/git/github.com/<org>/ holds for every extension here.
+		join(import.meta.dirname, "..", "..", "pi-blender-bridge"),
+		join(import.meta.dirname, "..", "..", "blender-bridge"),
+	];
+	try {
+		const require = createRequire(join(import.meta.dirname, "..", "package.json"));
+		candidates.push(dirname(require.resolve("@luxuride-pi/blender-bridge/package.json")));
+	} catch {
+		// Not installed as a dependency; the sibling checkout above is the case
+		// this repo is developed in.
+	}
+	const found = candidates.filter(Boolean).find((dir) => existsSync(join(dir, "blender", "live-bridge.py")));
+	if (!found) {
+		throw new Error(
+			`Could not find the bridge package (${candidates.filter(Boolean).join(", ")}). Clone ` +
+				`https://github.com/luxuride-pi-extensions/pi-blender-bridge next to this checkout, or set ` +
+				`PI_BLENDER_BRIDGE_ASSETS_DIR to its root. The suite cannot run the Python probes without it.`,
+		);
+	}
+	return found;
+}
+
+export const BRIDGE_DIR = resolveBridgePackageDir();
+
+/** `blender/` inside the bridge package: the scripts Blender executes. */
+export const BRIDGE_ASSETS_DIR = join(BRIDGE_DIR, "blender");
+
+/** `test/` inside the bridge package: the `--background` probes. */
+export const BRIDGE_PROBES_DIR = join(BRIDGE_DIR, "test");
+
+/**
  * Load a TypeScript module from this repo, with fresh evaluation.
  *
  * `isolated: true` is required, not a nicety: several modules here publish

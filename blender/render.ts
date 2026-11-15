@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getBlenderAssetsDir } from "../config.js";
+import { getBridgeAssetsDir } from "../config.js";
 import { NoWatchWindowError, requestLiveBlenderRender } from "./bridge.js";
 import { dispatchDeferredJob } from "./jobs.js";
 import type {
@@ -186,7 +186,7 @@ async function executeRender(options: RenderOptions): Promise<RenderResult> {
 					outputPath,
 					resolution: options.resolution,
 					samples: options.samples,
-					assetsDir: getBlenderAssetsDir(),
+					assetsDir: getBridgeAssetsDir(),
 				},
 				signal: options.signal,
 				timeoutMs: 360_000,
@@ -203,7 +203,7 @@ async function executeRender(options: RenderOptions): Promise<RenderResult> {
 				outputPath,
 				resolution: options.resolution,
 				samples: options.samples,
-				assetsDir: getBlenderAssetsDir(),
+				assetsDir: getBridgeAssetsDir(),
 			},
 			signal: options.signal,
 			timeoutMs: 360_000,

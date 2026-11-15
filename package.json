@@ -15,7 +15,7 @@
       "./index.ts"
     ]
   },
-  "license": "GPL-3.0-or-later",
+  "license": "MIT",
   "engines": {
     "node": ">=22.0.0",
     "blender": ">=4.2.0"

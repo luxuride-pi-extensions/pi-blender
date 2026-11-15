@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 
+import { BRIDGE_PROBES_DIR } from "./paths.mjs";
+
 /**
  * Run the Python probes against a real Blender.
  *
@@ -54,10 +56,10 @@ function detectBlender() {
  * can do is stay quiet.
  */
 function discoverProbes() {
-	return readdirSync(import.meta.dirname)
+	return readdirSync(BRIDGE_PROBES_DIR)
 		.filter((name) => name.endsWith(".py"))
 		.map((name) => {
-			const source = readFileSync(join(import.meta.dirname, name), "utf-8");
+			const source = readFileSync(join(BRIDGE_PROBES_DIR, name), "utf-8");
 			return {
 				name,
 				needsBlender: /^\s*import bpy\b/m.test(source),
@@ -105,7 +107,7 @@ describe("the Python probes against a real Blender", { skip: blender ? false : "
 					"--background",
 					"--factory-startup",
 					"--python",
-					join(import.meta.dirname, probe.name),
+					join(BRIDGE_PROBES_DIR, probe.name),
 				],
 				{
 					encoding: "utf8",

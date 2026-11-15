@@ -52,6 +52,20 @@ jobs:
   test:
     name: unit tests, typecheck, and manager-core consistency
     runs-on: ubuntu-latest
+    env:
+      # The Python that runs inside Blender is a separate GPL package
+      # (@luxuride-pi/blender-bridge); see LICENSING.md. It is deliberately not
+      # an npm dependency: npm 12 refuses non-registry specs by default
+      # (allow-git = none, allow-remote = none), so declaring it would make
+      # `npm ci` fail for every consumer instead of fetching anything. The
+      # release asset is the artifact, and this is where the suites look for it.
+      #
+      # github.workspace/.. and not runner.temp: the job-level `env` context
+      # does not include `runner` at all ("Unrecognized named-value: 'runner'",
+      # which GitHub reports as a workflow-file error and a run with zero jobs),
+      # and it must stay OUTSIDE $GITHUB_WORKSPACE anyway, because
+      # actions/checkout's `clean: true` wipes the workspace contents.
+      PI_BLENDER_BRIDGE_ASSETS_DIR: ${{ github.workspace }}/../blender-bridge
     steps:
       # THIS REPOSITORY FIRST, ON PURPOSE, AND NOT BY ACCIDENT.
       #
@@ -81,6 +95,20 @@ jobs:
       # 404 on a package that was never published.
       - name: install pi-blender
         run: npm ci --legacy-peer-deps
+
+      # A release asset, not a checkout: runner.temp is outside the workspace
+      # so actions/checkout's `clean: true` cannot delete it, and a tag is
+      # immutable where a branch is not.
+      - name: fetch the blender-bridge package
+        run: |
+          curl -fsSL -o /tmp/bridge.tgz \
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
+          mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
+          tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
+          # Fails here, with a plain "no such file", rather than inside a suite
+          # that would otherwise report a resolution bug in config.ts.
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/blank-bootstrap.py"
 
       # ----------------------------------------------------------------------
       # WHY A STEP-LEVEL GATE AND NOT A JOB-LEVEL ONE
@@ -144,17 +172,21 @@ jobs:
       # So this list is now MEASURED, not reasoned: each file was run on its
       # own from a `git archive` export -- no sibling checkout, no installed
       # extensions dir, PI_MANAGER_CORE_DIR pointed at a directory that does
-      # not exist -- which is the state this step creates. Exactly fifteen files
-      # and 80 tests survive:
+      # not exist -- which is the state this step creates. Exactly thirteen files
+      # and 71 tests survive.
+      #
+      # live-ownership and module-state used to be two of them, as the two
+      # suites that exercise the Python while needing no core. The Python moved
+      # to the bridge package, so they now need that package like everything
+      # else that spawns a script, and they are in step 1b where the bridge is
+      # fetched. Nothing that runs a .py belongs in this step:
       #
       #   camera-plan.test.mjs          11
       #   concurrency-budget.test.mjs   11
       #   critic-calibration.test.mjs    5
       #   generations.test.mjs           9
       #   headless-changed.test.mjs      2
-      #   live-ownership.test.mjs        3
       #   module-paths.test.mjs          7
-      #   module-state.test.mjs          6
       #   preflight.test.mjs             2
       #   reference-sources.test.mjs     5
       #   run-timings.test.mjs           3
@@ -172,7 +204,7 @@ jobs:
       # derived from `ls test/*.test.mjs`: a new test file is unverified by
       # default and has to be added here, which is the safe direction for a
       # mistake in the other one.
-      - name: typecheck and the twelve core-free suites
+      - name: typecheck and the thirteen core-free suites
         env:
           PI_MANAGER_CORE_DIR: ${{ runner.temp }}/absent-manager-core
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
@@ -186,9 +218,7 @@ jobs:
             test/critic-calibration.test.mjs \
             test/generations.test.mjs \
             test/headless-changed.test.mjs \
-            test/live-ownership.test.mjs \
             test/module-paths.test.mjs \
-            test/module-state.test.mjs \
             test/preflight.test.mjs \
             test/reference-sources.test.mjs \
             test/run-timings.test.mjs \
@@ -284,7 +314,7 @@ jobs:
                           -e concurrency-budget -e module-paths \
                           -e tool-params -e windowless-tools \
                           -e headless-changed -e generations -e camera-plan \
-                          -e live-ownership -e module-state -e preflight -e run-timings -e tool-surface)
+                          -e preflight -e run-timings -e tool-surface)
 
       # The same two suites step 2 exists for, now with
       # PI_MANAGER_CORE_DIR pointing at a core that actually exists.
@@ -392,6 +422,11 @@ jobs:
     name: real Blender probes (headless)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Same reason as the `test` job, and the same expression: this job runs
+      # the probes that were .py files in this repository until the license
+      # split, and they are now the bridge package's test/ directory.
+      PI_BLENDER_BRIDGE_ASSETS_DIR: ${{ github.workspace }}/../blender-bridge
     steps:
       - uses: actions/checkout@v5
 
@@ -402,6 +437,15 @@ jobs:
 
       - name: install pi-blender
         run: npm ci --legacy-peer-deps
+
+      - name: fetch the blender-bridge package
+        run: |
+          curl -fsSL -o /tmp/bridge.tgz \
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
+          mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
+          tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
+          test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/test/preflight.py"
 
       - name: install the fonts the import fixtures measure
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core

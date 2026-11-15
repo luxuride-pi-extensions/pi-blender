@@ -383,12 +383,25 @@ function confirmBridgeLaunched(): void {
  *
  * The cause is always an installation that no longer matches the code asking
  * for it — a repository renamed under a running session, a partial checkout, a
- * deploy that dropped the .py files. It is not transient, so retrying cannot
+ * deploy that dropped the .py files, or a bridge package that was never
+ * installed. It is not transient, so retrying cannot
  * fix it, and the honest behaviour is to say so once and stop.
+ *
+ * Returns the sentence to print, not just a path: an uninstalled bridge package
+ * fails during resolution rather than at the stat, and that error already names
+ * every candidate it tried. Either way the caller has one thing to report.
  */
 function missingLaunchAsset(): string | undefined {
-	for (const path of [getBundledBlankBootstrapPath(), getBundledBlenderBridgePath()]) {
-		if (!existsSync(path)) return path;
+	let bootstrapPath: string;
+	let bridgePath: string;
+	try {
+		bootstrapPath = getBundledBlankBootstrapPath();
+		bridgePath = getBundledBlenderBridgePath();
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+	for (const path of [bootstrapPath, bridgePath]) {
+		if (!existsSync(path)) return `the bundled script ${path} does not exist`;
 	}
 	return undefined;
 }
@@ -410,7 +423,7 @@ function assertLaunchAssetsAvailable(): boolean {
 	launchAssetsMissing = true;
 	stopBridgeSupervisor();
 	console.error(
-		`[pi-blender] not launching Blender: the bundled script ${missing} does not exist. ` +
+		`[pi-blender] not launching Blender: ${missing}. ` +
 			"This extension cannot start its bridge, and retrying would reopen a window every " +
 			`${LIVE_BRIDGE_SUPERVISE_INTERVAL_MS / 1000}s for the rest of the session without ever working. ` +
 			"Usually this means the checkout was renamed, moved, or updated while a pi session was already " +

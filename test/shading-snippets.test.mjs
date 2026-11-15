@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+
+import { BRIDGE_PROBES_DIR } from "./paths.mjs";
 import test from "node:test";
 
 function blender() {
@@ -15,7 +17,7 @@ const argv = blender();
 test("documented shading recipes hold in a real Blender", { skip: argv ? false : "no headless Blender available" }, () => {
 	const result = spawnSync(
 		argv[0],
-		[...argv.slice(1), "--background", "--factory-startup", "--python", join(import.meta.dirname, "shading-snippets.py")],
+		[...argv.slice(1), "--background", "--factory-startup", "--python", join(BRIDGE_PROBES_DIR, "shading-snippets.py")],
 		{ encoding: "utf8", timeout: 180_000 },
 	);
 	const output = `${result.stdout}\n${result.stderr}`;

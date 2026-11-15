@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getBridgeAssetsDir } from "../config.js";
 import type { ObjectDetailOptions, ObjectDetailResult } from "./types.js";
 import { runBlenderJson } from "./utils.js";
 import { loadWorkspaceManifest } from "./workspace.js";
 
-const OBJECT_DETAIL_SCRIPT = readFileSync(new URL("./object_detail.py", import.meta.url), "utf-8");
+// Read on first use rather than at module load: the script lives in the GPL
+// bridge package, and a missing install must surface as this tool's error (with
+// the resolver's list of candidates it tried), not as a failed extension load.
+let cachedObjectDetailScript: string | undefined;
+function objectDetailScript(): string {
+	cachedObjectDetailScript ??= readFileSync(join(getBridgeAssetsDir(), "object_detail.py"), "utf-8");
+	return cachedObjectDetailScript;
+}
 
 export async function blenderObjectDetail(options: ObjectDetailOptions): Promise<ObjectDetailResult> {
 	const manifest = await loadWorkspaceManifest(options.cwd, options.workspace);
@@ -15,7 +24,7 @@ export async function blenderObjectDetail(options: ObjectDetailOptions): Promise
 	const raw = await runBlenderJson<Omit<ObjectDetailResult, "workspacePath" | "blendPath">>({
 		cwd: options.cwd,
 		blendPath: manifest.blendPath,
-		scriptSource: OBJECT_DETAIL_SCRIPT,
+		scriptSource: objectDetailScript(),
 		payload: {
 			objectName: target,
 		},

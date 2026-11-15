@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,31 @@ const PROBE = fileURLToPath(new URL("./probe.mjs", import.meta.url));
 /** A scratch XDG cache root, so nothing here reads or writes the real one. */
 function scratchCache() {
 	return mkdtempSync(join(tmpdir(), "pi-blender-test-"));
+}
+
+/** A bridge package layout under a scratch root, or one missing a script. */
+function scratchBridgePackage({ scripts = ["live-bridge.py", "blank-bootstrap.py"] } = {}) {
+	const dir = mkdtempSync(join(tmpdir(), "pi-blender-bridge-pkg-"));
+	mkdirSync(join(dir, "blender"), { recursive: true });
+	for (const name of scripts) writeFileSync(join(dir, "blender", name), "# staged\n");
+	return dir;
+}
+
+/**
+ * The probe, when it is supposed to fail.
+ *
+ * config.ts throws from resolveBridgePackageDir(), and execFileSync turns a
+ * non-zero child into an exception whose stderr carries the message — which is
+ * the point, not an accident: an uninstalled bridge has to stop the caller, so
+ * there is no "resolved to undefined" path to assert on.
+ */
+function probeFailure(extra = {}) {
+	try {
+		probe(extra);
+	} catch (error) {
+		return `${error.stderr ?? ""}${error.stdout ?? ""}`;
+	}
+	assert.fail("the probe was expected to fail and did not");
 }
 
 /**
@@ -41,6 +66,10 @@ function probe(extra = {}) {
 		PI_BLENDER_BRIDGE_DIR: null,
 		PI_BLENDER_TMP_DIR: null,
 		PI_BLENDER_BLANK_BLEND_PATH: null,
+		// INHERITED, not cleared: CI points this at the fetched bridge package, and
+		// the ambient-resolution assertions below are meant to describe whatever
+		// this machine actually has. A test that erases the override only ever
+		// measures the sibling-checkout layout.
 		XDG_CACHE_HOME: scratchCache(),
 		...extra,
 	};
@@ -123,10 +152,55 @@ test("the blank bootstrap blend is per-instance", () => {
 	assert.ok(a.blankPath.endsWith("aaaaaaaaaaaa.blend"));
 });
 
-test("the bundled bridge script lives under this extension's assets dir", () => {
+test("the bridge script resolves inside the GPL bridge package", () => {
 	const result = probe();
-	assert.ok(result.bridgeScript.startsWith(result.assetsDir), "the bridge script resolved outside the extension");
-	assert.ok(existsSync(result.bridgeScript), "the bundled live-bridge.py is missing from the install");
+	assert.equal(result.bridgeScript, join(result.bridgeAssets, "live-bridge.py"));
+	assert.ok(existsSync(result.bridgeScript), "the bridge package is missing live-bridge.py");
+});
+
+test("the MIT half keeps only markdown in its own assets dir", () => {
+	// The license boundary is only real if the Python is not reachable from
+	// the extension's own directory: a package.json that says MIT while the
+	// tarball ships GPL Python is how the two disagree.
+	const result = probe();
+	assert.ok(
+		!result.bridgeScript.startsWith(result.assetsDir),
+		"the bridge script resolved back into the extension, which is MIT",
+	);
+	assert.ok(
+		!result.bridgeAssets.startsWith(result.assetsDir),
+		"the bridge package must not be nested inside the extension",
+	);
+});
+
+test("PI_BLENDER_BRIDGE_ASSETS_DIR wins over the installed package", () => {
+	const staged = scratchBridgePackage();
+	const result = probe({ PI_BLENDER_BRIDGE_ASSETS_DIR: staged });
+	assert.equal(result.bridgePackage, staged);
+	assert.equal(result.bridgeScript, join(staged, "blender", "live-bridge.py"));
+	rmSync(staged, { recursive: true, force: true });
+});
+
+test("a ~-relative bridge package override expands against the home directory", () => {
+	// Asserted through the failure message, which names the directory it
+	// actually looked in: writing a package into the real home is not something
+	// a test gets to do, and "expanded correctly" is only observable there.
+	const stderr = probeFailure({ PI_BLENDER_BRIDGE_ASSETS_DIR: "~/definitely-not-a-bridge" });
+	assert.ok(
+		stderr.includes(join(homedir(), "definitely-not-a-bridge")),
+		`the ~/ override did not expand against ${homedir()}: ${stderr}`,
+	);
+});
+
+test("an override with no live-bridge.py fails instead of falling through", () => {
+	// Falling back to the installed package here would run Python the user
+	// explicitly pointed away from, which is the one thing an override must
+	// never do.
+	const staged = scratchBridgePackage({ scripts: ["blank-bootstrap.py"] });
+	const stderr = probeFailure({ PI_BLENDER_BRIDGE_ASSETS_DIR: staged });
+	assert.match(stderr, /PI_BLENDER_BRIDGE_ASSETS_DIR/);
+	assert.match(stderr, /live-bridge\.py/);
+	rmSync(staged, { recursive: true, force: true });
 });
 
 test("the manager prompt carries the exchange contract after the manager prompt", () => {

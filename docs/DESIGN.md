@@ -12,8 +12,11 @@ launch.ts           BLENDER_PATH resolution (argv-aware) + detached live-bridge 
 config.ts           assets/bridge/temp dir resolution (XDG cache based)
 core/exec.ts        execCommand stand-in (argv spawn, no shell)
 blender/            module from packages/coding-agent/src/blender/ (+ set-mode, paint scene-info categories, module run/revert)
-  live-bridge.py      file-based bridge polled inside a running Blender UI
-  blank-bootstrap.py  strips the default startup scene and saves a clean blank.blend at launch (per-instance path)
+                    MARKDOWN ONLY — skills, agent prompts, the manager/child exchange
+                    contract. The Python that runs inside Blender (live-bridge,
+                    blank-bootstrap, the headless run scripts and measurement
+                    modules) lives in @luxuride-pi/blender-bridge, a separate
+                    GPL-3.0 package; see LICENSING.md for why the boundary is there.
   skills/             /skill:blender-create, blender-edit, blender-analyze, blender-with-reference, blender-paint, blender-shade, blender-sculpt, blender-modules, blender-live-state
   agents/             blender-worker + blender-critic + blender-manager PROMPT
                       + blender-diagnostician + blender-camera-aligner
@@ -141,6 +144,7 @@ instead of the skill. Parameter descriptions keep a short selector too.
 | `PI_BLENDER_BRIDGE_DIR` | `~/.cache/pi-blender/bridge` (each pi process uses `…/<instance-id>/`; setting this pins ONE shared dir and disables per-instance isolation — see §3) |
 | `PI_BLENDER_TMP_DIR` | `~/.cache/pi-blender/tmp` |
 | `PI_BLENDER_BLANK_BLEND_PATH` | `~/.cache/pi-blender/blank/<instance-id>.blend` (launch.ts always sets this; `blank-bootstrap.py`'s own default is `…/blank/manual.blend`, used only for a hand-started Blender) |
+| `PI_BLENDER_BRIDGE_ASSETS_DIR` | unset. Root of the `@luxuride-pi/blender-bridge` package (the GPL-3.0-or-later Python this extension loads into Blender — see LICENSING.md). Normal resolution is npm's `node_modules`, then a sibling checkout, then `~/.pi/agent/extensions/{blender-bridge,pi-blender-bridge}`. When set it is **authoritative**: a directory without `blender/live-bridge.py` is an error, never a reason to fall back to another copy |
 | `PI_BLENDER_NO_UI` | unset (set `1` to never auto-launch UI) |
 | `PI_BLENDER_MAX_PARALLEL_RUNS` | `16` — ceiling on concurrent **headless** Blender runs. A request, not a promise: the effective count is the smallest of this, the measured ceiling (4), the core count at 3 per run, and what free memory allows. The default is therefore normally clamped, and the clamp prints a warning naming the binding term. `blender_bridge_status` reports the resolved numbers **and how many headless Blenders are open right now**, counted across every process in the session tree, so a manager can see what its workers spent rather than only what the ceiling permits. The ceiling is session-wide: every pi process under the same bridge dir admits through one slot directory, and the narrowest active limit wins. A `/blender-watch` window is reported separately from that count: it is not one of these runs. |
 | `PI_BLENDER_WARM_POOL` | Off by default. When `1`, headless scripts run in long-lived Blender workers instead of a fresh process per job. A worker resets to factory settings before every job, chdirs to the job's cwd, restores `sys.path`/`sys.argv` and drops modules the job imported, then opens the scene that job names. Persistent handlers and timers a script leaves behind are not cleaned, so module scripts must not install them. A worker is recycled after `PI_BLENDER_WARM_JOBS` jobs (default 25), killed on timeout, and replaced after a crash. Idle workers hold no slot but remain resident until the session ends. The process ceiling and the session-wide slot still apply, so a pool cannot exceed the measured 4-way budget. Disable it to fall back to one process per job. |

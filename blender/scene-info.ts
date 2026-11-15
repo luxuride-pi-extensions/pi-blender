@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getBlenderAssetsDir } from "../config.js";
+import { getBridgeAssetsDir } from "../config.js";
 import { blenderObjectDetail } from "./object-detail.js";
 import type { SceneInfoOptions, SceneInfoResult, SceneInfoSelection, UsageGuessResult } from "./types.js";
 import { blenderUsageGuess } from "./usage-guess.js";
@@ -405,7 +405,7 @@ async function getSceneInfoForSelection(
 		blendPath: manifest.blendPath,
 		scriptSource: buildSceneInfoScript(),
 		payload: {
-			assetsDir: getBlenderAssetsDir(),
+			assetsDir: getBridgeAssetsDir(),
 			blendPath: manifest.blendPath,
 			includeObjects: selection.includeObjects,
 			includeCollections: selection.includeCollections,

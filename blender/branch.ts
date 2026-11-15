@@ -26,7 +26,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { copyBlendFile } from "./blend-storage.js";
 import { dirname, join } from "node:path";
-import { getBlenderAssetsDir } from "../config.js";
+import { getBridgeAssetsDir } from "../config.js";
 import { isLiveBridgeAlive } from "../launch.js";
 import { requestLiveBlenderReloadBlend } from "./bridge.js";
 import { mergeCameraPlan } from "./camera-plan.js";
@@ -1120,7 +1120,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				// The generated run script is executed as a string, not as a file
 				// in the assets dir, so nothing about sys.path comes for free and
 				// the shared fingerprint module has to be pointed at explicitly.
-				assetsDir: getBlenderAssetsDir(),
+				assetsDir: getBridgeAssetsDir(),
 				// Ownership is CARRIED FORWARD from the module's earlier APPLIED
 				// generations, not re-derived from the script or from the diff. The
 				// fingerprints are content-based, so a script that removes and rebuilds

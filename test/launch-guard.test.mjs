@@ -52,8 +52,15 @@ after(() => {
 const PEER_HALF_WRITTEN_CLAIM = "";
 
 /** Drive the staged launcher once, in a child process. */
-function launchOnce({ withScripts, subagentChild = false, seedClaim = null, seedHeartbeat = false, launched = true }) {
-	const staged = stageExtension({ withScripts });
+function launchOnce({
+	withScripts,
+	withBridge = true,
+	subagentChild = false,
+	seedClaim = null,
+	seedHeartbeat = false,
+	launched = true,
+}) {
+	const staged = stageExtension({ withScripts, withBridge });
 	const { path: blender, record } = stageFakeBlender();
 	const bridge = stageBridgeDir();
 	if (seedClaim !== null) writeFileSync(join(bridge, "launch.claim"), seedClaim);
@@ -82,6 +89,20 @@ describe("launch guard", () => {
 		assert.match(result.stderr, /Restart the pi session/, "the message must say what actually fixes it");
 	});
 
+	it("refuses to launch when the bridge package is not installed at all", () => {
+		// A missing package fails during resolution rather than at the stat, so
+		// this is a different code path from a missing script -- and the message
+		// has to list the candidates and name the override, because "not
+		// installed" without them is a bug report nobody can act on.
+		const { result, record } = launchOnce({ withScripts: false, withBridge: false });
+
+		assert.equal(existsSync(record), false, "no Blender may be started with no bridge package");
+		assert.match(result.stderr, /not launching Blender/);
+		assert.match(result.stderr, /blender-bridge/, "the message must name the package");
+		assert.match(result.stderr, /PI_BLENDER_BRIDGE_ASSETS_DIR/, "the message must name the override it tried");
+		assert.match(result.stderr, /Restart the pi session/, "the message must say what actually fixes it");
+	});
+
 	it("still launches, with both scripts, when the checkout is complete", () => {
 		const { result, record } = launchOnce({ withScripts: true });
 
@@ -90,6 +111,7 @@ describe("launch guard", () => {
 		const argv = readFileSync(record, "utf-8");
 		assert.match(argv, /--python \S*blank-bootstrap\.py/);
 		assert.match(argv, /--python \S*live-bridge\.py/);
+		assert.match(argv, /\/bridge\/blender\/blank-bootstrap\.py/, "the staged bridge package must be what launched");
 		assert.doesNotMatch(result.stderr, /not launching Blender/);
 	});
 

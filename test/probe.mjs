@@ -53,6 +53,8 @@ process.stdout.write(
 		blankPath: config.getBlankBlendPath(),
 		managerPrompt: config.getManagerPrompt(),
 		assetsDir: config.getBlenderAssetsDir(),
+		bridgeAssets: config.getBridgeAssetsDir(),
+		bridgePackage: config.resolveBridgePackageDir(),
 		bridgeScript: config.getBundledBlenderBridgePath(),
 	}),
 );
