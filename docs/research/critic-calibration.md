@@ -36,6 +36,15 @@ The shipped `test/fixtures/critic-calibration.json` is a **format fixture**,
 not evidence. Its numbers are synthetic and the script's tests assert the
 arithmetic, not the critic.
 
+The set that does ship as evidence is `test/fixtures/critic-calibration/`: eight
+self-authored renders (three clean, five defective) with labels, hashes and the
+threshold table. `node scripts/critic-calibration.mjs
+test/fixtures/critic-calibration/manifest.json` scores a deterministic proxy
+against them from measurements only, which is CI-safe and needs no model; a live
+critic transcript is scored with `--live --reviews <file>`. The directory's
+README lists what the proxy cannot see, so a clean proxy run is not mistaken for
+a calibrated critic.
+
 ## Measurement
 
 For each image, run the critic two or three times with the production prompt
@@ -66,7 +75,10 @@ node scripts/critic-calibration.mjs test/fixtures/critic-calibration.json
 
 The script prints per-axis mean, standard deviation and variance across runs,
 pass agreement with the human label, defect recall, and the estimated
-false-pass rate. `--json` prints only the machine-readable report. The axes are
+false-pass rate. It also reports the mean absolute error of each axis against
+the label's `expectedAxes` and recall broken down per defect name, because a
+single overall recall is satisfied by a critic that finds one defect
+everywhere. `--json` prints only the machine-readable report. The axes are
 the production integers 0–2 (`blender/critique.ts`), not a 0–10 scale.
 
 ## What counts as calibrated
