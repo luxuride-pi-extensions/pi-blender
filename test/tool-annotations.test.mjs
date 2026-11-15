@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { loadTs } from "./paths.mjs";
 
 const lines = readFileSync(new URL("../core/tools.ts", import.meta.url), "utf8").split("\n");
 
@@ -404,5 +405,23 @@ test("openWorldHint accurately distinguishes live Blender/external tools from wo
 		assert.ok(block, `missing ${name}`);
 		const annotations = parseAnnotations(block);
 		assert.equal(annotations.openWorldHint, false, `${name} is workspace-file-only and must declare openWorldHint: false`);
+	}
+});
+
+// The MCP surface and the runtime gate both read capability bundles. A
+// capability says which stage owns a tool, not what the tool does, so the
+// invariant is one-directional: nothing destructive may sit in the bundles an
+// external client gets by default.
+test("the default MCP bundles hold no destructive tool", async () => {
+	const { CAPABILITY_BUNDLES } = await loadTs("../blender/agent-policy.ts");
+	const exposed = new Set([...CAPABILITY_BUNDLES["blender.read"], ...CAPABILITY_BUNDLES["blender.review"]]);
+
+	for (const [name, annotations] of Object.entries(EXPECTED_ANNOTATIONS)) {
+		if (!exposed.has(name)) continue;
+		assert.equal(
+			annotations.destructiveHint,
+			false,
+			`${name} is destructive and must not be in blender.read or blender.review`,
+		);
 	}
 });
