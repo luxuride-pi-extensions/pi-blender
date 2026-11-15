@@ -29,6 +29,17 @@ const LUMA_R = 0.2126;
 const LUMA_G = 0.7152;
 const LUMA_B = 0.0722;
 
+/**
+ * How far a pixel may sit from the background colour and still count as background.
+ *
+ * The one copy of this number: the probe's own mask, the render's in-process
+ * stats (`blender/render_scene.py` measures against the same 0.02) and the
+ * silhouette split in `blender/silhouette.ts` all have to call the same pixels
+ * subject, or the palette and the mask disagree about what the subject is and a
+ * few code values of dither become the difference between two masks.
+ */
+export const DEFAULT_BACKDROP_TOLERANCE = 0.02;
+
 const DEFAULT_PALETTE_LIMIT = 6;
 const MAX_PALETTE_LIMIT = 16;
 const PALETTE_SQUARE_TOLERANCE = 0.06;

@@ -1942,7 +1942,7 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 		openWorldHint: false,
 	},
 	description:
-	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean. Full rules: skill `blender-analyze`.',
+	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean. A branch run already carries `renderStats`, backdrop included, for its own render; probe other images. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
 		description: 'Explicit workspace path.',
