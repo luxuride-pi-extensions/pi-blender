@@ -638,8 +638,10 @@ not an applied generation.
 
 Every headless module result carries `preflight`: bounds, unit scale, unapplied
 scale, non-manifold and boundary edges, self-intersections, wall thickness on
-print/character profiles, symmetry, UVs and procedural materials. It also states
-the method and sample for each number.
+print/character profiles, symmetry, UVs, procedural materials, and duplicate
+objects (a `<base>.NNN` copy Blender renamed into existence because the script
+re-created an object it already had). It also states the method and sample for
+each number.
 
 Read it before you spawn a critic. If `preflight.blocking` is true, the harness
 marks the run `blocked`, skips the render and refuses to apply the branch. Send
@@ -647,7 +649,17 @@ the `blockers` and their measured values back to the worker as the next brief.
 `forcePreflight: true` on the run and on `blender_branch_apply` overrides this
 and records the override in the manifest; use it only when the block is a known
 false positive. A hole, an interpenetration or a 0.4 mm wall cannot be judged
-away by a vision model, and the critic context is the expensive part. Non-blocking `warnings` belong in the critic's brief as facts to
+away by a vision model, and the critic context is the expensive part.
+
+`duplicateObjects` is the one warning that still stops an apply: on prop, paint,
+interior and asset_pack it does not block the run, but `blender_branch_apply`
+skips a branch that would merge the copy and tells you which names it refused.
+A `.001` twin of an object the module already owns is a second object stacked on
+the first, not a rebuild — send it back to the worker to reuse or remove the
+datablock, and pass `forcePreflight` only if you meant both copies. A warned
+duplicate is not a blocker, so the overridden record does not read
+`preflightOverridden`; it names the copies it merged in `forcedDuplicates`
+instead. Other non-blocking `warnings` belong in the critic's brief as facts to
 confirm, not as reasons to skip it.
 
 

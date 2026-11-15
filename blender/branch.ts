@@ -592,6 +592,13 @@ if exit_code == 0:
             preflight_subject,
             profile=camera_plan.get("profile") or "prop",
             symmetry_axis=symmetry_axis,
+            # What THIS run created, and what the module already owned before it.
+            # A .001 name only reads as a duplicate when Blender produced it now:
+            # numbered datablocks the file already held are not this script's
+            # mistake, and flagging them would block an idempotent rebuild of an
+            # intentionally numbered pair.
+            added_objects=delta["addedObjects"],
+            owned_objects=owned_objects,
         )
     except Exception as exc:
         # Measurement must never destroy a build that already succeeded: the
@@ -1799,6 +1806,25 @@ async function acquireApplyLock(manifestPath: string, _options?: { signal?: Abor
 }
 
 /**
+ * The `.NNN` twins of an owned object that this apply would merge as a second copy.
+ *
+ * `duplicateObjects` is a blocker on the profiles where a stacked twin is
+ * disqualifying and only a warning on the rest, because a prop with a duplicate
+ * can still be judged. A warning is not a licence to merge it, though: applying
+ * `Hero.001` beside `Hero` leaves model.blend with two objects where the module
+ * meant one, and the second is a datablock the render that was judged may have
+ * hidden inside the first. The apply therefore refuses these copies until the
+ * caller fixes the script or says `forcePreflight`.
+ */
+function duplicateTwinCopies(record: BlenderBranchRunRecord): string[] {
+	const check = record.preflight?.checks?.duplicateObjects;
+	const value = check?.value as { duplicates?: Array<{ base: string; copies: string[] }> } | undefined;
+	if (!value?.duplicates?.length) return [];
+	const applyable = new Set(record.applyObjects);
+	return value.duplicates.flatMap((entry) => entry.copies.filter((copy) => applyable.has(copy)));
+}
+
+/**
  * Apply staged branches into model.blend in ONE pass, reporting and skipping
  * any that conflict with another staged branch.
  *
@@ -1867,6 +1893,18 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 				module: record.module,
 				conflicts: [],
 				reason: `preflight blocked: ${record.preflight.blockers.join("; ")} (pass forcePreflight to override)`,
+			});
+			continue;
+		}
+		// A duplicate the profile only warns about is refused HERE rather than at
+		// run time: the run's render and its warning stay available to the manager,
+		// and the branch stays staged, so an explicit override still lands it.
+		const twins = duplicateTwinCopies(record);
+		if (twins.length > 0 && options.forcePreflight !== true) {
+			skipped.push({
+				module: record.module,
+				conflicts: [],
+				reason: `duplicate objects would be applied: ${twins.join(", ")}; the script re-created an object it already had, so reuse or remove it, or pass forcePreflight to override`,
 			});
 			continue;
 		}
@@ -1994,6 +2032,12 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			if (target) {
 				target.appliedAt = batchAt;
 				if (record.preflight?.blocking && options.forcePreflight === true) target.preflightOverridden = true;
+				// A warned duplicate is not a blocking override, so without this the
+				// twin would land and the record would read as a clean apply: nothing
+				// would say a second object was merged on purpose. Only the override
+				// gets here, because the refused path skipped the record above.
+				const forcedTwins = duplicateTwinCopies(record);
+				if (forcedTwins.length > 0 && options.forcePreflight === true) target.forcedDuplicates = forcedTwins;
 			}
 			applied.push({
 				module: record.module,
