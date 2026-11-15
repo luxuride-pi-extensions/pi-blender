@@ -107,7 +107,7 @@ jobs:
           # way to tell them apart -- and without it, CI on the PR that pins a new
           # tag fails for a reason that has already fixed itself.
           curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.3.0/luxuride-pi-blender-bridge-0.3.0.tgz
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.4.0/luxuride-pi-blender-bridge-0.4.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           # Fails here, with a plain "no such file", rather than inside a suite
@@ -451,7 +451,7 @@ jobs:
           # way to tell them apart -- and without it, CI on the PR that pins a new
           # tag fails for a reason that has already fixed itself.
           curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.3.0/luxuride-pi-blender-bridge-0.3.0.tgz
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.4.0/luxuride-pi-blender-bridge-0.4.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
