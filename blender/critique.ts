@@ -1,6 +1,15 @@
 import { recordBuildStage } from "./build-state.js";
-import { appendFile } from "node:fs/promises";
-import type { CritiqueLogOptions, CritiqueLogResult, CritiqueVerdict } from "./types.js";
+import { appendFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { getRunDirName } from "./module-paths.js";
+import type {
+	BlenderReference,
+	BlenderWorkspaceManifest,
+	CritiqueLogOptions,
+	CritiqueLogResult,
+	CritiqueVerdict,
+	PartChecklistEntry,
+} from "./types.js";
 import { nowIso } from "./utils.js";
 import { ensureWorkspaceCritiqueLogExists, loadWorkspaceManifest, updateManifest } from "./workspace.js";
 
@@ -56,8 +65,7 @@ function decisionLine(entry: {
 	verdict: CritiqueVerdict;
 	rejectReason?: string;
 	iterationBudgetExceeded: boolean;
-}): string {
-	if (entry.verdict === "present") return "Decision: present to user";
+}): string {	if (entry.verdict === "present") return "Decision: present to user";
 	if (entry.verdict === "continue") return "Decision: continue iterating";
 	if (entry.rejectReason) return `Decision: REJECT — ${entry.rejectReason}`;
 	if (entry.iterationBudgetExceeded) {
@@ -97,6 +105,101 @@ function validateCritiqueScore(name: string, value: number): void {
 }
 
 /**
+ * Lowercase, single-spaced form of a part name, so "Handle" and "handle "
+ * answer each other. Only used for matching, never for output.
+ */
+function normalizePart(part: string): string {
+	return part.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * The parts the reference behind this critique declares.
+ *
+ * Two routes, because the guarantee must not depend on the critic remembering to
+ * ask for the check:
+ *  - an explicit `referenceId`, for a critic judging a reference the run was not
+ *    rendered against;
+ *  - otherwise the reference recorded in this iteration's `packet.json`, which is
+ *    the reference the render was actually paired with. A critic cannot dodge
+ *    the checklist by omitting an argument, and a brief written before any of
+ *    this existed still gets checked.
+ *
+ * A `referenceId` that resolves to nothing throws. Answering "no parts, nothing
+ * to verify" would be precisely the silent pass the checklist exists to remove.
+ */
+async function resolveExpectedParts(
+	manifest: BlenderWorkspaceManifest,
+	moduleName: string,
+	iteration: number,
+): Promise<string[]> {
+	const references: BlenderReference[] = manifest.references ?? [];
+	const packetPath = join(
+		manifest.workspacePath,
+		"modules",
+		moduleName,
+		"iterations",
+		getRunDirName(iteration),
+		"packet.json",
+	);
+	let packet: { reference?: { path?: string } | null };
+	try {
+		packet = JSON.parse(await readFile(packetPath, "utf8")) as { reference?: { path?: string } | null };
+	} catch {
+		// No packet is not an error: a critique can judge a render that was never
+		// run through a branch, and there is then no reference to check against.
+		return [];
+	}
+	const path = packet.reference?.path;
+	if (!path) return [];
+	return references.find((entry) => entry.path === path)?.parts ?? [];
+}
+
+/**
+ * The parts this checklist fails to vouch for: named absent, skipped, or claimed
+ * present with nothing behind the claim.
+ *
+ * The direction of the rule is the whole point of the checklist. A part the
+ * reference names is a part the model was asked to have, so the checklist's job
+ * is to prove presence — and a critic that answers nothing has proved nothing.
+ * Reading silence as a pass is how an occluded back panel went unnoticed: the
+ * one view never showed it, so no issue was ever raised, and the score was the
+ * same as for a complete model.
+ */
+export function findPartGaps(expectedParts: string[], checklist: PartChecklistEntry[]): string[] {
+	const gaps: string[] = [];
+	const answers = checklist.map((entry) => ({
+		name: normalizePart(entry.part),
+		part: entry.part,
+		present: entry.present,
+		// A `present` with no evidence is a tick, not a finding: the evidence is
+		// what a reader checks the claim against. An absent part needs no evidence
+		// beyond its absence, which the view itself shows.
+		evidenced: entry.evidence.trim().length > 0,
+	}));
+	const answered = (key: string) =>
+		answers.find((answer) => answer.name === key || answer.name.includes(key) || key.includes(answer.name));
+
+	for (const expected of expectedParts) {
+		const key = normalizePart(expected);
+		if (key.length === 0) continue;
+		const answer = answered(key);
+		if (!answer) gaps.push(expected);
+		else if (!answer.present) gaps.push(expected);
+		else if (!answer.evidenced) gaps.push(expected);
+	}
+
+	// A part the critic itself marks absent is a gap whether or not the reference
+	// named it: the critic looked and found nothing, which is a finding.
+	for (const answer of answers) {
+		if (answer.present || answer.name.length === 0) continue;
+		if (expectedParts.some((expected) => normalizePart(expected) === answer.name)) continue;
+		gaps.push(answer.part);
+	}
+
+	return [...new Set(gaps)];
+}
+
+/**
  * The decision table, as a pure function of the inputs.
  *
  * Split out from blenderLogCritique because the table is the whole policy and
@@ -113,6 +216,9 @@ export function resolveCritiqueVerdict(options: {
 	maxBudget?: number;
 	presentThreshold?: number;
 	maxScorePerAxis?: number;
+	/** The parts the reference says the subject has. */
+	expectedParts?: string[];
+	partChecklist?: PartChecklistEntry[];
 }): {
 	verdict: CritiqueVerdict;
 	score: number;
@@ -120,15 +226,35 @@ export function resolveCritiqueVerdict(options: {
 	shouldPresent: boolean;
 	iterationBudgetExceeded: boolean;
 	rejectReason?: string;
+	/** The axes actually scored, with `completeness` capped for a part gap. */
+	axes: Record<(typeof SIX_AXES)[number], number>;
+	/** Parts named absent, skipped, or claimed without evidence. */
+	partGaps: string[];
 } {
-	const score = SIX_AXES.reduce<number>((total, axis) => total + options.axes[axis], 0);
+	const partGaps = findPartGaps(options.expectedParts ?? [], options.partChecklist ?? []);
+	// A model missing a named part is not complete, whatever the critic typed, so
+	// the axis is capped here rather than trusted. It is capped at 1 and not 0
+	// because a part gap is one failing among the rest of the build; the forcing
+	// below is what keeps the total from presenting it.
+	const axes =
+		partGaps.length > 0
+			? { ...options.axes, completeness: Math.min(options.axes.completeness, 1) }
+			: options.axes;
+	const score = SIX_AXES.reduce<number>((total, axis) => total + axes[axis], 0);
 	const viewUsable = options.viewAdequacy >= 1;
 	const rejectReason = (options.rejectReason ?? "").trim();
 	// A view that cannot show the subject cannot make an asset presentable, so
 	// it gates the threshold rather than sitting in the total: otherwise a
 	// perfect render of nothing would score its way to present.
+	//
+	// A part gap gates it for the same reason and independently: a near-perfect
+	// total is exactly the shape of the failure this catches — the model reads
+	// well, the proportion is right, and one part is simply not there.
 	const shouldPresent =
-		score >= (options.presentThreshold ?? PRESENT_SCORE_THRESHOLD) && viewUsable && rejectReason.length === 0;
+		score >= (options.presentThreshold ?? PRESENT_SCORE_THRESHOLD) &&
+		viewUsable &&
+		rejectReason.length === 0 &&
+		partGaps.length === 0;
 
 	let verdict: CritiqueVerdict = "continue";
 	if (rejectReason.length > 0) verdict = "reject";
@@ -147,6 +273,8 @@ export function resolveCritiqueVerdict(options: {
 		// other means the brief was wrong, and only the first is worth retrying.
 		iterationBudgetExceeded: verdict === "reject" && rejectReason.length === 0,
 		rejectReason: rejectReason.length > 0 ? rejectReason : undefined,
+		axes,
+		partGaps,
 	};
 }
 
@@ -176,11 +304,17 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 	// claim and settled after it. `preClaim` answers only the question the claim
 	// needs — is this presenting? — and its budgetUsed is a placeholder that no
 	// branch reads, because a presenting critique never looks at the budget.
-	// budgetUsed is a placeholder: this call's verdict is never read, only
-	// shouldPresent, and shouldPresent is independent of the budget. Zero is
-	// safe to pass because it can only ever read as "budget not spent", which
-	// is the same answer a claim about to happen would give.
-	const preClaim = resolveCritiqueVerdict({ axes, viewAdequacy: options.viewAdequacy, rejectReason, budgetUsed: 0 });
+	// Zero is safe to pass because it can only ever read as "budget not spent",
+	// which is the same answer a claim about to happen would give.
+	let expectedParts = await resolveExpectedParts(manifest, moduleName, options.iteration ?? manifest.latestIteration);
+	const preClaim = resolveCritiqueVerdict({
+		axes,
+		viewAdequacy: options.viewAdequacy,
+		rejectReason,
+		budgetUsed: 0,
+		expectedParts,
+		partChecklist: options.partChecklist,
+	});
 
 	// Read the manifest first to find the log, then claim under its lock: the
 	// callback needs to know whether this critique presents (the score says so)
@@ -201,13 +335,23 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 	// whichever module run finished last, not the run that produced the image
 	// this critique is about.
 	const iteration = claimed.iteration;
+	// The packet belongs to the claimed iteration, which can differ from the one
+	// read above when a sibling module finished in between.
+	if (options.iteration === undefined && iteration !== manifest.latestIteration) {
+		expectedParts = await resolveExpectedParts(manifest, moduleName, iteration);
+	}
 
-	const { verdict, score, viewUsable, shouldPresent, iterationBudgetExceeded } = resolveCritiqueVerdict({
-		axes,
-		viewAdequacy: options.viewAdequacy,
-		rejectReason,
-		budgetUsed: claimed.budgetUsed,
-	});
+	const { verdict, score, viewUsable, shouldPresent, iterationBudgetExceeded, axes: scoredAxes, partGaps } =
+		resolveCritiqueVerdict({
+			axes,
+			viewAdequacy: options.viewAdequacy,
+			rejectReason,
+			budgetUsed: claimed.budgetUsed,
+			expectedParts,
+			partChecklist: options.partChecklist,
+		});
+	const partChecklist = options.partChecklist ?? [];
+	const silhouetteIoU = options.silhouetteIoU;
 	const loggedAt = nowIso();
 	const entry = {
 		iteration,
@@ -217,17 +361,20 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 		iterationBudgetExceeded,
 		viewUsable,
 		verdict,
-		accuracy: options.accuracy,
-		geometry: options.geometry,
-		materials: options.materials,
-		completeness: options.completeness,
-		quality: options.quality,
-		validity: options.validity,
+		accuracy: scoredAxes.accuracy,
+		geometry: scoredAxes.geometry,
+		materials: scoredAxes.materials,
+		completeness: scoredAxes.completeness,
+		quality: scoredAxes.quality,
+		validity: scoredAxes.validity,
 		viewAdequacy: options.viewAdequacy,
 		viewNote: options.viewNote,
 		issues: options.issues,
 		nextAction: options.nextAction,
 		rejectReason: rejectReason.length > 0 ? rejectReason : undefined,
+		partChecklist,
+		partGaps,
+		silhouetteIoU,
 		loggedAt,
 		shouldPresent,
 	};
@@ -237,12 +384,38 @@ export async function blenderLogCritique(options: CritiqueLogOptions): Promise<C
 	// without parsing prose. The score's own denominator is printed from the
 	// axes rather than hardcoded, because a hardcoded one is exactly the number
 	// that silently lies after an axis is added.
-	const axisLines = SIX_AXES.map((axis) => `${AXIS_LABELS[axis]}: ${options[axis]}/${MAX_SCORE_PER_AXIS}`);
+	const axisLines = SIX_AXES.map((axis) => `${AXIS_LABELS[axis]}: ${scoredAxes[axis]}/${MAX_SCORE_PER_AXIS}`);
+	// The checklist is printed in full because its consequences are silent
+	// otherwise: a capped axis and a withheld present cannot say WHICH part was
+	// missing, and a reader who has to reconstruct that from the render stops
+	// trusting the log. Only printed when there is something to print, so the
+	// common no-reference critique does not grow two empty lines.
+	const partLines: string[] = [];
+	if (partChecklist.length > 0 || expectedParts.length > 0) {
+		const present = partChecklist.filter((entry) => entry.present).length;
+		partLines.push(
+			`Parts: ${present}/${partChecklist.length} marked present` +
+				(expectedParts.length > 0 ? ` of ${expectedParts.length} the reference names` : "") +
+				(partGaps.length > 0 ? ` — unvouched: ${partGaps.join(", ")}` : ""),
+		);
+		for (const item of partChecklist) {
+			partLines.push(`- ${item.part}: ${item.present ? "present" : "ABSENT"} — ${item.evidence}`);
+		}
+		for (const gap of partGaps) {
+			if (partChecklist.some((item) => item.part === gap)) continue;
+			partLines.push(`- ${gap}: not answered by the checklist`);
+		}
+	}
+	const silhouetteLine = silhouetteIoU && Object.keys(silhouetteIoU).length > 0
+		? `Silhouette IoU: ${Object.entries(silhouetteIoU).map(([view, value]) => `${view} ${value}`).join(", ")}`
+		: undefined;
 	const logBlock = [
 		`[${loggedAt}] iteration_${String(iteration).padStart(2, "0")} module=${moduleName} budget ${claimed.budgetUsed}/${MAX_ITERATIONS_PER_MODULE}`,
 		`Score: ${score}/${SIX_AXES.length * MAX_SCORE_PER_AXIS}`,
 		...axisLines,
 		`View adequacy: ${options.viewAdequacy}/${MAX_SCORE_PER_AXIS} — ${options.viewNote}`,
+		...(silhouetteLine ? [silhouetteLine] : []),
+		...partLines,
 		"Issues:",
 		...(options.issues.length > 0 ? options.issues.map((issue) => `- ${issue}`) : ["- none"]),
 		`Next action: ${options.nextAction}`,

@@ -76,6 +76,70 @@ export function getReferencesDir(workspacePath: string): string {
 	return join(workspacePath, "references");
 }
 
+/** Longest a part name may be before it reads as a sentence, not a part. */
+const MAX_PART_LENGTH = 60;
+/** Most a part name may be before it reads as a description of one. */
+const MAX_PART_WORDS = 8;
+/** A lone fragment is a feature note; two or more is a parts list. */
+const MIN_PARTS = 2;
+/** More parts than this is a description being parsed as a list. */
+const MAX_PARTS = 8;
+
+/**
+ * A part name as it will be stored and matched against a critic's checklist.
+ *
+ * Exported because the checklist matcher in `critique.ts` normalises the same
+ * way: a reference saying "Handle " and a critic answering "handle" have to be
+ * the same part, or the check reads as an omission.
+ */
+export function normalizePartName(raw: string): string {
+	return raw.trim().replace(/\s+/g, " ");
+}
+
+/**
+ * The parts named in a reference caption, or the list the describer wrote.
+ *
+ * A caption that already carries a list — `Parts: handle, rim, base`, or the
+ * describer's `Notable features: ...` line — is where parts come from without a
+ * new argument: the manager's brief is built from the describer's text, so the
+ * parts the describer saw are already in the caption it handed over.
+ *
+ * Falling back to the whole caption is deliberate, and the bar for doing so is
+ * deliberately high: every fragment has to be a short noun phrase and there have
+ * to be at least two of them. The parts list drives a fail-closed check, so a
+ * prose caption that happens to contain commas must yield NO parts rather than a
+ * handful of invented ones — inventing parts turns "the critic answered nothing"
+ * into "the model is missing something", which is a worse error than not
+ * checking. A caption the describer wrote ("Notable features: tall body, thick
+ * handle, flared base, glaze ...") is shaped exactly like a list, which is why
+ * this recovers it without guessing.
+ */
+export function extractReferenceParts(caption: string): string[] {
+	const line = caption
+		.split("\n")
+		.map((entry) => entry.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, ""))
+		.find((entry) => /^(?:notable features|parts|features)\s*:/i.test(entry));
+	const source = line ? line.replace(/^[^:]*:/, "") : caption;
+	const fragments = source
+		.split(/[;,\n•|/]+/)
+		.map(normalizePartName)
+		.map((fragment) => fragment.replace(/[.]+$/, ""))
+		.filter((fragment) => fragment.length > 0)
+		.filter((fragment) => fragment.length <= MAX_PART_LENGTH)
+		.filter((fragment) => fragment.split(" ").length <= MAX_PART_WORDS);
+	// "Silhouette: ..." and "proportions ..." are feature CATEGORIES in the
+	// describer's report, not parts of the object, and a checklist that demands a
+	// part called "silhouette" fails every model built from that reference.
+	const parts = fragments.filter((fragment) => !/^(?:silhouette|proportions|proportion|materials?|material cues?|colou?r|texture|style)$/i.test(fragment));
+	if (parts.length < MIN_PARTS) return [];
+	const unique: string[] = [];
+	for (const part of parts.slice(0, MAX_PARTS)) {
+		if (unique.some((existing) => existing.toLowerCase() === part.toLowerCase())) continue;
+		unique.push(part);
+	}
+	return unique.length >= MIN_PARTS ? unique : [];
+}
+
 /**
  * Register a reference image with a workspace.
  *
@@ -156,6 +220,13 @@ export async function blenderAddReference(options: AddReferenceOptions): Promise
 		path: targetPath,
 		sourcePath: options.url ? undefined : sourcePath,
 		caption,
+		// Explicit parts win: a manager that knows the parts does not need the
+		// caption re-read, and passing them is how a brief written before the
+		// caption habit existed still gets checked.
+		parts:
+			options.parts && options.parts.length > 0
+				? [...new Set(options.parts.map(normalizePartName).filter((part) => part.length > 0))]
+				: extractReferenceParts(caption),
 		suggestedView: options.suggestedView?.trim() || undefined,
 		sourceUrl: options.url,
 		license: options.license?.trim() || undefined,

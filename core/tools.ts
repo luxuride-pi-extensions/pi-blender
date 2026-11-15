@@ -130,7 +130,7 @@ export const blenderExecutePythonTool: CoreToolDefinition = {
 	'Copy a Blender Python script into a run directory, execute it inside. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	script_path: Type.String({
 		description:
@@ -335,7 +335,7 @@ export const blenderSceneInfoTool: CoreToolDefinition = {
 'Read the workspace blend file as it was last SAVED, and return its structure: scene content (objects. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	categories: Type.Optional(
 		Type.Array(
@@ -442,7 +442,7 @@ export const blenderObjectDetailTool: CoreToolDefinition = {
 	'Read the workspace blend file as it was last SAVED. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	objectName: Type.Optional(
 		Type.String({
@@ -497,7 +497,7 @@ export const blenderSaveViewTool: CoreToolDefinition = {
 	'Save a named render view in the workspace manifest. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	name: Type.String({
 		description: 'Saved view name.',
@@ -543,7 +543,7 @@ export const blenderRenderTool: CoreToolDefinition = {
 	'Render the workspace blend file and write outputs into the current iteration. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	view: Type.Optional(
 		Type.String({
@@ -645,7 +645,7 @@ export const blenderModuleRunTool: CoreToolDefinition = {
 	'Run a workspace module: checkpoint model.blend, execute the script, and stage the branch for apply. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description:
@@ -808,7 +808,7 @@ export const blenderBranchRunTool: CoreToolDefinition = {
 	'Run a workspace module HEADLESSLY against its own private copy of model.blend. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description:
@@ -963,7 +963,7 @@ export const blenderBranchApplyTool: CoreToolDefinition = {
 	'Apply staged branch runs into model.blend in one locked pass, in the order their branch runs were staged. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	modules: Type.Array(Type.String(), {
 		description:
@@ -1013,7 +1013,7 @@ export const blenderModuleRevertTool: CoreToolDefinition = {
 	'Revert model.blend to a module\'s recorded pre-run checkpoint and reload it in the live Blender session. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description: 'Module name to revert.',
@@ -1062,7 +1062,7 @@ export const blenderSetModeTool: CoreToolDefinition = {
 	'Switch the live Blender viewport/object mode for a workspace blend, enabling texture paint. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	mode: Type.Union(
 		[
@@ -1120,7 +1120,7 @@ export const blenderSwitchWorkspaceTool: CoreToolDefinition = {
 	'Switch the active workspace tab in the live Blender window by workspace name. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	workspaceName: Type.Optional(
 		Type.String({
@@ -1166,7 +1166,7 @@ export const blenderFocusViewTool: CoreToolDefinition = {
 	'Center and frame the 3D viewport on a named object in the live Blender window. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	objectName: Type.String({
 		description: 'Name.',
@@ -1200,7 +1200,7 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 	'Append a structured critique entry to the workspace critique.log using the 0-12 Blender iteration rubric. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description:
@@ -1266,6 +1266,20 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 				'Reject the asset outright, whatever it.',
 		}),
 	),
+	partChecklist: Type.Optional(
+		Type.Array(
+			Type.Object({
+				part: Type.String({ description: 'Reference part name.' }),
+				present: Type.Boolean({ description: 'Absent blocks the present.' }),
+				evidence: Type.String({ description: 'What shows it, or the view that would.' }),
+			}),
+		),
+	),
+	silhouetteIoU: Type.Optional(
+		Type.Record(Type.String(), Type.Number({
+			description: 'View to IoU, from packet.json.',
+		})),
+	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderLogCritique({
@@ -1284,6 +1298,8 @@ export const blenderLogCritiqueTool: CoreToolDefinition = {
 		issues: params.issues,
 		nextAction: params.nextAction,
 		rejectReason: params.rejectReason,
+		partChecklist: params.partChecklist,
+		silhouetteIoU: params.silhouetteIoU,
 	});
 
 	return {
@@ -1305,7 +1321,7 @@ export const blenderRankAssetsTool: CoreToolDefinition = {
 	description:
 	'Rank a batch against ITSELF and return the best slice. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	workspace: Type.String({ description: 'Explicit workspace path.' }),
 	topFraction: Type.Optional(
 		Type.Number({
 			description:
@@ -1355,7 +1371,7 @@ export const blenderIterationStateTool: CoreToolDefinition = {
 	description:
 	'What this module\'s iteration loop already knows, derived. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	workspace: Type.String({ description: 'Explicit workspace path.' }),
 	moduleName: Type.String({
 		description:
 			'The module to report on.',
@@ -1410,7 +1426,7 @@ export const blenderRecordIterationFactTool: CoreToolDefinition = {
 	description:
 	'Persist one MEASURED fact about this module so it survives the critic that measured it, a context fold. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	workspace: Type.String({ description: 'Explicit workspace path.' }),
 	moduleName: Type.String({ description: 'The module the fact is about.' }),
 	statement: Type.String({
 		description:
@@ -1462,7 +1478,7 @@ export const blenderExportAssetTool: CoreToolDefinition = {
 	description:
 	'Export the workspace blend to glb, gltf, obj, or stl with materials and scene graph. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	workspace: Type.String({ description: 'Explicit workspace path.' }),
 	format: Type.Optional(
 		Type.String({
 			description: 'glb (default), gltf, obj, or stl (geometry only).',
@@ -1556,7 +1572,7 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 	description:
 	'Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+	workspace: Type.String({ description: 'Explicit workspace path.' }),
 	path: Type.String({ description: 'Path to the 3D asset file to import (obj, stl, gltf, glb, or fbx).' }),
 	format: Type.Optional(
 		Type.String({
@@ -1622,7 +1638,7 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 	'Register a reference image with a workspace. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	path: Type.Optional(
 		Type.String({
@@ -1658,6 +1674,13 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 				'Optional saved view.',
 		}),
 	),
+	parts: Type.Optional(
+		Type.Array(
+			Type.String({
+				description: 'Parts the subject has; unchecked ones block present.',
+			}),
+		),
+	),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderAddReference({
@@ -1670,6 +1693,7 @@ export const blenderAddReferenceTool: CoreToolDefinition = {
 		caption: params.caption,
 		id: params.id,
 		suggestedView: params.suggestedView,
+		parts: params.parts,
 		signal: context?.signal,
 	});
 
@@ -1753,7 +1777,7 @@ export const blenderGeometryProbeTool: CoreToolDefinition = {
 	'Measure mesh/transform relationships in the workspace blend and return numbers: world-space bounds. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	objects: Type.Optional(
 		Type.Array(Type.String(), {
@@ -1921,7 +1945,7 @@ export const blenderImageProbeTool: CoreToolDefinition = {
 	'Measure a rendered PNG numerically instead of judging it by eye: subject pixel bounds and coverage, mean. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	path: Type.String({
 		description:
@@ -1986,7 +2010,7 @@ export const blenderReadOnlyPythonTool: CoreToolDefinition = {
 	'Run a Python measurement script in the LIVE scene and get its stdout; mutating bpy operations are refused. Full rules: skill `blender-live-state`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	script: Type.String({
 		description:
@@ -2034,7 +2058,7 @@ export const blenderMontageTool: CoreToolDefinition = {
 	'Render several preset views of one subject and tile them into a single labelled sheet, plus. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description: 'Module the sheet belongs to.',
@@ -2128,7 +2152,7 @@ export const blenderCompareTool: CoreToolDefinition = {
 	'Render the PREVIOUS generation of a subject beside the current one on a single labelled sheet, so. Full rules: skill `blender-analyze`.',
 	parameters: Type.Object({
 	workspace: Type.String({
-		description: 'Explicit workspace path for the Blender task.',
+		description: 'Explicit workspace path.',
 	}),
 	moduleName: Type.String({
 		description:
@@ -2450,7 +2474,7 @@ export const blenderBuildStatusTool: CoreToolDefinition = {
 	description:
 		'Read the build contract\'s current stage and history. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-		workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+		workspace: Type.String({ description: 'Explicit workspace path.' }),
 	}),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 		const result = await blenderBuildStatus({
@@ -2469,7 +2493,7 @@ export const blenderBuildAdvanceTool: CoreToolDefinition = {
 	description:
 		'Advance the build contract to a stage the extension cannot observe by itself, with evidence. Full rules: skill `blender-modules`.',
 	parameters: Type.Object({
-		workspace: Type.String({ description: 'Explicit workspace path for the Blender task.' }),
+		workspace: Type.String({ description: 'Explicit workspace path.' }),
 		stage: Type.String({
 			enum: ["intake", "planned", "finalized"],
 			description: 'Stage to record.',
