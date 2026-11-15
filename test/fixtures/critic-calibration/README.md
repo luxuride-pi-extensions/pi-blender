@@ -40,17 +40,31 @@ hidden assertion.
 
 ## Provenance and licence
 
-Self-authored, MIT, no third-party assets. `scripts/generate-calibration-fixtures.py`
-builds every object from Blender primitives (cylinder, torus, cubes, an ortho
-camera, two area lights) and renders it, so nothing here is downloaded, traced,
-or derived from someone else's artwork; there is no attribution obligation to
-discharge and no licence that could later conflict with the repository's.
+Self-authored, no third-party assets. The generator builds every object from
+Blender primitives (cylinder, torus, cubes, an ortho camera, two area lights)
+and renders it, so nothing here is downloaded, traced, or derived from someone
+else's artwork; there is no attribution obligation to discharge and no licence
+that could later conflict with the repository's.
+
+The generator is **not in this repository**. It lives in the bridge package,
+`@luxuride-pi/blender-bridge`, as `blender/generate-calibration-fixtures.py`,
+because it imports `bpy` and runs inside Blender — which is exactly what makes
+it GPL-3.0-or-later, like every other Blender-side script there. A single `.py`
+file anywhere in this MIT package makes "MIT" false for the whole tarball, so
+`test/license.test.mjs` refuses one and names the bridge as its home. The
+boundary is therefore drawn where it belongs: GPL tooling on one side, output
+on the other.
+
+The images stay here because they are output: data produced by a GPL tool,
+containing none of its code. Program output is not a derivative work of the
+program, which is why the package that carries the renders can stay MIT while
+the script that made them stays GPL.
 
 MIT rather than CC0 for the images: pi-blender already grants MIT over its own
 artefacts (`LICENSE`, `LICENSING.md`), and adding a second licence for one
-subdirectory makes the terms harder to state, not freer. The renders are
-generator output, so the licence question is really about the generator, which
-is MIT like the rest of the repository.
+subdirectory makes the terms harder to state, not freer. `manifest.json` says
+the same in `provenance` and `license`, next to the hashes, so the claim
+travels with an image if someone copies one out.
 
 ## Rendering
 
@@ -70,18 +84,30 @@ version:
   measure the same signal. The test suite asserts the clean renders' probe
   bounds never touch an edge; if you re-frame the camera, keep that property.
 
-Reproduce with Blender 5.3:
+Reproduce with Blender 5.3, from a pi-blender checkout with the bridge checked
+out beside it (or `PI_BLENDER_BRIDGE_ASSETS_DIR` pointing at it):
 
 ```sh
+cd /path/to/pi-blender
 HOME=$HOME flatpak run --command=blender org.blender.Blender \
   --background --factory-startup \
-  --python "$PWD/scripts/generate-calibration-fixtures.py"
+  --python /path/to/pi-blender-bridge/blender/generate-calibration-fixtures.py
 ```
+
+The script is run from the bridge because it is GPL and this package is MIT (see
+Provenance above); running it from the pi-blender checkout is what puts the
+output in the right place. The default output directory is
+`test/fixtures/critic-calibration` under the *current working directory*, so the
+`cd` matters; `-- --out <dir>` renders somewhere else.
 
 The generator rewrites `images/` and `manifest.json` (hashes, byte sizes and the
 engine version included). A different Blender version will change the samples
-and therefore the hashes; regenerate on the version you intend to run in CI and
-commit the result.
+and therefore the pixels; regenerate on the version you intend to run in CI and
+commit the result. The pixels are deterministic, the files are not: Blender
+stamps a `Date` text chunk into every PNG, so two runs of the same version
+produce identical pixels under different sha256 hashes. Regenerate the manifest
+together with the images, never one without the other — the calibration test
+compares those hashes against the bytes on disk and would fail on the drift.
 
 ## Thresholds
 
@@ -138,13 +164,15 @@ to call it. A transcript is either a bare array of
 
 ## How to add a case
 
-1. Add a `Case(...)` entry to `CASES` in `scripts/generate-calibration-fixtures.py`:
-   an id, a builder, `expectedAxes`, `truth` labels, and the `reference` id when
-   the defect is best described relative to a clean render in the set.
+1. Add a `Case(...)` entry to `CASES` in the bridge's
+   `blender/generate-calibration-fixtures.py`: an id, a builder, `expectedAxes`,
+   `truth` labels, and the `reference` id when the defect is best described
+   relative to a clean render in the set.
 2. Write the builder as a function returning the objects it created. Prefer
    reusing an existing clean builder and modifying one thing — a defect that
    changes three things proves nothing about which one the critic saw.
-3. Regenerate, then check the render by eye. A label has to be visibly true.
+3. Regenerate (see Rendering above), then check the render by eye. A label has
+   to be visibly true.
 4. If the proxy mispredicts it, that is information: either the threshold table
    needs widening for a real gap between clean and defective, or the case is one
    the proxy cannot see. Record a known miss in the gap list below rather than

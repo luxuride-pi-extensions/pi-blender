@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "generator": "scripts/generate-calibration-fixtures.py",
-  "provenance": "Self-authored: every render is built from Blender primitives by scripts/generate-calibration-fixtures.py in this repository. No third-party image, texture, model or font is used, so the set carries no attribution obligation.",
-  "license": "MIT, the same licence as the rest of pi-blender (see LICENSE and LICENSING.md). Not CC0: the repository already grants MIT over its own artefacts and a second licence for part of the tree only makes the terms harder to state, not freer.",
+  "generator": "@luxuride-pi/blender-bridge blender/generate-calibration-fixtures.py",
+  "provenance": "Self-authored: every render is built from Blender primitives by generate-calibration-fixtures.py in the @luxuride-pi/blender-bridge package (GPL-3.0-or-later), which writes its output here. No third-party image, texture, model or font is used, so the set carries no attribution obligation.",
+  "license": "MIT, the same licence as the rest of pi-blender (see LICENSE and LICENSING.md). Not CC0: the repository already grants MIT over its own artefacts and a second licence for part of the tree only makes the terms harder to state, not freer. The images are output of a GPL-licensed Blender script; they contain none of its code, so they are data, not a derivative work, and the package carrying them stays MIT.",
   "render": {
     "engine": "CYCLES",
     "device": "CPU",

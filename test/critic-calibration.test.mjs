@@ -100,7 +100,7 @@ test("the golden set ships every render the decision names, with its label", () 
 		assert.equal(image.truth.pass, pass, `${id} pass label`);
 		assert.deepEqual(image.truth.defects, defects, `${id} defect labels`);
 		const path = join(GOLDEN_DIR, "images", file);
-		assert.ok(existsSync(path), `${path} is missing; run scripts/generate-calibration-fixtures.py`);
+		assert.ok(existsSync(path), `${path} is missing; regenerate with the bridge's blender/generate-calibration-fixtures.py`);
 		assert.ok(statSync(path).size > 1024, `${file} is suspiciously small`);
 		assert.equal(statSync(path).size, image.bytes, `${file} size does not match the manifest`);
 	}
