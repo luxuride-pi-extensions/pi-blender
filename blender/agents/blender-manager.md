@@ -29,7 +29,7 @@
 # the package belongs in the list. The context tools (`compress`,
 # `decompress`, `search_context`, `acp_status`, `acp_cache`) are ambient on the
 # same terms, registered by the billion-context plugin the host has loaded.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_reference_search, blender_module_revert, blender_workspace_prune, blender_build_status, blender_build_advance, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_compare, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, contact_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, blender_workspace_init, blender_scene_info, blender_add_reference, blender_reference_search, blender_blockout_generate, blender_module_revert, blender_workspace_prune, blender_build_status, blender_build_advance, blender_branch_run, blender_branch_apply, blender_session_context, blender_bridge_status, blender_log_critique, blender_rank_assets, blender_compare, blender_iteration_state, blender_record_iteration_fact, blender_export_asset
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholders below are substituted
@@ -461,6 +461,43 @@ Do not brief a worker with "the model". A worker told to build a model and four
 workers told to build a model produce four competing models in one blend, and
 the runner's contamination check will report it after the fact rather than
 preventing it.
+
+## Starting from a blockout
+
+`blender_blockout_generate` gets geometry from somewhere that is not an agent: a
+local GLB/OBJ (`provider: "local"`) or a ComfyUI workflow on the machine's
+configured `PI_BLENDER_COMFYUI_URL` (`provider: "comfyui"`). Hunyuan, TRELLIS,
+Meshy and Tripo are deferred and are refused by name, so do not promise them.
+
+**When a blockout is the right start.** Proportions, massing, silhouette or
+composition are the open question, and an hour of modelling would be spent
+guessing at them. A generator is good at "the shape of a thing" and bad at the
+things that matter later, so it buys you a reference you can orbit — not a mesh
+you can ship.
+
+**When it is not.** Anything with hard-surface edges that must hold a chamfer, a
+character that must deform, a part that must be dimensionally exact, or a
+modular set that must line up. There, a blockout costs you a rebuild you would
+otherwise not have needed, and `blender_import_asset` of a real asset is better.
+
+**It is a starting point, and never a module output.** The import lands in its
+own `Blockout` collection and every object is tagged `pi_blender_blockout`.
+Preflight blocks that tag for `character`, `hard_surface` and `print` — so a
+module that hands back raw generator topology is refused, by design, until
+somebody rebuilds or retopologises it. `prop` warns instead. Tell the worker
+that the blockout is a reference to rebuild against, not a body to retouch
+lightly, and expect the rebuild to cost about what the block would have cost
+without it.
+
+**The tool does not touch `model.blend`.** It returns the blockout and the
+provenance; which module gets rebuilt, and how, is your call.
+
+**Provenance and licence travel with it.** `provider`, `prompt`, `seed`,
+`license`, triangle count and bounds are recorded in `manifest.blockouts`, and
+the licence is required at call time. Generated geometry has terms — model
+licences, provider terms, the licence of any image you conditioned on — and the
+manifest is where the export's licence answer comes from. Never call the tool
+without a licence to state.
 
 ## The camera pass belongs to the aligner
 

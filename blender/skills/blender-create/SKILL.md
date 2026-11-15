@@ -62,6 +62,26 @@ Import an external 3D asset (obj, stl, gltf/glb, fbx) into the workspace blend. 
 - **name** — Optional asset name or object name prefix. Sanitized against invalid characters.
 - **allowedPaths** — Allowed directories or file paths for source assets to guard against traversal. Defaults to the workspace directory and current working directory.
 
+### blender_blockout_generate
+
+Generate or import a blockout: `provider: "local"` imports a GLB/OBJ you already
+have, `provider: "comfyui"` posts a workflow to `PI_BLENDER_COMFYUI_URL` and
+polls it. `license` is required and `async: true` queues the run.
+
+- **prompt** — what the blockout should be; recorded as provenance.
+- **provider** — `local` or `comfyui`. `hunyuan`, `trellis`, `meshy` and `tripo` are deferred and are refused by name.
+- **path** — the GLB/OBJ to import, for `provider: "local"`.
+- **workflow** — the API-format ComfyUI graph, for `provider: "comfyui"`.
+- **license** — the licence of the result. Required; provenance that cannot state a licence cannot ship.
+- **seed**, **imagePath** — reproducibility and a conditioning image, when the provider takes them.
+- **targetBounds** — target box in metres; the import normalises into it and warns when the source units are unknown.
+
+The result lands in its own `Blockout` collection, tagged `pi_blender_blockout`,
+with provenance in `manifest.blockouts`. It is a **starting point**: preflight
+blocks it for `character`, `hard_surface` and `print` until you rebuild or
+retopologise it. The tool never touches `model.blend` — you decide what to
+rebuild, and from where.
+
 ### blender_add_reference
 
 Register a reference image with a workspace. Copies the image into <workspace>/references/ and records it in the manifest so it can be listed, addressed by a stable id in briefs, and handed to a critic that cannot read images. The `caption` is required and is the only description of the image available to the worker and critic, because the manager is blocked from reading image files.

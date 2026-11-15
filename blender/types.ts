@@ -666,6 +666,14 @@ export interface BlenderWorkspaceManifest {
 	savedViews: Record<string, BlenderSavedView>;
 	/** Appended by blender_add_reference; absent until the first reference. */
 	references?: BlenderReference[];
+	/**
+	 * Appended by blender_blockout_generate; absent until the first blockout.
+	 *
+	 * Separate from `references` because a blockout is geometry, not an image to
+	 * compare against: the reference list is read as pictures, and a .glb in it
+	 * would be fed to critics as one. Provenance still travels with the file.
+	 */
+	blockouts?: BlockoutProvenance[];
 	renderOutputs: BlenderRenderOutput[];
 	/** Appended by blender_module_run; absent until the first module run. */
 	moduleRuns?: BlenderModuleRunRecord[];
@@ -3091,3 +3099,72 @@ export interface DeferredJobRecord {
 	metadata?: Record<string, unknown>;
 }
 
+/** Where a blockout came from, kept so the file can never be mistaken for authored work. */
+export interface BlockoutProvenance {
+	/** Stable id, also the stem of the saved blockout blend. */
+	id: string;
+	/** The file that was imported into the workspace. */
+	path: string;
+	/** The provider that produced it: `local` or `comfyui`. */
+	provider: string;
+	/** Licence as stated by the caller. Required, because a blockout ships with it. */
+	license: string;
+	prompt?: string;
+	seed?: number;
+	/** Bounds after normalisation, as the bridge measured them. */
+	bounds?: { min: [number, number, number]; max: [number, number, number]; dimensions: [number, number, number] };
+	triangles?: number;
+	/** Always true: the presence of this record is the claim that it is a blockout. */
+	blockout: true;
+}
+
+/** Stage 1 providers, plus the ones the issue defers. */
+export type BlockoutProvider = "local" | "comfyui";
+
+export interface BlockoutGenerateOptions {
+	cwd: string;
+	workspace: string;
+	provider: BlockoutProvider | string;
+	/** Required: provenance that cannot state its licence cannot be shipped. */
+	license: string;
+	prompt?: string;
+	/** A reference image the provider may condition on. */
+	imagePath?: string;
+	/** Target box in metres; the import normalises into it. */
+	targetBounds?: { x: number; y: number; z: number };
+	/** Only `glb` is accepted in Stage 1. */
+	format?: "glb";
+	seed?: number;
+	/** Source file for provider `local`. */
+	path?: string;
+	/** API-format ComfyUI graph for provider `comfyui`. */
+	workflow?: Record<string, unknown>;
+	/** Id for the record and the saved blend; derived from the provider otherwise. */
+	id?: string;
+	/** Run through the deferred-job machinery instead of blocking. */
+	async?: boolean;
+	/** ComfyUI base URL; falls back to PI_BLENDER_COMFYUI_URL. */
+	comfyUrl?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}
+
+export interface BlockoutGenerateResult {
+	success: boolean;
+	status: "imported" | "queued" | "failed" | string;
+	provider: string;
+	/** Deferred-job id when `async` was requested. */
+	jobId?: string;
+	/** The file the blockout was read from. */
+	sourcePath?: string;
+	/** The file the blockout was imported from, once it lives in the workspace. */
+	blockoutPath?: string;
+	blendPath?: string;
+	collection?: string;
+	objects: string[];
+	notes: string[];
+	warnings: string[];
+	provenance?: BlockoutProvenance;
+	workspacePath?: string;
+	error?: string;
+}
