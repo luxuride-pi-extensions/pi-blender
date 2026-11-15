@@ -101,8 +101,13 @@ jobs:
       # immutable where a branch is not.
       - name: fetch the blender-bridge package
         run: |
-          curl -fsSL -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
+          # --retry*: a freshly published release asset answers 404 for about a
+          # minute while GitHub's CDN catches up. That is a real 404 for a genuinely
+          # missing asset and a transient one for a new tag, so retrying is the only
+          # way to tell them apart -- and without it, CI on the PR that pins a new
+          # tag fails for a reason that has already fixed itself.
+          curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.2.0/luxuride-pi-blender-bridge-0.2.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           # Fails here, with a plain "no such file", rather than inside a suite
@@ -440,8 +445,13 @@ jobs:
 
       - name: fetch the blender-bridge package
         run: |
-          curl -fsSL -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.1.0/luxuride-pi-blender-bridge-0.1.0.tgz
+          # --retry*: a freshly published release asset answers 404 for about a
+          # minute while GitHub's CDN catches up. That is a real 404 for a genuinely
+          # missing asset and a transient one for a new tag, so retrying is the only
+          # way to tell them apart -- and without it, CI on the PR that pins a new
+          # tag fails for a reason that has already fixed itself.
+          curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.2.0/luxuride-pi-blender-bridge-0.2.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
