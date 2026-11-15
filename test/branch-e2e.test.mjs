@@ -1006,6 +1006,16 @@ test("each generation keeps its evidence and compares against the previous one",
 		assert.equal(packet.changed, true);
 		assert.ok(packet.stateDigest);
 		assert.ok(packet.cameraPlan.shots.length > 0);
+		// A render carries its own measurements, and the packet is where a critic
+		// reads them. Guarded rather than asserted outright because a bridge older
+		// than the stats still renders; the CI pin is what tells the two apart.
+		if (second.renderStats) {
+			assert.equal(packet.renderStats.subjectPixelCount, second.renderStats.subjectPixelCount);
+			assert.deepEqual(packet.renderStats.palette, second.renderStats.palette);
+			assert.ok(second.renderStats.subjectPixelCount > 0, "the packet measured a subject");
+		} else {
+			assert.equal(packet.renderStats, null, "a bridge without stats writes null, not a guess");
+		}
 		const sheet = await compare.blenderCompare({
 			cwd: ws.root,
 			workspace: ws.workspacePath,
@@ -1722,6 +1732,9 @@ test("an unchanged rebuild reuses the picture instead of rendering it", { skip }
 	assert.equal(second.reused, true);
 	assert.equal(second.renderOutputPath, first.renderOutputPath);
 	assert.deepEqual(readFileSync(second.renderOutputPath), before);
+	// The file is the same one, so its measurements are carried over rather than
+	// re-taken by a second decode of a picture nothing changed.
+	if (first.renderStats) assert.deepEqual(second.renderStats, first.renderStats);
 });
 
 test("a modifier setting is content, not a type name", { skip }, async () => {

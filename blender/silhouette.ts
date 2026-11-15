@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import { findSubject, type SubjectMask } from "./image-probe.js";
+import { DEFAULT_BACKDROP_TOLERANCE, findSubject, type SubjectMask } from "./image-probe.js";
 import { decodePng, looksLikePng, type DecodedImage } from "./png.js";
 import type {
 	ReferenceCompleteness,
@@ -40,16 +40,6 @@ import type {
 const DEFAULT_GRID = 128;
 const MIN_GRID = 16;
 const MAX_GRID = 512;
-/**
- * Per-channel tolerance for the backdrop comparison, 0.02.
- *
- * Must agree with the backdrop facts' own tolerance: if the palette calls a pixel
- * backdrop and the mask does not (or the other way round), the two disagree about
- * what the subject is, and a handful of code values of dither or film grain is
- * enough to make the difference the whole frame. #133/#144 owns a second copy of
- * this number; it must be unified into one constant when that lands.
- */
-const DEFAULT_BACKDROP_TOLERANCE = 0.02;
 /** Box aspect ratios further apart than this are reported as different framing, not noise. */
 const ASPECT_MISMATCH_RATIO = 1.15;
 /** Subject coverage above this means the mask is the frame, so the background colour is wrong for the image. */

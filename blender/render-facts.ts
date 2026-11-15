@@ -1,4 +1,4 @@
-import type { ImageProbeResult, RenderFacts } from "./types.js";
+import type { ImageProbeResult, RenderFacts, RenderStats } from "./types.js";
 
 /**
  * The facts a saved render states about material and exposure, derived from the
@@ -58,7 +58,37 @@ export interface RenderBackdrop {
 	backgroundUniform?: number;
 }
 
+/** The measurements the facts are decided on: everything a probe or a render's own stats report. */
+type RenderMeasurements = Pick<ImageProbeResult, "exposure" | "palette" | "subjectCoverage" | "warnings">;
+
+/**
+ * The facts for an image someone else produced, measured by a probe.
+ *
+ * `blenderImageProbe` is the tool for an arbitrary PNG -- a reference, a
+ * montage, an older run's picture -- so it stays the way those get measured. A
+ * render this repo took is measured by the render process itself and arrives as
+ * `RenderStats`; `renderFactsFromStats` is the same derivation over that.
+ */
 export function renderFactsFromProbe(probe: ImageProbeResult, backdrop: RenderBackdrop): RenderFacts {
+	return factsFromMeasurements(probe, backdrop);
+}
+
+/**
+ * The facts for a render this repo took, from the numbers the render reported.
+ *
+ * One measurement, two readings: the mask, the palette and the backdrop all came
+ * out of the same pass over the saved PNG, so nothing here can disagree with the
+ * picture the way a second probe of a file that has since changed could.
+ */
+export function renderFactsFromStats(stats: RenderStats): RenderFacts {
+	return factsFromMeasurements(stats, {
+		background: stats.background ?? undefined,
+		filmTransparent: stats.filmTransparent,
+		backgroundUniform: stats.backgroundUniform ?? undefined,
+	});
+}
+
+function factsFromMeasurements(probe: RenderMeasurements, backdrop: RenderBackdrop): RenderFacts {
 	const reportedMass = probe.palette.reduce((sum, entry) => sum + entry.fraction, 0);
 	const neutralMass = probe.palette
 		.filter((entry) => channelSpread(entry.hex) <= NEUTRAL_CHANNEL_SPREAD)

@@ -309,6 +309,8 @@ export interface BlenderBranchRunRecord {
 	reused?: boolean;
 	/** The engine the picture was rendered with, carried through a reuse. */
 	resolvedEngine?: string;
+	/** The picture's own measurements, as the render process computed them. */
+	renderStats?: RenderStats;
 	/** Framing this run solved for the module's camera. Empty when it produced no mesh. */
 	cameras?: BranchCameraFraming[];
 	/** The resolved plan this run's framing came from. */
@@ -478,6 +480,13 @@ export interface BranchRunResult {
 	status: BranchRunStatus;
 	/** Engine the branch render actually used; absent when rendering was disabled. */
 	resolvedEngine?: string;
+	/**
+	 * The picture's own measurements, computed from the saved PNG inside the
+	 * render process. Absent when the run rendered nothing, or when the render
+	 * failed (see `renderError`) — a failed render can still leave a PNG behind
+	 * for `blender_image_probe` to read.
+	 */
+	renderStats?: RenderStats;
 	/** Why the render failed, when the run itself succeeded and the branch was kept. */
 	renderError?: string;
 	/** Framing solved for the module's camera, and the numbers it was solved from. */
@@ -2761,6 +2770,43 @@ export interface ImageProbeResult {
 	};
 	warnings: string[];
 }
+
+/**
+ * A render's own pixel measurements, as the render process computed them.
+ *
+ * Exactly the measurement half of `ImageProbeResult`: the same fields, over the
+ * same saved 8-bit sRGB PNG, by a port of the same rules — so a run's numbers
+ * describe the picture it wrote and a `blender_image_probe` of that file would
+ * only re-measure it. The probe keeps its full result shape (path, dimensions,
+ * background, tolerance) for images this repo did not render.
+ *
+ * The backdrop is part of the measurement, not a guess handed in afterwards: the
+ * render process reads it off the frame's own border ring, so the mask, the
+ * facts derived from it and the silhouette split all use one colour. On a
+ * film-transparent frame there is no backdrop — alpha is the mask — and
+ * `background` is null.
+ */
+export type RenderStats = Pick<
+	ImageProbeResult,
+	| "subjectBounds"
+	| "subjectPixelCount"
+	| "subjectCoverage"
+	| "transparentPixels"
+	| "meanColour"
+	| "lumaGrid"
+	| "silhouette"
+	| "edgeSharpness"
+	| "palette"
+	| "exposure"
+	| "warnings"
+> & {
+	/** The backdrop the mask was split on, 0..1 per channel; null when alpha was. */
+	background?: [number, number, number] | null;
+	/** Share of the border ring that backdrop holds, 0..1; null when it was not measured. */
+	backgroundUniform?: number | null;
+	/** True when the saved frame carries alpha, so alpha decided the mask. */
+	filmTransparent?: boolean;
+};
 
 export interface SilhouetteIoUOptions {
 	/**

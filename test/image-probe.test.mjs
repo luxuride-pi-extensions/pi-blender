@@ -13,11 +13,12 @@ import { deflateSync } from "node:zlib";
 import { crc32 } from "node:zlib";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
-import { loadTs } from "./paths.mjs";
+import { BRIDGE_ASSETS_DIR, loadTs } from "./paths.mjs";
 
 // The extension is TypeScript with NodeNext ".js" specifiers, so the modules
 // are loaded through jiti — the same loader pi uses. A direct `.ts` import
@@ -438,4 +439,126 @@ test("exposure: flat lighting warns even when nothing is clipped", async (t) => 
 	assert.equal(result.exposure.clippedLow.all, 0);
 	assert.equal(result.exposure.lumaPercentiles.p1, result.exposure.lumaPercentiles.p99);
 	assert.ok(result.warnings.some((warning) => /flat-light/.test(warning)));
+});
+
+/**
+ * The bridge's in-process render stats and this probe are two implementations
+ * of one contract, so they are pinned against the same file.
+ *
+ * The tolerance is 1e-4: both sides round to four decimals before reporting, so
+ * agreement sharper than that would be luck rather than agreement, and anything
+ * looser would let a real rule difference (a mean distance where the other side
+ * uses the max, or half-up rounding where the other uses banker's) pass.
+ *
+ * What this does NOT cover: the two rules could be ported wrong in the same
+ * direction, which one PNG cannot reveal — `test/render-stats.py` in the bridge
+ * covers the rules themselves, and the hand-computed images above cover this
+ * probe. It also only exercises an opaque subject against a backdrop both sides
+ * are told (black), so the alpha-mask branch, the tolerance branch and the
+ * render process's own ring measurement are uncompared here.
+ */
+const PARITY_FIXTURE = join(import.meta.dirname, "fixtures", "critic-calibration", "images", "mug-pass-01.png");
+const PARITY_TOLERANCE = 1e-4;
+const RENDER_STATS_FIELDS = [
+	"subjectBounds",
+	"subjectPixelCount",
+	"subjectCoverage",
+	"transparentPixels",
+	"meanColour",
+	"lumaGrid",
+	"silhouette",
+	"edgeSharpness",
+	"palette",
+	"exposure",
+	"warnings",
+];
+
+/** The bridge package's `render_scene.py`, which only a released bridge carries the stats in. */
+const RENDER_STATS_SOURCE = join(BRIDGE_ASSETS_DIR, "render_scene.py");
+const PARITY_SKIP = (() => {
+	const blender = blenderCommand();
+	if (!blender) return "no Blender on this machine";
+	const source = existsSync(RENDER_STATS_SOURCE) ? readFileSync(RENDER_STATS_SOURCE, "utf-8") : "";
+	if (!source.includes("def compute_render_stats") || !source.includes("backgroundUniform")) {
+		return `the installed bridge (${BRIDGE_ASSETS_DIR}) does not measure the backdrop itself, so there is nothing to compare against yet`;
+	}
+	return false;
+})();
+
+/** Blender, as a command prefix, when this machine has one. */
+function blenderCommand() {
+	for (const candidate of [["flatpak", "run", "org.blender.Blender"], ["blender"]]) {
+		const found = spawnSync(candidate[0], [...candidate.slice(1), "--version"], { encoding: "utf-8", timeout: 60_000 });
+		if (!found.error && found.status === 0) return candidate;
+	}
+	return null;
+}
+
+/** Every leaf where the two stats disagree by more than the parity tolerance. */
+function statsDifferences(python, probe, path) {
+	if (typeof python === "number" && typeof probe === "number") {
+		return Math.abs(python - probe) <= PARITY_TOLERANCE ? [] : [`${path}: python ${python} vs probe ${probe}`];
+	}
+	if (Array.isArray(python) && Array.isArray(probe)) {
+		if (python.length !== probe.length) return [`${path}: python has ${python.length} entries, probe has ${probe.length}`];
+		return python.flatMap((entry, index) => statsDifferences(entry, probe[index], `${path}[${index}]`));
+	}
+	if (python && probe && typeof python === "object" && typeof probe === "object") {
+		const keys = new Set([...Object.keys(python), ...Object.keys(probe)]);
+		return [...keys].flatMap((key) => statsDifferences(python[key], probe[key], path ? `${path}.${key}` : key));
+	}
+	return JSON.stringify(python) === JSON.stringify(probe) ? [] : [`${path}: python ${JSON.stringify(python)} vs probe ${JSON.stringify(probe)}`];
+}
+
+test("render stats parity: the Python stats and the probe agree on one PNG", { skip: PARITY_SKIP }, async (t) => {
+	const boxes = sandboxes();
+	t.after(() => boxes.cleanup());
+	const dir = boxes.create();
+
+	// Blender under flatpak cannot read /tmp, so the script it is asked to run
+	// has to sit under the home directory even though the workspace does not.
+	const scriptDir = mkdtempSync(join(homedir(), ".pi-render-stats-"));
+	t.after(() => rmSync(scriptDir, { recursive: true, force: true }));
+	const scriptPath = join(scriptDir, "parity.py");
+	writeFileSync(
+		scriptPath,
+		[
+			"import json, sys",
+			`sys.path.insert(0, ${JSON.stringify(BRIDGE_ASSETS_DIR)})`,
+			"from render_scene import compute_render_stats",
+			`stats = compute_render_stats(${JSON.stringify(PARITY_FIXTURE)}, background=(0, 0, 0), tolerance=0.02)`,
+			'sys.stdout.write("__PI_RENDER_STATS__" + json.dumps(stats) + "__PI_RENDER_STATS__\\n")',
+		].join("\n"),
+		"utf-8",
+	);
+
+	const [command, ...args] = blenderCommand();
+	const run = spawnSync(command, [...args, "--background", "--factory-startup", "--python", scriptPath], {
+		encoding: "utf-8",
+		timeout: 300_000,
+		env: { ...process.env, HOME: homedir() },
+	});
+	const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+	const reported = output.match(/__PI_RENDER_STATS__(.*?)__PI_RENDER_STATS__/);
+	assert.ok(reported, `Blender did not report render stats: ${output.slice(-1500)}`);
+	const pythonStats = JSON.parse(reported[1]);
+
+	// Identical inputs are the whole point: the render process measures its own
+	// border ring when nobody names a backdrop, and the probe has no such rule, so
+	// the comparison has to name the same backdrop on both sides. What the auto
+	// path measures is covered by the bridge's own `test/render-stats.py`, against
+	// the corner pixel of a render whose world colour is known.
+	assert.deepEqual(pythonStats.background, [0, 0, 0], "an explicit background must not be re-measured from the ring");
+	assert.equal(pythonStats.backgroundUniform, null, "an explicit background has no ring share to report");
+
+	// The probe's tolerance defaults to 0, so the same 0.02 the render process
+	// measured with has to be asked for explicitly on this side too.
+	const probe = await withManifest(dir, () =>
+		blenderImageProbe({ cwd: dir, workspace: dir, path: PARITY_FIXTURE, background: [0, 0, 0], tolerance: 0.02 }),
+	);
+	assert.ok(probe.subjectPixelCount > 0, "the fixture has a subject, so agreement cannot be two empty measurements");
+
+	for (const field of RENDER_STATS_FIELDS) {
+		assert.deepEqual(statsDifferences(pythonStats[field], probe[field], field), [], `${field} disagrees beyond ${PARITY_TOLERANCE}`);
+	}
 });
