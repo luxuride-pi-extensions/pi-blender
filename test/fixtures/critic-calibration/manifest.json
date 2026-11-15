@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "generator": "@luxuride-pi/blender-bridge blender/generate-calibration-fixtures.py",
+  "provenance": "Self-authored: every render is built from Blender primitives by generate-calibration-fixtures.py in the @luxuride-pi/blender-bridge package (GPL-3.0-or-later), which writes its output here. No third-party image, texture, model or font is used, so the set carries no attribution obligation.",
+  "license": "MIT, the same licence as the rest of pi-blender (see LICENSE and LICENSING.md). Not CC0: the repository already grants MIT over its own artefacts and a second licence for part of the tree only makes the terms harder to state, not freer. The images are output of a GPL-licensed Blender script; they contain none of its code, so they are data, not a derivative work, and the package carrying them stays MIT.",
+  "render": {
+    "engine": "CYCLES",
+    "device": "CPU",
+    "samples": 24,
+    "seed": 0,
+    "adaptiveSampling": false,
+    "denoising": false,
+    "resolution": [
+      400,
+      300
+    ],
+    "viewTransform": "Standard",
+    "exposure": 0.0,
+    "overexposedCaseEv": 5.0,
+    "worldColor": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "keyLightWatts": 900.0,
+    "fillLightWatts": 260.0,
+    "camera": {
+      "type": "ORTHO",
+      "orthoScale": 4.0,
+      "location": [
+        0.0,
+        -8.0,
+        1.3
+      ],
+      "rotation": [
+        1.5707963267948966,
+        0.0,
+        0.0
+      ]
+    },
+    "blenderVersion": "5.3.0",
+    "totalBytes": 219271
+  },
+  "thresholds": {
+    "clippedShare": 0.25,
+    "clippedSevereShare": 0.5,
+    "flatNeutralShare": 0.85,
+    "chromaNeutral": 0.12,
+    "partialLossShare": 0.05,
+    "missingSevereShare": 0.15,
+    "collapsedAreaShare": 0.6,
+    "collapsedHeightShare": 0.4,
+    "frameBleedCoverage": 0.35
+  },
+  "images": [
+    {
+      "id": "mug-pass-01",
+      "file": "images/mug-pass-01.png",
+      "sha256": "b8592987f80cbd1c78d5affd47227d92595cb6cb0ada57e2e48a9a90361a3b35",
+      "bytes": 30983,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": true,
+        "defects": [],
+        "expectedAxes": {}
+      },
+      "notes": "Clean terracotta mug with handle. The false-positive side of the proxy: it must not be called defective."
+    },
+    {
+      "id": "arch-pass-02",
+      "file": "images/arch-pass-02.png",
+      "sha256": "0c0341da94528edcba60f780ee1c385939ee87ba2eefb17490620ebf4143782a",
+      "bytes": 39825,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": true,
+        "defects": [],
+        "expectedAxes": {}
+      },
+      "notes": "Clean sandstone arch prop, a second object shape so the passes are not one material on one silhouette."
+    },
+    {
+      "id": "character-pass-03",
+      "file": "images/character-pass-03.png",
+      "sha256": "690af052897adc6ea72424953a471142885b6c81971416179a31d4b0e4464f48",
+      "bytes": 30615,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": true,
+        "defects": [],
+        "expectedAxes": {}
+      },
+      "notes": "Clean blockout character with three materials and six parts."
+    },
+    {
+      "id": "defect-collapsed-silhouette",
+      "file": "images/defect-collapsed-silhouette.png",
+      "sha256": "be4c369c879d15129358a7b8ec390db59cf402768512f21e38f3884aff61f3a5",
+      "bytes": 2988,
+      "width": 400,
+      "height": 300,
+      "reference": "character-pass-03",
+      "truth": {
+        "pass": false,
+        "defects": [
+          "collapsed_silhouette"
+        ],
+        "expectedAxes": {
+          "geometry": 0,
+          "validity": 0
+        }
+      },
+      "notes": "The character squashed to 2% height: same width as the clean render, almost no height and no area."
+    },
+    {
+      "id": "defect-missing-handle",
+      "file": "images/defect-missing-handle.png",
+      "sha256": "df5d7b5bd8b92f917f2bf61d7ae35f3b2076a98dc05e3bcd8af009e508e2b117",
+      "bytes": 23308,
+      "width": 400,
+      "height": 300,
+      "reference": "mug-pass-01",
+      "truth": {
+        "pass": false,
+        "defects": [
+          "missing_handle"
+        ],
+        "expectedAxes": {
+          "completeness": 0
+        }
+      },
+      "notes": "The mug without its handle: the same body, one part missing from the silhouette."
+    },
+    {
+      "id": "defect-wrong-scale",
+      "file": "images/defect-wrong-scale.png",
+      "sha256": "a6a848ed1bc55b2fd245e8c0b72567998254748f3f55fbde0f07e3ac9539db69",
+      "bytes": 81724,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": false,
+        "defects": [
+          "wrong_scale"
+        ],
+        "expectedAxes": {
+          "geometry": 0,
+          "accuracy": 0
+        }
+      },
+      "notes": "The character 4.2x too wide: the silhouette is cropped by both sides of the frame."
+    },
+    {
+      "id": "defect-flat-material",
+      "file": "images/defect-flat-material.png",
+      "sha256": "f19303847927c48ded4cb160dd499757bfda7e5426e377a6167598b7b59d382e",
+      "bytes": 4547,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": false,
+        "defects": [
+          "flat_material"
+        ],
+        "expectedAxes": {
+          "materials": 0
+        }
+      },
+      "notes": "The mug in a single emissive grey: correct silhouette, no shading, no colour."
+    },
+    {
+      "id": "defect-clipped-exposure",
+      "file": "images/defect-clipped-exposure.png",
+      "sha256": "c819535d7c6aa20a8eed5df99ed23e7cb6368a9557519f7d1a2dbfe2e45005bc",
+      "bytes": 5281,
+      "width": 400,
+      "height": 300,
+      "reference": null,
+      "truth": {
+        "pass": false,
+        "defects": [
+          "clipped_exposure"
+        ],
+        "expectedAxes": {
+          "quality": 0
+        }
+      },
+      "notes": "The clean mug at +5 EV: the subject's channels pin at white and hold no detail."
+    }
+  ]
+}
