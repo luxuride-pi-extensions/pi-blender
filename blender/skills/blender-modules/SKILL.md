@@ -200,6 +200,8 @@ Append a structured critique entry to the workspace critique.log using the 0-12 
 - **viewNote** — Free text on the framing, coverage, or perspective, kept because the score cannot say why.
 - **issues** — Concrete problems found in the current render or scene.
 - **nextAction** — Either a fix to attempt next, or "present to user" when the result is good enough.
+- **partChecklist** — One entry per part the reference names: `{ part, present, evidence }`. A part marked absent, a part the reference names that the checklist does not answer, or a `present: true` with empty `evidence` is a gap; any gap caps `completeness` at 1 and blocks a present verdict whatever the other five axes scored. Fail closed on purpose: silence is not a pass.
+- **silhouetteIoU** — The per-view `{ view: iou }` record the branch run wrote into this iteration's `packet.json` under `referenceCompleteness.views`. Pass it through so the log carries the measured shape agreement beside the judgement. Absent means the run could not measure it — never substitute a number.
 - **rejectReason** — Reject the asset outright, whatever it scored. Use this when the ATTEMPT was wrong -- the category is unsatisfiable from this brief, or the structure is fundamentally not what was asked for -- rather than merely unpolished. Distinct from a low score on purpose: a scored failure is a finished attempt worth keeping the record of, and this says it should never have been made.
 
 ### blender_iteration_state

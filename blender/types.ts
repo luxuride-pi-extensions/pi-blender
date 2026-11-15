@@ -35,6 +35,16 @@ export interface BlenderReference {
 	sourceUrl?: string;
 	license?: string;
 	credit?: string;
+	/**
+	 * Parts the reference says the subject HAS, as a checklist the critic must
+	 * answer item by item. Empty or absent means the reference was never
+	 * decomposed, so the part check is skipped rather than silently passed.
+	 *
+	 * On the reference rather than the brief because the reference is the thing
+	 * that cannot be wrong: a brief is written by the same agent that builds the
+	 * model, so a part missing from both would be missing from the checklist too.
+	 */
+	parts?: string[];
 	addedAt: string;
 }
 
@@ -52,6 +62,11 @@ export interface AddReferenceOptions {
 	/** What the image depicts. Required, because the manager cannot see it. */
 	caption: string;
 	suggestedView?: string;
+	/**
+	 * Parts the subject must show, taken from the describer's notable features.
+	 * Omitted, they are extracted from the caption when it reads as a list.
+	 */
+	parts?: string[];
 	signal?: AbortSignal;
 }
 
@@ -277,6 +292,12 @@ export interface BlenderBranchRunRecord {
 	reviewSheet?: ReviewSheetResult;
 	/** Where this generation's render, sheet, comparison and packet were stored. */
 	reviewPacket?: ReviewPacket;
+	/**
+	 * Silhouette agreement between the reference and every planned view, when
+	 * this run was given a `referenceId`. Kept on the record as well as in
+	 * `packet.json` so a later audit reads the number without opening the run.
+	 */
+	referenceCompleteness?: ReferenceCompleteness;
 	/** Structural checks measured before this run's render. */
 	preflight?: PreflightResult;
 	/** True when a blocking preflight was explicitly overridden. */
@@ -436,6 +457,12 @@ export interface BranchRunResult {
 	reviewSheet?: ReviewSheetResult;
 	/** Where this generation's render, sheet, comparison and packet were stored. */
 	reviewPacket?: ReviewPacket;
+	/**
+	 * Silhouette agreement between the reference and every planned view, when the
+	 * run was given a `referenceId`. Also written into the run's `packet.json`,
+	 * because that is the file a critic can read.
+	 */
+	referenceCompleteness?: ReferenceCompleteness;
 	/** Content hash of the applied datablocks; absent when there was no subject to digest. */
 	stateDigest?: string;
 	/** Content the headless apply does not carry, such as world or scene settings. */
@@ -1362,6 +1389,33 @@ export interface CritiqueLogOptions {
 	 * or the work is structurally wrong rather than merely unpolished.
 	 */
 	rejectReason?: string;
+	/**
+	 * The reference's parts, each marked present or absent with the evidence that
+	 * decided it.
+	 *
+	 * A structured list rather than a sentence in `issues` because the log has to
+	 * decide something from it: an absent part — or an expected part the critic
+	 * simply did not answer — is what stops a build being presented, and prose
+	 * cannot be checked for omission without guessing at what was meant.
+	 */
+	partChecklist?: PartChecklistEntry[];
+	/**
+	 * Silhouette IoU per view, copied from the run's `packet.json`
+	 * `referenceCompleteness`, so the shape measurement reaches the log.
+	 */
+	silhouetteIoU?: Record<string, number>;
+}
+
+export interface PartChecklistEntry {
+	/** The part, named as the reference names it. */
+	part: string;
+	/**
+	 * False is a claim the part is MISSING. Never defaulted: a critic that marks
+	 * a part present it cannot point at is marking the checklist, not the model.
+	 */
+	present: boolean;
+	/** What in the render shows it, or — for a part on a side this view cannot show — which view would. */
+	evidence: string;
 }
 
 /**
@@ -1631,6 +1685,15 @@ export interface CritiqueLogResult {
 		issues: string[];
 		nextAction: string;
 		rejectReason?: string;
+		/**
+		 * Reference parts: present, absent, and unanswered. Written in full so an
+		 * absent part is visible in the log itself, not only in its consequences.
+		 */
+		partChecklist: PartChecklistEntry[];
+		/** Parts the reference declares that the checklist did not answer, or marked absent. */
+		partGaps: string[];
+		/** Silhouette IoU per view, when the run measured one against a reference. */
+		silhouetteIoU?: Record<string, number>;
 		loggedAt: string;
 		shouldPresent: boolean;
 	};
@@ -2655,6 +2718,109 @@ export interface ImageProbeResult {
 		lumaPercentiles: { p1: number; p50: number; p99: number };
 	};
 	warnings: string[];
+}
+
+export interface SilhouetteIoUOptions {
+	/**
+	 * The render's backdrop in 0..1 per channel. Required to split an opaque
+	 * render; an image with transparency is split on its alpha channel instead and
+	 * needs no colour. Never defaulted — a wrong or guessed backdrop puts the
+	 * backdrop in the mask, and the numbers then measure the studio.
+	 */
+	background?: [number, number, number];
+	/**
+	 * The reference's own backdrop. Separate from `background` because a
+	 * photograph's backdrop is not a render's world colour, and never inherited
+	 * from it for the same reason.
+	 */
+	referenceBackground?: [number, number, number];
+	/**
+	 * Per-channel tolerance, 0..1, for calling a pixel background. Defaults to
+	 * 0.02 — the same bar the backdrop facts use — because dithering and film
+	 * grain put code values a little off the mode, and a stricter reading turns
+	 * the whole frame into foreground.
+	 */
+	tolerance?: number;
+	/** The reference side's own tolerance; falls back to `tolerance`. */
+	referenceTolerance?: number;
+	/** Cells per side of the comparison grid, 16..512. Default 128. */
+	grid?: number;
+}
+
+/** One mask's own geometry, before any comparison. */
+export interface SilhouetteMaskSummary {
+	width: number;
+	height: number;
+	pixels: number;
+	/** Fraction of the whole frame the subject covers. */
+	coverage: number;
+	/** Inclusive pixel range, or null when the mask is empty. */
+	bounds: { x0: number; x1: number; y0: number; y1: number } | null;
+	/** Bounding-box width:height, so a squashed subject is visible as a number. */
+	aspect: number | null;
+}
+
+export interface SilhouetteIoUMeasured {
+	measured: true;
+	renderPath: string;
+	referencePath: string;
+	/**
+	 * Shape agreement with each mask normalised to its own bounding box. 1.0 is
+	 * the same silhouette; framing, crop, scale and position do not move it and
+	 * a squashed subject does not either — see `aspectRatio` and `bboxIoU`.
+	 */
+	iou: number;
+	/** Overlap of the two bounding boxes in frame-relative coordinates. */
+	bboxIoU: number;
+	/** Share of the REFERENCE silhouette the render covers, so a missing part reads low. */
+	coverageRatio: number;
+	/**
+	 * Which transformation was applied to compare masks that need not share a
+	 * frame. Spelled out in the result so no reader has to infer it.
+	 */
+	normalisation: "bounding-box";
+	grid: number;
+	/** How each side's foreground was decided, so a number can be audited. */
+	split: { render: "alpha" | "background"; reference: "alpha" | "background" };
+	render: SilhouetteMaskSummary;
+	reference: SilhouetteMaskSummary;
+	/** render aspect ÷ reference aspect; null when either mask is empty. */
+	aspectRatio: number | null;
+	aspectMismatch: boolean;
+	warnings: string[];
+}
+
+/**
+ * A comparison that could not be made honestly.
+ *
+ * Reported instead of a number because the honest alternative to "not measured"
+ * is not 0.0 — a zero reads as "nothing matched" and a 1.0 reads as "everything
+ * matched", and both are findings about the model that were never measured.
+ * Callers must keep skipped views out of anything they persist.
+ */
+export interface SilhouetteIoUSkipped {
+	measured: false;
+	renderPath: string;
+	referencePath: string;
+	reason: string;
+	warnings: string[];
+}
+
+export type SilhouetteIoUResult = SilhouetteIoUMeasured | SilhouetteIoUSkipped;
+
+/** Per-view silhouette agreement with a reference, as a run persists it. */
+export interface ReferenceCompletenessView {
+	iou: number;
+	coverageRatio: number;
+}
+
+export interface ReferenceCompleteness {
+	/** Measured views only: a view that could not be measured is absent, never 0. */
+	views: Record<string, ReferenceCompletenessView>;
+	/** Highest `iou` across the views measured. */
+	bestViewIoU: number;
+	/** The view that produced `bestViewIoU`. */
+	bestView?: string;
 }
 
 export interface GeometryProbeWorkspaceResult extends GeometryProbeResult {

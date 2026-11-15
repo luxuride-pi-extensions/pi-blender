@@ -74,6 +74,7 @@ Register a reference image with a workspace. Copies the image into <workspace>/r
 - **caption** — What this image depicts, in one or two sentences: the subject, the angle it is shot from, and anything a worker or critic would need to judge against it. Required — you cannot read the image yourself, so this text is the only thing that will convey its contents.
 - **id** — Stable id to address this reference by in briefs, e.g. 'front' or 'three-quarter'. Defaults to the file's name without its extension. Adding a reference whose id is taken stores it as <id>-2 rather than overwriting, so earlier verdicts stay reproducible.
 - **suggestedView** — Optional saved view or camera name you believe this reference should be compared against. The pairing is a hypothesis: a critic will report whether the two images are actually comparable, and name the view it would prefer if not.
+- **parts** — The parts the subject has, e.g. `["body", "handle", "rim"]`. Optional, but pass it: a critic must answer for every part the reference names, and a part it leaves unanswered blocks the present verdict. When omitted, the parts are read out of the caption's `Notable features` line; a prose caption with no list yields none, and then nothing is checked.
 
 ### blender_reference_search
 

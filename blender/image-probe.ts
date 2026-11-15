@@ -33,7 +33,12 @@ const DEFAULT_PALETTE_LIMIT = 6;
 const MAX_PALETTE_LIMIT = 16;
 const PALETTE_SQUARE_TOLERANCE = 0.06;
 
-interface SubjectMask {
+/**
+ * The foreground mask `findSubject` derives, exported because
+ * `blender/silhouette.ts` measures shape from the same mask rather than growing
+ * a second definition of "subject".
+ */
+export interface SubjectMask {
 	mask: Uint8Array;
 	pixels: number;
 	transparentPixels: number;
@@ -168,15 +173,27 @@ function normalizePaletteLimit(limit: number | undefined): number {
 	return Math.min(MAX_PALETTE_LIMIT, Math.max(0, Math.round(limit)));
 }
 
-function findSubject(image: DecodedImage, background: [number, number, number], tolerance: number): SubjectMask {
+function hasTransparency(pixels: Uint8Array, count: number): boolean {
+	for (let index = 0; index < count; index++) {
+		if ((pixels[index * 4 + 3] ?? 255) <= ALPHA_CUTOFF) return true;
+	}
+	return false;
+}
+
+export function findSubject(image: DecodedImage, background: [number, number, number], tolerance: number): SubjectMask {
 	const { width, height, pixels } = image;
 	const mask = new Uint8Array(width * height);
 	const backgroundR = background[0] * 255;
 	const backgroundG = background[1] * 255;
 	const backgroundB = background[2] * 255;
+	// A film-transparent image states its own subject, and then alpha is the only
+	// thing that decides: comparing colour as well would drop an opaque black
+	// subject against a black backdrop, which is a normal render of a black object.
+	const alphaDefinesSubject = hasTransparency(pixels, width * height);
 	// Mean per-channel distance, so `tolerance` reads as "how far a pixel may
-	// sit from the background and still count as background".
-	const threshold = tolerance * 255;
+	// sit from the background and still count as background". A negative
+	// threshold disables the comparison for every pixel, which is how alpha wins.
+	const threshold = alphaDefinesSubject ? -1 : tolerance * 255;
 
 	let pixels_found = 0;
 	let transparent = 0;

@@ -46,6 +46,7 @@ import type {
 	BranchConflict,
 	PreflightResult,
 	ResolvedCameraPlan,
+	ReferenceCompleteness,
 	ReviewPacket,
 	ReviewSheetResult,
 	BranchRunOptions,
@@ -66,6 +67,7 @@ import {
 } from "./module-paths.js";
 import { fileExists, delay, formatBlenderFailure, getSavedViewCameraObjectName, nowIso, runBlenderJson } from "./utils.js";
 import type { RunTimings } from "./types.js";
+import { measureReferenceCompleteness, persistReferenceCompleteness } from "./silhouette.js";
 import { loadWorkspaceManifest, releaseReservedIteration, updateManifest } from "./workspace.js";
 
 const BRANCH_FILE = "branch.blend";
@@ -82,9 +84,40 @@ const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
 const RENDER_TIMEOUT_MS = 360_000;
 const BRANCH_SAVED_MARKER = "branch-saved";
 
-/** The module's branch blend: its private copy of model.blend. */
+/**
+ * The module's branch blend: its private copy of model.blend.
+ */
 export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
 	return join(getModuleDir(workspacePath, moduleName), BRANCH_FILE);
+}
+
+/**
+ * The share of the render's border ring that has to hold one colour before that
+ * colour can be called the backdrop.
+ *
+ * This is exactly the bar #144 applies before it records `backgroundUniform` and
+ * calls the mode the backdrop, deliberately read from the consumer side: at 0.5 a
+ * ring that is 40% something else would still be split on the mode, which is the
+ * mask contamination the measurement exists to avoid — and it would smuggle a
+ * guessed backdrop into `referenceCompleteness` after all. One number, one
+ * meaning, so the producer and this consumer cannot drift apart.
+ */
+const MIN_BACKDROP_UNIFORMITY = 0.9;
+
+/**
+ * The render's backdrop as #133 records it on the render payload, when it is one
+ * colour the foreground can be split on. Absent means "not known", which is a
+ * skip rather than a guess.
+ */
+function measuredBackdrop(render: unknown): [number, number, number] | undefined {
+	const facts = render as { background?: unknown; backgroundUniform?: unknown } | null | undefined;
+	const channels = facts?.background;
+	const uniformity = facts?.backgroundUniform;
+	if (!Array.isArray(channels) || channels.length !== 3) return undefined;
+	if (typeof uniformity !== "number" || uniformity < MIN_BACKDROP_UNIFORMITY) return undefined;
+	const values = channels.map(Number);
+	if (values.some((channel) => !Number.isFinite(channel))) return undefined;
+	return [values[0], values[1], values[2]] as [number, number, number];
 }
 
 /* ------------------------------------------------------------------ *
@@ -1287,6 +1320,47 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		viewLabel = payload.cameras[0]?.cameraName ?? "active-camera";
 	}
 
+	// Silhouette agreement with the paired reference, measured on each planned
+	// view. The split needs a backdrop for each side, and this package has none at
+	// run time: the payload carries no world colour, and DESIGN.md is explicit that
+	// a backdrop is a value the caller states rather than one the probe infers.
+	// Work already parked for it: issue #133 (PR #144, branch
+	// `issue-133-render-facts`) reads the saved PNG's border ring inside the branch
+	// run and records it as `payload.render.background` (0..1 per channel) with
+	// `payload.render.backgroundUniform` (the mode's share of that ring).
+	// `measuredBackdrop` below is the seam that consumes those two keys, so when
+	// they land the opaque case measures with no new surface and no second reading
+	// of the ring here. Until then an opaque render is NOT measured: the views stay
+	// out of `referenceCompleteness` and a warning says why, because splitting
+	// against a guessed black would score the studio. Alpha renders and alpha
+	// references measure today.
+	let referenceCompleteness: ReferenceCompleteness | undefined;
+	if (reference) {
+		const views: { name: string; path: string }[] = [];
+		if (renderOutputPath) views.push({ name: viewLabel, path: renderOutputPath });
+		for (const panel of reviewSheet?.panels ?? []) {
+			// The hero panel is the render itself, already listed above.
+			if (!panel.file || panel.file === renderOutputPath) continue;
+			views.push({ name: panel.name, path: panel.file });
+		}
+		if (views.length > 0) {
+			const measured = await measureReferenceCompleteness({
+				referencePath: reference.path,
+				views,
+				background: measuredBackdrop(payload.render),
+			});
+			warnings.push(...measured.warnings);
+			if (measured.completeness) {
+				referenceCompleteness = measured.completeness;
+				const packetDir = payload.reviewPacket?.dir;
+				if (packetDir) {
+					const persistWarning = await persistReferenceCompleteness(packetDir, measured.completeness);
+					if (persistWarning) warnings.push(persistWarning);
+				}
+			}
+		}
+	}
+
 	await pruneOldModuleRuns(manifest.workspacePath, moduleName, iteration);
 
 	const record: BlenderBranchRunRecord = {
@@ -1319,6 +1393,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		cameraPlan: payload.cameraPlan,
 		reviewSheet,
 		reviewPacket: payload.reviewPacket ?? undefined,
+		referenceCompleteness,
 		timings,
 	};
 
@@ -1410,6 +1485,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		preflightOverridden: payload.preflightOverridden === true,
 		reviewSheet: payload.reviewSheet ?? undefined,
 		reviewPacket: payload.reviewPacket ?? undefined,
+		referenceCompleteness,
 		resolvedCameraName: payload.render?.cameraName ?? requestedCameraName ?? payload.cameras[0]?.cameraName,
 		stateDigest: payload.stateDigest ?? undefined,
 		warnings,

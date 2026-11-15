@@ -47,12 +47,19 @@ Subject: <what it depicts, concretely — the specific garment, object, characte
 Viewpoint: <which side, roughly how much rotation and elevation, how it is cropped>
 Lighting: <direction, quality, shadow behavior — enough to reproduce a comparable render>
 Palette: <the colors that matter, by name>
-Notable features: <parts, silhouette, proportions, material cues worth building>
+Parts: <the object's separate parts, comma-separated short noun phrases — "body, handle, rim, base". These become the critic's checklist, so list what the object HAS, not the styles and proportions around it>
+Notable features: <silhouette, proportions, material cues worth building>
 Suggested view: <a short view name for reproducing this angle>
 Suggested caption: <one paragraph, usable verbatim as a blender_add_reference caption>
 Caption check: <no caption supplied | agrees | differs — how, and which reading you trust>
 Confidence: <high | medium | low — say why when not high>
 ```
+
+The `Parts` line is load-bearing for a different reader: `blender_add_reference`
+stores the parts a critic must answer for one by one, and a part missing from this
+list is a part no critic will ever check. Keep each entry to a short noun phrase
+(`handle`, `sleeve`, `left wing`) — a phrase that reads as a sentence is dropped,
+because a checklist built from prose fails every model it is applied to.
 
 The `Suggested caption` line is load-bearing. It becomes the caption field that
 every downstream brief carries, and no later agent can check it, so write it for
