@@ -104,22 +104,25 @@ export function normalizePartName(raw: string): string {
  * new argument: the manager's brief is built from the describer's text, so the
  * parts the describer saw are already in the caption it handed over.
  *
- * Falling back to the whole caption is deliberate, and the bar for doing so is
- * deliberately high: every fragment has to be a short noun phrase and there have
- * to be at least two of them. The parts list drives a fail-closed check, so a
- * prose caption that happens to contain commas must yield NO parts rather than a
- * handful of invented ones — inventing parts turns "the critic answered nothing"
- * into "the model is missing something", which is a worse error than not
- * checking. A caption the describer wrote ("Notable features: tall body, thick
- * handle, flared base, glaze ...") is shaped exactly like a list, which is why
- * this recovers it without guessing.
+ * A caption with no such line yields NO parts rather than a guess. The parts
+ * list drives a fail-closed check, so inventing one turns "the critic answered
+ * nothing" into "the model is missing something", which is the worse of the two
+ * errors; and prose a manager wrote about a photograph ("a white mug on a table,
+ * lit from the left") parses as a list just as readily as a real one does. The
+ * fragments still have to look like part names — short, few words — because the
+ * describer's line also carries silhouette and material notes.
  */
 export function extractReferenceParts(caption: string): string[] {
 	const line = caption
 		.split("\n")
 		.map((entry) => entry.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, ""))
 		.find((entry) => /^(?:notable features|parts|features)\s*:/i.test(entry));
-	const source = line ? line.replace(/^[^:]*:/, "") : caption;
+	// Only a labelled list is trusted. Prose a manager wrote about a photograph —
+	// "a white mug on a table, lit from the left" — is shaped like a list too, and
+	// parsing it would invent parts, which turns "the critic answered nothing"
+	// into "the model is missing something": the worse of the two errors.
+	if (!line) return [];
+	const source = line.replace(/^[^:]*:/, "");
 	const fragments = source
 		.split(/[;,\n•|/]+/)
 		.map(normalizePartName)

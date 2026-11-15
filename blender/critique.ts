@@ -196,7 +196,14 @@ export function findPartGaps(expectedParts: string[], checklist: PartChecklistEn
 		gaps.push(answer.part);
 	}
 
-	return [...new Set(gaps)];
+	// One part, one line: "handle" and "Handle" are the same part, and a report
+	// that lists it twice reads as two problems.
+	const unique: string[] = [];
+	for (const gap of gaps) {
+		if (unique.some((existing) => existing.toLowerCase() === gap.toLowerCase())) continue;
+		unique.push(gap);
+	}
+	return unique;
 }
 
 /**
