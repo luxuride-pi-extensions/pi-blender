@@ -107,7 +107,7 @@ jobs:
           # way to tell them apart -- and without it, CI on the PR that pins a new
           # tag fails for a reason that has already fixed itself.
           curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.2.0/luxuride-pi-blender-bridge-0.2.0.tgz
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.3.0/luxuride-pi-blender-bridge-0.3.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           # Fails here, with a plain "no such file", rather than inside a suite
@@ -451,14 +451,28 @@ jobs:
           # way to tell them apart -- and without it, CI on the PR that pins a new
           # tag fails for a reason that has already fixed itself.
           curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
-            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.2.0/luxuride-pi-blender-bridge-0.2.0.tgz
+            https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.3.0/luxuride-pi-blender-bridge-0.3.0.tgz
           mkdir -p "$PI_BLENDER_BRIDGE_ASSETS_DIR"
           tar xzf /tmp/bridge.tgz -C "$PI_BLENDER_BRIDGE_ASSETS_DIR" --strip-components=1
           test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/blender/live-bridge.py"
           test -f "$PI_BLENDER_BRIDGE_ASSETS_DIR/test/preflight.py"
 
-      - name: install the fonts the import fixtures measure
-        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+      - name: install the fonts the import fixtures measure and the GL stack a render needs
+        run: |
+          sudo apt-get update
+          # fonts-dejavu-core: the import fixtures measure real text widths.
+          #
+          # libegl1 + libgl1 + libgl1-mesa-dri: Blender's GPU backend loads
+          # libEGL.so.1 at start-up and this runner image does not ship it, so
+          # every probe that only opens a blend survives and the one that
+          # RENDERS a frame dies with
+          #
+          #   Couldn't open libEGL.so.1: cannot open shared object file
+          #
+          # which reads like a corrupt Blender download and is a missing
+          # system library. mesa-dri is what backs EGL with llvmpipe so the
+          # render actually completes on a runner with no GPU.
+          sudo apt-get install -y fonts-dejavu-core libegl1 libgl1 libgl1-mesa-dri
 
       - name: detect the cross-repo token
         id: token
