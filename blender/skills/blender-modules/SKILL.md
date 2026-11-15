@@ -171,7 +171,7 @@ Apply staged branch runs into model.blend in one locked pass, in the order their
 
 - **workspace** — Explicit workspace path for the Blender task.
 - **modules** — Module names to apply, in any order — they are applied in the order their branch runs were staged. Every one must have a staged branch run.
-- **forcePreflight** — Override a blocking preflight and merge a warned duplicate copy anyway. The default marks a blocked run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. A `warn`-level `duplicateObjects` needs this too, because the twin is applied either way. Use only for a known false positive.
+- **forcePreflight** — Override a blocking preflight, or merge a warned duplicate copy, anyway. The default marks a blocked run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. A `warn`-level `duplicateObjects` is not a blocker, so the applied record names the copies it merged in `forcedDuplicates` instead. Without the override the apply skips the branch rather than stacking `Hero.001` next to the `Hero` it re-created. Use only for a known false positive or a copy you meant.
 - **timeoutSeconds** — Timeout for the whole apply batch in seconds.
 
 ### blender_module_revert

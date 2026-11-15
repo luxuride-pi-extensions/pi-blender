@@ -1681,6 +1681,12 @@ print("second datablock is", bpy.context.object.name)
 		assert.equal(overridden.applied.length, 1, "an explicit override lands the branch");
 		const merged = await objectNames(ws.root, ws.blendPath);
 		assert.ok(merged.includes("Hero") && merged.includes("Hero.001"), "the override applies both copies");
+		// The override must not read as a clean apply: a warn-level duplicate sets no
+		// preflightOverridden, so the record has to name the copy it let through.
+		const appliedManifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf8"));
+		const twinRecord = appliedManifest.branchRuns.find((run) => run.module === "hero");
+		assert.deepEqual(twinRecord.forcedDuplicates, ["Hero.001"], "the applied record names the merged copy");
+		assert.equal(twinRecord.preflightOverridden, false, "a warned duplicate overrides no blocker");
 
 		// A profile where a stacked twin cannot be judged away refuses the run
 		// itself: no render is spent on it and the branch is not applied.

@@ -281,6 +281,14 @@ export interface BlenderBranchRunRecord {
 	preflight?: PreflightResult;
 	/** True when a blocking preflight was explicitly overridden. */
 	preflightOverridden?: boolean;
+	/**
+	 * `<base>.NNN` copies an explicit override merged for this branch.
+	 *
+	 * A warned duplicate is not a blocking defect, so `preflightOverridden` stays
+	 * false for it. Without this list the twin would land and the record would
+	 * read as a clean apply, with nothing saying the second object was meant.
+	 */
+	forcedDuplicates?: string[];
 }
 
 export interface BranchRunOptions {

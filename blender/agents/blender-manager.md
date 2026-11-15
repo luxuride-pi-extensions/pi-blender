@@ -656,9 +656,11 @@ interior and asset_pack it does not block the run, but `blender_branch_apply`
 skips a branch that would merge the copy and tells you which names it refused.
 A `.001` twin of an object the module already owns is a second object stacked on
 the first, not a rebuild — send it back to the worker to reuse or remove the
-datablock, and pass `forcePreflight` only if you meant both copies. Other
-non-blocking `warnings` belong in the critic's brief as facts to confirm, not as
-reasons to skip it.
+datablock, and pass `forcePreflight` only if you meant both copies. A warned
+duplicate is not a blocker, so the overridden record does not read
+`preflightOverridden`; it names the copies it merged in `forcedDuplicates`
+instead. Other non-blocking `warnings` belong in the critic's brief as facts to
+confirm, not as reasons to skip it.
 
 
 ## Image budget

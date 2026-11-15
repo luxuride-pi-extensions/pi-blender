@@ -469,7 +469,8 @@ Start pi in any project dir. The extension:
   sends the numbers to the worker instead of spending a critic on a picture that
   cannot answer them. Duplicates are critical on character, hard-surface and
   print, and a warning elsewhere — but the apply refuses a warned twin too,
-  unless `forcePreflight` says the two copies were meant.
+  unless `forcePreflight` says the two copies were meant; the applied record
+  then names them in `forcedDuplicates`, since a warning overrides no blocker.
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

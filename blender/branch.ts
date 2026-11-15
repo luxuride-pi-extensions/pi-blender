@@ -2032,6 +2032,12 @@ export async function blenderBranchApply(options: BranchApplyOptions): Promise<B
 			if (target) {
 				target.appliedAt = batchAt;
 				if (record.preflight?.blocking && options.forcePreflight === true) target.preflightOverridden = true;
+				// A warned duplicate is not a blocking override, so without this the
+				// twin would land and the record would read as a clean apply: nothing
+				// would say a second object was merged on purpose. Only the override
+				// gets here, because the refused path skipped the record above.
+				const forcedTwins = duplicateTwinCopies(record);
+				if (forcedTwins.length > 0 && options.forcePreflight === true) target.forcedDuplicates = forcedTwins;
 			}
 			applied.push({
 				module: record.module,
