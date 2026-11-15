@@ -108,6 +108,10 @@ function channelSpread(hex: string): number {
 	const red = Number.parseInt(hex.slice(1, 3), 16);
 	const green = Number.parseInt(hex.slice(3, 5), 16);
 	const blue = Number.parseInt(hex.slice(5, 7), 16);
-	if (![red, green, blue].every(Number.isFinite)) return 0;
+	// A hex this cannot parse is not evidence of a neutral colour: 0 is a spread
+	// every caller reads as grey, so a malformed entry would invent a
+	// nearMonochrome verdict. Report the widest spread instead and let the entry
+	// count as coloured.
+	if (![red, green, blue].every(Number.isFinite)) return 255;
 	return Math.max(red, green, blue) - Math.min(red, green, blue);
 }
