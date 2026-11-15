@@ -3143,7 +3143,14 @@ export interface BlockoutGenerateOptions {
 	id?: string;
 	/** Run through the deferred-job machinery instead of blocking. */
 	async?: boolean;
-	/** ComfyUI base URL; falls back to PI_BLENDER_COMFYUI_URL. */
+	/**
+	 * ComfyUI base URL for code and tests; falls back to PI_BLENDER_COMFYUI_URL.
+	 *
+	 * Deliberately absent from the tool schema and restricted to loopback: a
+	 * model that could name a host could point the user's prompt and reference
+	 * image at it. Anything off this machine goes through the environment
+	 * variable, which is the user's own configuration.
+	 */
 	comfyUrl?: string;
 	signal?: AbortSignal;
 	timeoutMs?: number;

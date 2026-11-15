@@ -84,6 +84,29 @@ test("comfyui without an endpoint fails immediately and names the variable", asy
 	}
 });
 
+test("a comfyUrl override off loopback is refused, and the env var is named as the way out", async () => {
+	await assert.rejects(
+		() => blenderBlockoutGenerate({ ...base, provider: "comfyui", comfyUrl: "http://10.11.12.13:8188", workflow: { "1": {} } }),
+		(error) => {
+			assert.match(error.message, /loopback/);
+			assert.match(error.message, /10\.11\.12\.13/);
+			assert.match(error.message, /PI_BLENDER_COMFYUI_URL/);
+			return true;
+		},
+	);
+	// The same address in the environment is the user's own configuration, not a
+	// model-chosen host, so it passes the endpoint stage and reaches the workflow
+	// check untouched.
+	const previous = process.env.PI_BLENDER_COMFYUI_URL;
+	process.env.PI_BLENDER_COMFYUI_URL = "http://10.11.12.13:8188";
+	try {
+		await assert.rejects(() => blenderBlockoutGenerate({ ...base, provider: "comfyui" }), /workflow/);
+	} finally {
+		if (previous === undefined) delete process.env.PI_BLENDER_COMFYUI_URL;
+		else process.env.PI_BLENDER_COMFYUI_URL = previous;
+	}
+});
+
 test("comfyui without a workflow says so instead of inventing a graph", async () => {
 	await assert.rejects(
 		() => blenderBlockoutGenerate({ ...base, provider: "comfyui", comfyUrl: "http://127.0.0.1:1" }),

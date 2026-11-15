@@ -30,7 +30,7 @@ import type {
 	BlockoutProvenance,
 	BlenderWorkspaceManifest,
 } from "./types.js";
-import { nowIso } from "./utils.js";
+import { nowIso, runBlenderJson } from "./utils.js";
 import { getManifestPath, loadWorkspaceManifest, updateManifest } from "./workspace.js";
 
 /** Providers that exist in Stage 1. */
@@ -100,8 +100,25 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
-/** The configured ComfyUI endpoint, or a refusal that says where to put it. */
+/** Hostnames an override may point at: the machine this process runs on. */
+function isLoopbackHost(hostname: string): boolean {
+	const host = hostname.toLowerCase();
+	if (host === "localhost" || host === "::1" || host === "[::1]") return true;
+	return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/**
+ * The ComfyUI endpoint: the user's configured URL, or a loopback override.
+ *
+ * `override` exists for code and tests — the tool schema deliberately does not
+ * expose a URL parameter — and it is restricted to loopback so that adding one
+ * later cannot silently turn into "a model points the tool, and the user's
+ * prompt and reference image, at a host of its choosing". The environment
+ * variable is the user's own configuration and may name any host, because a
+ * ComfyUI box on the LAN is a legitimate thing to run.
+ */
 function comfyUiEndpoint(override?: string): string {
+	const fromOverride = override !== undefined;
 	const raw = (override ?? process.env.PI_BLENDER_COMFYUI_URL ?? "").trim();
 	if (raw.length === 0) {
 		fail(
@@ -115,6 +132,13 @@ function comfyUiEndpoint(override?: string): string {
 		url = new URL(raw);
 	} catch {
 		fail(`PI_BLENDER_COMFYUI_URL is not a URL: "${raw}". Expected something like http://127.0.0.1:8188.`);
+	}
+	if (fromOverride && !isLoopbackHost(url.hostname)) {
+		fail(
+			`comfyUrl must be a loopback address, not "${url.hostname}": the override is for code and ` +
+				`tests, and it is not exposed on the tool. Set PI_BLENDER_COMFYUI_URL to reach a ` +
+				`ComfyUI instance on another host.`,
+		);
 	}
 	return url.href.replace(/\/+$/, "");
 }
@@ -211,6 +235,30 @@ async function generateWithComfyUi(
 }
 
 /**
+ * An empty blend for a blockout to land in.
+ *
+ * A blockout is deliberately not merged into model.blend, so it needs a
+ * container of its own, and the bridge will only open a blend that exists. The
+ * scene is emptied first: `createBlankBlend` keeps Blender's startup cube and
+ * camera, which would then sit in every blockout file and be appended along with
+ * the geometry it is meant to hold.
+ */
+async function createBlockoutBlend(blendPath: string, cwd: string, signal?: AbortSignal): Promise<void> {
+	await runBlenderJson({
+		cwd,
+		scriptSource: `
+import bpy, json, sys
+payload = json.loads(sys.argv[sys.argv.index("--") + 1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.wm.save_as_mainfile(filepath=payload["blendPath"])
+print("__PI_BLENDER_JSON_START__" + json.dumps({"blendPath": payload["blendPath"]}) + "__PI_BLENDER_JSON_END__")
+`,
+		payload: { blendPath },
+		signal,
+	});
+}
+
+/**
  * Import a file into the workspace as a blockout and record where it came from.
  *
  * The bridge owns the geometry work -- collection, tag, normalisation -- because
@@ -234,6 +282,8 @@ async function importBlockout(
 	// that is gone by the next turn.
 	const storedPath = join(blockoutsDir, `${id}${extname(sourcePath).toLowerCase()}`);
 	if (sourcePath !== storedPath) await copyFile(sourcePath, storedPath);
+
+	if (!existsSync(blendPath)) await createBlockoutBlend(blendPath, options.cwd, options.signal);
 
 	const response = await requestBridge<BridgeBlockoutResponse>({
 		payload: {
@@ -286,7 +336,7 @@ async function importBlockout(
 		success: true,
 		status: "imported",
 		provider,
-		blockoutPath: sourcePath,
+		blockoutPath: storedPath,
 		blendPath: response.blendPath ?? blendPath,
 		collection: response.collection ?? "Blockout",
 		objects: response.objects ?? [],
