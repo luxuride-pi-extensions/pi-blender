@@ -136,10 +136,15 @@ def reset_scene() -> bpy.types.Scene:
     camera.type = "ORTHO"
     # The frame is 4 x 3 metres at 400x300, i.e. exactly 100 px per metre, and
     # the camera is fixed for every case so a silhouette diff is a diff of the
-    # object and not of the framing.
+    # object and not of the framing. It is centred at z=1.3 rather than 1.5 so
+    # the ground plane (z=0, where every object stands) sits 0.2 m above the
+    # bottom edge: a clean render that is cropped by the frame would make the
+    # wrong_scale rule ambiguous, and "a whole object" is what a pass label has
+    # to mean. The highest subject (the blockout figure, 2.65 m) still clears
+    # the top edge by 0.15 m.
     camera.ortho_scale = 4.0
     camera_object = bpy.data.objects.new("fixture-camera", camera)
-    camera_object.location = (0.0, -8.0, 1.5)
+    camera_object.location = (0.0, -8.0, 1.3)
     camera_object.rotation_euler = (math.pi / 2, 0.0, 0.0)
     scene.collection.objects.link(camera_object)
     scene.camera = camera_object
@@ -468,7 +473,7 @@ def main() -> None:
             "worldColor": list(WORLD_COLOR),
             "keyLightWatts": KEY_LIGHT_WATTS,
             "fillLightWatts": FILL_LIGHT_WATTS,
-            "camera": {"type": "ORTHO", "orthoScale": 4.0, "location": [0.0, -8.0, 1.5], "rotation": [math.pi / 2, 0.0, 0.0]},
+            "camera": {"type": "ORTHO", "orthoScale": 4.0, "location": [0.0, -8.0, 1.3], "rotation": [math.pi / 2, 0.0, 0.0]},
             "blenderVersion": bpy.app.version_string,
             "totalBytes": sum(entry["bytes"] for entry in entries),
         },

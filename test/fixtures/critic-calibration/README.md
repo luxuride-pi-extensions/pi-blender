@@ -2,9 +2,11 @@
 
 Eight real Blender renders, labelled, used to check that a critic's verdict
 tracks the picture. `scripts/critic-calibration.mjs` scores a critic against
-this manifest; `test/critic-calibration.test.mjs` checks that the labels are
-true of the pixels and that the deterministic proxy can reproduce them without
-reading them.
+this manifest. `test/critic-calibration-pixels.test.mjs` checks that each label
+is true of the pixels and that the deterministic proxy reproduces it without
+reading it; `test/critic-calibration.test.mjs` checks the manifest itself —
+hashes, budget, threshold table, and that the proxy's predictions do not move
+when the labels are inverted.
 
 The neighbouring `test/fixtures/critic-calibration.json` is a *format* fixture:
 a handful of hand-written rows that agree with themselves. This directory is the
@@ -60,7 +62,13 @@ version:
 - 400×300, `Standard` view transform, black world, one key and one fill area
   light, fixed wattages.
 - Orthographic camera at 100 px/m, so a metre in the scene is 100 pixels in the
-  render and the silhouette rules can be checked against geometry by hand.
+  render and the silhouette rules can be checked against geometry by hand. The
+  frame is 4×3 m centred at z=1.3, so the ground plane sits 0.2 m above the
+  bottom edge and the whole of every clean subject is inside all four edges.
+  That is deliberate: `wrong_scale` is frame contact plus high coverage, so a
+  clean render that was itself cropped would make the defect and the pass label
+  measure the same signal. The test suite asserts the clean renders' probe
+  bounds never touch an edge; if you re-frame the camera, keep that property.
 
 Reproduce with Blender 5.3:
 
@@ -141,9 +149,9 @@ to call it. A transcript is either a bare array of
    needs widening for a real gap between clean and defective, or the case is one
    the proxy cannot see. Record a known miss in the gap list below rather than
    loosening a threshold until it passes.
-5. Keep the set's total committed size under 500 KB. It is 213 KB now, so a new
-   case has room, but not much: prefer geometry and lighting defects over more
-   resolution.
+5. Keep the set's total committed size under 500 KB. The renders are 214 KB
+   (219 271 bytes) now, so a new case has room, but not much: prefer geometry and
+   lighting defects over more resolution.
 
 ## What the proxy can and cannot see
 
@@ -190,3 +198,43 @@ axis MAE 0 (7 labelled expectations)
 Axis MAE is 0 because each rule sets exactly the axes its label asserts and
 leaves the rest at full marks — it is a check that the axes are wired to the
 right defects, not evidence that a model scores nuances well.
+
+### What those numbers do and do not establish
+
+**This is an in-sample fit.** The thresholds in the table above were chosen by
+measuring these same eight renders — the spacing paragraph is literally the
+record of that. So recall 1 and MAE 0 mean two things and only two things:
+
+- every label in the manifest is *reachable from pixel measurements* (a grey
+  palette can be read as `flat_material`, a 17% lateral silhouette loss as
+  `missing_handle`), and
+- the rules are wired to real renders rather than to the labels — the test suite
+  scores the set twice, once as shipped and once with every `truth` inverted, and
+  requires byte-identical reviews.
+
+They do **not** estimate recall on renders these thresholds were not tuned
+against. Eight images fitted by hand would report 1.0 even if the rules were
+brittle. What would make the number out-of-sample: add a case to `CASES`, render
+it, commit the manifest *before* looking at the proxy's verdict, and score it
+blind (step 4 above); or hold out a second set — a different object family,
+rendered by someone who did not read `DEFAULT_THRESHOLDS` — and score that.
+Until one of those exists, read `recall 1` as "reachable and wired", not as
+"calibrated".
+
+That recall can fall is checked, not assumed. The pixel test re-scores the same
+eight renders with deliberately mutated thresholds: `flatNeutralShare: 0.999`
+hides exactly one defect (recall 0.8, `missed: ["flat_material"]`, pass agreement
+0.875); thresholds no pixel can reach hide all five (recall 0, false-pass rate 1,
+agreement 0.375); and a loose `flatNeutralShare: 0.3` invents a `flat_material`
+defect on the clean figure (agreement 0.875, spurious 1). A proxy that read the
+labels would score 1.0 under every one of those.
+
+## Tests
+
+`test/critic-calibration.test.mjs` (manifest shape, hashes, size budget, the
+threshold table, label-blindness with a stub probe, the recall-can-drop
+assertions) imports no Blender code, so it runs in CI's core-free step.
+`test/critic-calibration-pixels.test.mjs` measures the real pixels with
+`blenderImageProbe`, checks each labelled defect is visible, and scores the set;
+it needs the manager-core checkout and is picked up by the core job
+automatically.
