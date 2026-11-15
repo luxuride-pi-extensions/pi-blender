@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+
+import { BRIDGE_PROBES_DIR } from "./paths.mjs";
 import test from "node:test";
 
 function blender() {
@@ -15,7 +17,7 @@ const argv = blender();
 test("sculpt strokes are local, closed and reproducible", { skip: argv ? false : "no headless Blender available" }, () => {
 	const result = spawnSync(
 		argv[0],
-		[...argv.slice(1), "--background", "--python", join(import.meta.dirname, "sculpt-strokes.py")],
+		[...argv.slice(1), "--background", "--python", join(BRIDGE_PROBES_DIR, "sculpt-strokes.py")],
 		{ encoding: "utf8", timeout: 180_000, env: { ...process.env, PYTHONPATH: join(import.meta.dirname, "..", "blender") } },
 	);
 	const output = `${result.stdout}\n${result.stderr}`;

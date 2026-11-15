@@ -5,12 +5,13 @@
  * arrived at by getting them wrong first.
  *
  * The copy: launch.ts resolves the two scripts it hands to Blender
- * (`blank-bootstrap.py`, `live-bridge.py`) relative to its OWN location, which
- * is what made a renamed checkout invisible to it in the first place. So the
- * only honest way to test the "the bundled scripts are missing" guard is a
- * directory that has the TypeScript and not the Python — which means copying,
- * because the real checkout has to stay intact for the tests that launch
- * successfully.
+ * (`blank-bootstrap.py`, `live-bridge.py`) through config.ts, and the Python
+ * lives in the GPL bridge package (LICENSING.md). Both the extension and the
+ * package are staged into a temp dir, so the copy resolves ITS OWN staged
+ * package rather than whatever this machine has installed — and the "scripts
+ * are missing" guard can be staged as an incomplete package or as no package at
+ * all, which are the two ways a real install breaks. Copying is also what keeps
+ * the real checkout intact for the tests that launch successfully.
  *
  * The child process: the launcher holds module state — the launch claim, the
  * supervisor's interval handle, the cached "assets are missing" flag, the
@@ -48,8 +49,17 @@ export function cleanupSandboxes() {
 	for (const dir of sandboxes.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
-/** A copy of the launcher in a directory of its own, scripts present or not. */
-export function stageExtension({ withScripts }) {
+/**
+ * A copy of the launcher in a directory of its own, with a bridge package.
+ *
+ * `withScripts: false` stages a package that is present but incomplete — it has
+ * `live-bridge.py` (which is what makes a directory a bridge package at all) and
+ * no `blank-bootstrap.py`. `withBridge: false` stages no package, so resolution
+ * itself fails. Those are different failures on purpose: one is a damaged
+ * install, the other a missing dependency, and the extension must name the right
+ * one for each.
+ */
+export function stageExtension({ withScripts, withBridge = true }) {
 	const dir = mkdtempSync(join(tmpdir(), "pi-blender-launch-"));
 	sandboxes.push(dir);
 	for (const rel of LAUNCH_SOURCES) {
@@ -57,12 +67,11 @@ export function stageExtension({ withScripts }) {
 		mkdirSync(dirname(dest), { recursive: true });
 		copyFileSync(join(REPO, rel), dest);
 	}
-	// config.ts resolves the assets dir from its OWN location, so this is the
-	// only way the two bundled scripts can be made to not exist.
-	if (withScripts) {
-		for (const name of ["blank-bootstrap.py", "live-bridge.py"]) {
-			writeFileSync(join(dir, "blender", name), "# staged\n");
-		}
+	if (withBridge) {
+		const bridgeBlender = join(dir, "bridge", "blender");
+		mkdirSync(bridgeBlender, { recursive: true });
+		writeFileSync(join(bridgeBlender, "live-bridge.py"), "# staged\n");
+		if (withScripts) writeFileSync(join(bridgeBlender, "blank-bootstrap.py"), "# staged\n");
 	}
 	return dir;
 }
@@ -137,6 +146,10 @@ export function runDriver(
 		env: {
 			...process.env,
 			PI_BLENDER_BRIDGE_DIR: bridge,
+			// The staged package, not this machine's: the copy's config.ts would
+			// otherwise resolve a real sibling checkout and every "missing
+			// script" case would pass by finding the Python it was not given.
+			PI_BLENDER_BRIDGE_ASSETS_DIR: join(staged, "bridge"),
 			PI_BLENDER_NO_UI: "",
 			PI_SUBAGENT_CHILD: subagentChild ? "1" : "",
 			LAUNCH: launched ? "1" : "0",

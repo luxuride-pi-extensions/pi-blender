@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getBlenderAssetsDir, getBlenderBridgeDir } from "../config.js";
+import { getBridgeAssetsDir, getBlenderBridgeDir } from "../config.js";
 import { ensureLiveBridgeLaunched, isLiveBridgeAlive } from "../launch.js";
 import { isHeartbeatFresh, readHeartbeatBlendPath } from "./liveness.js";
 import type {
@@ -119,7 +119,7 @@ async function runHeadlessBridgeRequest<T>(options: {
 	const result = await runBlenderProcess({
 		cwd: options.cwd ?? process.cwd(),
 		blendPath: typeof options.payload.blendPath === "string" ? options.payload.blendPath : undefined,
-		scriptPath: join(getBlenderAssetsDir(), "live-bridge.py"),
+		scriptPath: join(getBridgeAssetsDir(), "live-bridge.py"),
 		// Blender has to be told to serve rather than poll. The flag goes AFTER
 		// the `--`: in the position where it belongs semantically, Blender's
 		// argument parser reads it as a blend filename and refuses to start

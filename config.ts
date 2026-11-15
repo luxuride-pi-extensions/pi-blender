@@ -3,7 +3,10 @@
  * blender module can run unmodified under the stock pi extension loader.
  *
  * Paths:
- *  - assets dir: this extension's `blender/` directory (scripts + skills)
+ *  - assets dir: this extension's `blender/` directory (skills + agent prompts)
+ *  - bridge assets: the GPL-3.0 `@luxuride-pi/blender-bridge` package's
+ *    `blender/` directory (the Python that runs inside Blender) — see
+ *    resolveBridgePackageDir(), and LICENSING.md for why it is elsewhere
  *  - bridge dir: $PI_BLENDER_BRIDGE_DIR (supports `~/`, used EXACTLY as given)
  *    or $XDG_CACHE_HOME/pi-blender/bridge/<instance-id>
  *  - temp dir:   $XDG_CACHE_HOME/pi-blender/tmp  (flatpak-visible)
@@ -36,7 +39,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,16 +139,140 @@ export function getBlenderBridgeRootDir(): string {
 	return join(xdgCacheHome(), "pi-blender", "bridge");
 }
 
+/**
+ * Skills and agent prompts: this extension's own `blender/` directory.
+ *
+ * Markdown only. Everything Python lives in the bridge package (see below), so
+ * this directory is MIT like the rest of the extension.
+ */
 export function getBlenderAssetsDir(): string {
 	return join(EXTENSION_DIR, "blender");
 }
 
+/**
+ * The GPL-3.0 Python half, in its own package.
+ *
+ * The split is a license boundary, not a preference: scripts loaded into the
+ * Blender process and calling bpy are a combined program with Blender and have
+ * to be GPL, while this extension spawns Blender as a child process and only
+ * exchanges JSON — so it can be MIT. Two packages keep one license per boundary
+ * instead of one identifier claiming both. See LICENSING.md.
+ */
+export const BRIDGE_PACKAGE_NAME = "@luxuride-pi/blender-bridge";
+
+/**
+ * Env var pointing at the bridge package root (the directory holding `blender/`).
+ *
+ * Exists for the cases npm resolution cannot cover: a checkout being developed
+ * beside this one, a vendored copy, or a test harness that stages the Python
+ * somewhere temporary to prove a missing bridge is reported rather than assumed.
+ */
+export const ENV_BRIDGE_ASSETS_DIR = "PI_BLENDER_BRIDGE_ASSETS_DIR";
+
+let bridgePackageDir: string | undefined;
+
+/**
+ * Where `@luxuride-pi/blender-bridge` is installed, resolved once.
+ *
+ * Order matters: the env var is an explicit override, npm resolution is the
+ * normal case (the extension declares the package as a dependency), and the
+ * remaining candidates cover this project's own development layout, where the
+ * extension is symlinked out of a checkout and installed with its sibling.
+ *
+ * A missing bridge is a HARD ERROR. Substituting a directory that happens not
+ * to contain the scripts would turn an incomplete install into "Blender will
+ * not launch" several minutes later, from a path the user never chose; naming
+ * every candidate now is the only message that tells them what to do.
+ */
+export function resolveBridgePackageDir(): string {
+	if (bridgePackageDir) return bridgePackageDir;
+
+	const override = process.env[ENV_BRIDGE_ASSETS_DIR]?.trim();
+	if (override) {
+		// An explicit override is authoritative: falling back to another location
+		// when it is wrong would run the Python the user explicitly did not
+		// point at, which is the one outcome an override must never produce.
+		const dir = expandBridgeOverride(override);
+		if (!hasBridgeScripts(dir)) {
+			throw new Error(
+				`${ENV_BRIDGE_ASSETS_DIR} is set to ${dir}, but there is no blender/live-bridge.py there. ` +
+					`Point it at the ${BRIDGE_PACKAGE_NAME} package root, or unset it to resolve the package normally.`,
+			);
+		}
+		bridgePackageDir = dir;
+		return dir;
+	}
+
+	const resolved = describeBridgeCandidates().find((dir) => hasBridgeScripts(dir));
+	if (!resolved) {
+		throw new Error(
+			`The Blender bridge package (${BRIDGE_PACKAGE_NAME}) is not installed: no directory among ` +
+				`${describeBridgeCandidates().join(", ")} contains blender/live-bridge.py. ` +
+				`Get it (git clone --depth 1 https://github.com/luxuride-pi-extensions/pi-blender-bridge ` +
+				`next to this checkout, or unpack the release asset named there), or set ` +
+				`${ENV_BRIDGE_ASSETS_DIR} to the package root. It is a separate package ` +
+				`because the Python is GPL-3.0-or-later -- see LICENSING.md.`,
+		);
+	}
+	bridgePackageDir = resolved;
+	return resolved;
+}
+
+function expandBridgeOverride(override: string): string {
+	const expanded = override === "~" ? homedir() : override.startsWith("~/") ? homedir() + override.slice(1) : override;
+	return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
+}
+
+/**
+ * Every place a bridge package could be, most specific first.
+ *
+ * Returned as strings rather than probed one by one so the failure message can
+ * list exactly what was tried — "not installed" without the list is a bug
+ * report nobody can act on.
+ */
+function describeBridgeCandidates(): string[] {
+	const candidates: string[] = [];
+
+	// 1. npm resolution, from the extension's own location. Resolving
+	//    package.json rather than the module keeps this working whether or not
+	//    the package ships an entry point.
+	try {
+		const require = createRequire(import.meta.url);
+		candidates.push(dirname(require.resolve(`${BRIDGE_PACKAGE_NAME}/package.json`)));
+	} catch {
+		// Not installed as a dependency. The layout candidates below still apply.
+	}
+
+	// 2. Sibling checkout: this project's development layout, where the
+	//    extension is symlinked out of ~/.pi/agent/git/.../pi-blender.
+	const parent = resolve(EXTENSION_DIR, "..");
+	candidates.push(join(parent, "pi-blender-bridge"), join(parent, "blender-bridge"));
+
+	// 3. Installed as a pi package in its own right (git: installs land here).
+	const extensionsDir = join(homedir(), ".pi", "agent", "extensions");
+	candidates.push(join(extensionsDir, "blender-bridge"), join(extensionsDir, "pi-blender-bridge"));
+
+	return candidates;
+}
+
+function hasBridgeScripts(dir: string): boolean {
+	return existsSync(join(dir, "blender", "live-bridge.py"));
+}
+
+/**
+ * The bridge package's `blender/` directory: the scripts Blender executes and
+ * the `sys.path` entry the generated run scripts import their modules from.
+ */
+export function getBridgeAssetsDir(): string {
+	return join(resolveBridgePackageDir(), "blender");
+}
+
 export function getBundledBlenderBridgePath(): string {
-	return resolve(join(getBlenderAssetsDir(), "live-bridge.py"));
+	return resolve(join(getBridgeAssetsDir(), "live-bridge.py"));
 }
 
 export function getBundledBlankBootstrapPath(): string {
-	return resolve(join(getBlenderAssetsDir(), "blank-bootstrap.py"));
+	return resolve(join(getBridgeAssetsDir(), "blank-bootstrap.py"));
 }
 
 export function getBlenderDocsReferenceDir(): string {

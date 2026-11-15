@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getBlenderAssetsDir } from "../config.js";
+import { getBridgeAssetsDir } from "../config.js";
 import type { UsageGuessOptions, UsageGuessResult } from "./types.js";
 import { fileExists, normalizeUserPath, normalizeWorkspacePath, runBlenderJson } from "./utils.js";
 import { readManifest } from "./workspace.js";
@@ -9,7 +9,7 @@ let cachedScript: string | null = null;
 
 async function getUsageGuessScript(): Promise<string> {
 	if (!cachedScript) {
-		const scriptPath = join(getBlenderAssetsDir(), "usage_guess.py");
+		const scriptPath = join(getBridgeAssetsDir(), "usage_guess.py");
 		cachedScript = await readFile(scriptPath, "utf-8");
 	}
 	return cachedScript;

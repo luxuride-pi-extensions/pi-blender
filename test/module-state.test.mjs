@@ -4,12 +4,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const moduleDir = fileURLToPath(new URL("../blender", import.meta.url));
+import { BRIDGE_ASSETS_DIR } from "./paths.mjs";
+
+const moduleDir = BRIDGE_ASSETS_DIR;
 const python = spawnSync("python3", ["--version"], { encoding: "utf-8" });
-const skip = python.error ? "python3 is required to exercise blender/module_state.py" : false;
+const skip = python.error ? "python3 is required to exercise the bridge package's module_state.py" : false;
 
 function runPython(source) {
 	const result = spawnSync("python3", ["-c", source], {

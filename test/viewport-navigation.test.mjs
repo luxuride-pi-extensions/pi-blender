@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { loadTs } from "./paths.mjs";
+import { BRIDGE_ASSETS_DIR, loadTs } from "./paths.mjs";
 
 const REPO = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const load = (name) => loadTs(join(REPO, name));
@@ -118,7 +118,7 @@ test("without watch window, blenderFocusView reports moved: false with reason an
 });
 
 test("live-bridge.py defines handle_switch_workspace and handle_focus_view", () => {
-	const bridgePy = readFileSync(new URL("../blender/live-bridge.py", import.meta.url), "utf8");
+	const bridgePy = readFileSync(join(BRIDGE_ASSETS_DIR, "live-bridge.py"), "utf8");
 	assert.match(bridgePy, /def handle_switch_workspace\(/);
 	assert.match(bridgePy, /def handle_focus_view\(/);
 	assert.match(bridgePy, /request_type == "switch-workspace"/);

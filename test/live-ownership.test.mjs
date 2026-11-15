@@ -10,9 +10,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { join } from "node:path";
+
+import { BRIDGE_ASSETS_DIR } from "./paths.mjs";
 
 const moduleSource = readFileSync(new URL("../blender/module.ts", import.meta.url), "utf8");
-const bridgeSource = readFileSync(new URL("../blender/live-bridge.py", import.meta.url), "utf8");
+const bridgeSource = readFileSync(join(BRIDGE_ASSETS_DIR, "live-bridge.py"), "utf8");
 
 test("a live run reads ownership from the manifest and sends both halves", () => {
 	assert.match(moduleSource, /const ownership = collectModuleOwnership\(manifest, moduleName\)/);

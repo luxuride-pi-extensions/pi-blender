@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { join } from "node:path";
-import { getBlenderAssetsDir } from "../config.js";
+import { getBridgeAssetsDir } from "../config.js";
 
 const RESPONSE_PREFIX = "__PI_WARM__";
 
@@ -84,7 +84,7 @@ function spawnWorker(
 	cwd: string,
 	onSpawn?: (pid: number) => void,
 ): WarmWorker {
-	const driver = join(getBlenderAssetsDir(), "warm_worker.py");
+	const driver = join(getBridgeAssetsDir(), "warm_worker.py");
 	const child = spawn(command, [...args, "--background", "--factory-startup", "--python", driver], {
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],
