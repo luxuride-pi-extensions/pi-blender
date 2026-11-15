@@ -14,10 +14,17 @@ Licensing:
 
 - Blender Python API documentation, operator signatures, parameter descriptions,
   and type definitions located in `docs/reference/api/` are derived from the
-  Blender source code and docstrings, licensed under the GNU General Public
-  License (GPL), version 2 or later (and GPL version 3).
+  Blender source code and its docstrings. Blender 4.2 is licensed under the GNU
+  General Public License version 3 or later, so these excerpts are
+  GPL-3.0-or-later. The full license text is in `COPYING.GPL-3.0` beside this
+  file.
   Reference: https://docs.blender.org/api/4.2/
   License details: https://www.gnu.org/licenses/gpl-3.0.html
+
+Neither directory is MIT. The MIT license in this repository's root `LICENSE`
+covers the extension's own code, skills and prompts; it does not cover, and does
+not attempt to relicense, anything under `docs/reference/api/` or
+`docs/reference/manual/`.
 
 Copyright (C) Blender Foundation, Blender Contributors.
 All rights and trademarks belong to their respective owners.
