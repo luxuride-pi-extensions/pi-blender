@@ -197,12 +197,37 @@ export interface BlenderModuleRunRecord {
  * live work even though there is no result to apply.
  */
 export type BranchRunStatus = "running" | "staged" | "blocked" | "applied" | "unchanged" | "conflict" | "failed";
+/**
+ * How far one generation's picture moved from the previous one, measured on the
+ * two panels' raw pixels before either is fitted into its tile.
+ *
+ * `meanAbsDiff` is a distance — 0.0 means the pixels are identical and a larger
+ * value means more change. `structuralScore` is the same measurement as a score:
+ * 1.0 is identical and lower means more change. The two names carry opposite
+ * polarity on purpose; neither is perceptual, so `changedPixelRatio` (the
+ * fraction of pixels whose worst channel moved by more than 0.02) sits beside
+ * them and says how much of the frame moved rather than how bright the change
+ * was. `widthMatch` is the size check: when the two pictures loaded at
+ * different dimensions nothing can be differenced, every number is null, and
+ * `warnings` carries the reason the heatmap is missing.
+ */
+export interface ComparisonDiff {
+	meanAbsDiff: number | null;
+	maxAbsDiff: number | null;
+	structuralScore: number | null;
+	changedPixelRatio: number | null;
+	widthMatch: boolean;
+	warnings: string[];
+}
+
 /** One generation's stored visual evidence, under modules/<name>/iterations/NN. */
 export interface ReviewPacket {
 	dir: string;
 	renderPath?: string;
 	reviewPath?: string;
 	comparePath?: string;
+	/** What the comparison sheet's DIFF panel shows; null when there was nothing to compare against. */
+	diff?: ComparisonDiff | null;
 	previousDir?: string;
 	referencePath?: string;
 }
@@ -2985,6 +3010,8 @@ export interface CompareOptions {
 
 export interface CompareResult extends MontageResult {
 	labels: { baseline: string; current: string };
+	/** The difference between the two generations of each view, when it could be measured. */
+	diff?: ComparisonDiff | null;
 	baseline: {
 		blendPath: string;
 		panelPaths: string[];

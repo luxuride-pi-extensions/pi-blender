@@ -1091,6 +1091,104 @@ test("a painted material is not reported as flat or near-monochrome", { skip }, 
 	}
 });
 
+test("an identical generation reports a zero difference and no DIFF panel", { skip }, async () => {
+	// The comparison sheet says "nothing changed" two ways: the numbers in
+	// packet.json and a third panel drawn from the difference. A rebuild that
+	// renders the same pixels has to come out as 0.0, not as a small number a
+	// reader has to interpret, and it must not gain a panel.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "same", replaceBox("SamePart", 2, 2, 2));
+		const first = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "same",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		const second = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "same",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		assert.ok(second.reviewPacket?.comparePath, `second packet: ${JSON.stringify(second.reviewPacket)}`);
+		const diff = second.reviewPacket.diff;
+		assert.ok(diff, `the packet carries a difference: ${JSON.stringify(second.reviewPacket)}`);
+		assert.equal(diff.meanAbsDiff, 0, "an identical generation differs by 0");
+		assert.equal(diff.structuralScore, 1, "structuralScore is 1.0 only when identical");
+		assert.equal(diff.changedPixelRatio, 0, "no pixel moved");
+		assert.equal(diff.widthMatch, true, "the two panels loaded at the same size");
+		assert.deepEqual(diff.warnings, [], "nothing to warn about");
+		const comparisonImage = png.decodePng(readFileSync(second.reviewPacket.comparePath));
+		assert.equal(comparisonImage.width, 1304, "identical generations keep the two-panel sheet");
+		const packet = JSON.parse(readFileSync(join(second.reviewPacket.dir, "packet.json"), "utf-8"));
+		assert.deepEqual(packet.diff, diff, "packet.json stores the same number the sheet reported");
+		assert.equal(first.reviewPacket.comparePath ?? undefined, undefined);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("an added part reports a nonzero difference and a DIFF panel", { skip }, async () => {
+	// The failure this exists to catch is the one a side-by-side sheet hides: a
+	// part that grew a bump is easy to miss at a glance and shows up as a
+	// number here. The change has to be in the SILHOUETTE to be visible at all:
+	// the camera reframes the subject from its own bounds, so translating a
+	// part moves the camera with it and renders the same picture.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "bump", replaceBox("BumpPart", 2, 2, 2));
+		await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "bump",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+
+		writeScript(
+			ws.workspacePath,
+			"bump",
+			`${replaceBox("BumpPart", 2, 2, 2)}\n${box("BumpNub", 1.0, 1.0, 1.0, 1.2, 1.2, 0.8)}`,
+		);
+		const changed = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "bump",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		const diff = changed.reviewPacket?.diff;
+		assert.ok(diff, `the packet carries a difference: ${JSON.stringify(changed.reviewPacket)}`);
+		assert.ok(diff.meanAbsDiff > 0, `an added part differs: ${JSON.stringify(diff)}`);
+		assert.ok(diff.structuralScore < 1, `structuralScore drops below 1.0: ${JSON.stringify(diff)}`);
+		assert.ok(diff.changedPixelRatio > 0, `pixels changed: ${JSON.stringify(diff)}`);
+		assert.deepEqual(diff.warnings, []);
+		assert.equal(
+			Math.abs(1 - diff.structuralScore - diff.meanAbsDiff) < 1e-6,
+			true,
+			"structuralScore is 1.0 - meanAbsDiff",
+		);
+		const comparisonImage = png.decodePng(readFileSync(changed.reviewPacket.comparePath));
+		assert.equal(comparisonImage.width, 1952, "current, previous and the DIFF panel on one row");
+		const packet = JSON.parse(readFileSync(join(changed.reviewPacket.dir, "packet.json"), "utf-8"));
+		assert.deepEqual(packet.diff, diff, "packet.json stores the difference the sheet was labelled with");
+		assert.deepEqual(
+			packet.panels.map((panel) => panel.name),
+			["current", "previous 1"],
+			"the stored panels are still the generations, not the derived heatmap",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("a review sheet renders the plan's other angles in the same run", { skip }, async () => {
 	// One 3/4 image cannot show a collapsed back or left/right asymmetry. The
 	// sheet is composed inside the run process from panels rendered there, so it

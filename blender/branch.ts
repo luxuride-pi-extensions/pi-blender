@@ -193,7 +193,7 @@ from module_state import (
     state_digest as compute_state_digest,
     widen_apply_objects,
 )
-from render_scene import compose_review_sheet, render_scene
+from render_scene import compose_comparison_sheet, compose_review_sheet, render_scene
 from validation import validate as validate_preflight
 
 imports_finished_at = time.time()
@@ -882,8 +882,11 @@ if exit_code == 0 and packet_dir and render_result:
         # claim a photograph is iteration N-1. Compose only once there is a
         # previous generation to compare against.
         if len(panel_files) >= 2 and any(panel["name"].startswith("previous") for panel in panel_files):
-            compare_path = compose_review_sheet(panel_files, os.path.join(packet_dir, "compare.png"), columns=len(panel_files))
-            compare_path = compare_path["path"]
+            comparison = compose_comparison_sheet(panel_files, os.path.join(packet_dir, "compare.png"))
+            compare_path = comparison["path"]
+            # The score the DIFF panel shows, kept beside the sheet so a reader
+            # of packet.json sees the same number the panel was labelled with.
+            packet["diff"] = comparison.get("diff")
         packet["compare"] = compare_path
         packet["panels"] = panel_files
         with open(os.path.join(packet_dir, "packet.json"), "w", encoding="utf-8") as handle:
@@ -893,6 +896,7 @@ if exit_code == 0 and packet_dir and render_result:
             "renderPath": current_render,
             "reviewPath": current_review if os.path.exists(current_review) else None,
             "comparePath": compare_path,
+            "diff": packet.get("diff"),
             "previousDir": previous_dir,
             "referencePath": reference_copy if packet["reference"] else None,
         }

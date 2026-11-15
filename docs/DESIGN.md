@@ -454,7 +454,20 @@ Start pi in any project dir. The extension:
   `compare.png`, `packet.json`). The comparison is composed from the current
   and previous packets, plus a named `referenceId` when given, so it costs no
   Blender process, and `blender_compare` returns that stored sheet for the
-  default comparison instead of re-rendering both checkpoints. The packet lives
+  default comparison instead of re-rendering both checkpoints. That sheet also
+  reports what changed between the two generations, measured on both panels'
+  raw loaded pixels before either is fitted into its tile: the composer inserts
+  a panel labelled `DIFF - MEAN <n>` (a heatmap of the per-pixel maximum RGB
+  change, dark to amber to red to white, composited on the sheet's dark ground
+  so a transparent panel cannot break the ramp) and returns `diff` with
+  `meanAbsDiff` (0.0 is identical), `maxAbsDiff`, `structuralScore` (the same
+  measurement flipped so 1.0 is identical), `changedPixelRatio` (fraction of
+  pixels whose worst channel moved more than 0.02) and `widthMatch`. The
+  measurement is numeric, not perceptual: it answers "did anything move" where
+  a side-by-side sheet only answers "does it look wrong". When the panels load
+  at different sizes the heatmap is skipped, the sheet stays the plain
+  side-by-side, and `diff.warnings` carries the reason, because a silence there
+  would read as a zero difference. The packet lives
   outside `runs/NN`, which is the directory checkpoint retention prunes.
   one image. That is how a back, profile or asymmetry finding becomes visible
   without a second process or a second image.

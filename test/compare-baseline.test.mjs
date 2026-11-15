@@ -24,9 +24,13 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import { loadTs } from "./paths.mjs";
 
-const { resolvePreviousCheckpoint } = await loadTs("../blender/compare.ts");
+const { resolvePreviousCheckpoint, storedPacketComparison } = await loadTs("../blender/compare.ts");
 
 const MODULE = "table-top";
 const OTHER = "door-handle";
@@ -226,4 +230,141 @@ test("a run with an unrecorded iteration still names its checkpoint", () => {
 		checkpointPath: "/w/runs/01/pre-01.blend",
 		iteration: undefined,
 	});
+});
+// --- the difference a stored packet already measured ----------------------
+
+/** Minimal RGBA PNG, so a stored sheet can be decoded without Blender. */
+function encodePng(width, height) {
+	const raw = Buffer.alloc(height * (width * 4 + 1));
+	for (let y = 0; y < height; y++) {
+		const rowStart = y * (width * 4 + 1);
+		raw[rowStart] = 0;
+		for (let x = 0; x < width; x++) raw[rowStart + 1 + x * 4] = 32;
+	}
+	const chunk = (type, body) => {
+		const out = Buffer.alloc(body.length + 12);
+		out.writeUInt32BE(body.length, 0);
+		out.write(type, 4, "ascii");
+		body.copy(out, 8);
+		out.writeUInt32BE(crc32(out.subarray(4, 8 + body.length)), 8 + body.length);
+		return out;
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(width, 0);
+	ihdr.writeUInt32BE(height, 4);
+	ihdr[8] = 8;
+	ihdr[9] = 6;
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		chunk("IHDR", ihdr),
+		chunk("IDAT", deflateSync(raw)),
+		chunk("IEND", Buffer.alloc(0)),
+	]);
+}
+
+/**
+ * A workspace manifest whose latest branch run left a comparison packet.
+ *
+ * Built by hand rather than by running Blender: the question here is what the
+ * stored comparison REPORTS, and a real render would only add a Blender start
+ * between the packet and the answer.
+ */
+function packetWorkspace(packetRecord) {
+	const root = mkdtempSync(join(tmpdir(), "compare-packet-"));
+	const packetDir = join(root, "modules", MODULE, "iterations", "02");
+	const previousDir = join(root, "modules", MODULE, "iterations", "01");
+	const comparePath = join(packetDir, "compare.png");
+	mkdirSync(packetDir, { recursive: true });
+	writeFileSync(comparePath, encodePng(1304, 496));
+	writeFileSync(
+		join(packetDir, "packet.json"),
+		JSON.stringify({
+			iteration: 2,
+			panels: [
+				{ name: "current", file: join(packetDir, "review.png") },
+				{ name: "previous 1", file: join(previousDir, "review.png") },
+			],
+			...packetRecord,
+		}),
+		"utf-8",
+	);
+	const manifest = {
+		workspacePath: root,
+		manifestPath: join(root, "workspace.json"),
+		branchRuns: [
+			{
+				module: MODULE,
+				sequence: 1,
+				iteration: 2,
+				reviewPacket: {
+					dir: packetDir,
+					comparePath,
+					previousDir,
+				},
+			},
+		],
+		moduleRuns: [],
+	};
+	return { manifest, root };
+}
+
+const MEASURED = {
+	meanAbsDiff: 0.0125,
+	maxAbsDiff: 0.63,
+	structuralScore: 0.9875,
+	changedPixelRatio: 0.04,
+	widthMatch: true,
+	warnings: [],
+};
+
+test("a stored packet reports the difference stored beside its sheet", () => {
+	// The packet's diff is the number the DIFF panel was LABELLED with. Reading
+	// it back is what keeps the sheet and the reported score from disagreeing;
+	// recomputing it here would let them drift.
+	const { manifest, root } = packetWorkspace({ diff: MEASURED });
+	try {
+		const result = storedPacketComparison({ moduleName: MODULE, workspace: root }, manifest);
+		assert.ok(result, "the packet qualifies as the default comparison");
+		assert.deepEqual(result.diff, MEASURED);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a packet that skipped the heatmap carries the warning instead of a number", () => {
+	// The size-mismatch fallback: a review.png sheet compared against a single
+	// render.png cannot be differenced. The sheet stays side by side, and the
+	// only honest thing the tool can say about the difference is why it has none.
+	const skipped = {
+		meanAbsDiff: null,
+		maxAbsDiff: null,
+		structuralScore: null,
+		changedPixelRatio: null,
+		widthMatch: false,
+		warnings: ["comparison panel dimensions differ; skipped difference heatmap"],
+	};
+	const { manifest, root } = packetWorkspace({ diff: skipped });
+	try {
+		const result = storedPacketComparison({ moduleName: MODULE, workspace: root }, manifest);
+		assert.ok(result, "a degraded comparison is still a comparison");
+		assert.equal(result.diff?.widthMatch, false);
+		assert.equal(result.diff?.meanAbsDiff, null, "no number is invented for incomparable panels");
+		assert.deepEqual(result.diff?.warnings, skipped.warnings);
+		assert.equal(result.panelPaths.length, 2, "the side-by-side sheet keeps its two panels");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a packet written before differences existed reports none, not zero", () => {
+	// An old packet has no diff, and 0.0 would read as "this generation is
+	// identical to the last one" -- a claim nobody measured.
+	const { manifest, root } = packetWorkspace({});
+	try {
+		const result = storedPacketComparison({ moduleName: MODULE, workspace: root }, manifest);
+		assert.ok(result);
+		assert.equal(result.diff ?? null, null);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
