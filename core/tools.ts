@@ -2251,6 +2251,12 @@ export const blenderCompareTool: CoreToolDefinition = {
 					missing.length > 0
 						? `Baseline is missing ${missing.join(", ")} — it predates those objects, so their absence in the ${result.labels.baseline} panels is not a render fault.`
 						: undefined,
+					result.diff && result.diff.meanAbsDiff !== null
+						? `Difference: meanAbsDiff ${result.diff.meanAbsDiff.toFixed(4)} (0 is identical), structuralScore ${result.diff.structuralScore?.toFixed(4)} (1 is identical), ${((result.diff.changedPixelRatio ?? 0) * 100).toFixed(2)}% of pixels changed`
+						: undefined,
+					result.diff && result.diff.warnings.length > 0
+						? `Warning: ${result.diff.warnings.join("; ")}`
+						: undefined,
 					result.note,
 				]
 					.filter((line): line is string => line !== undefined)

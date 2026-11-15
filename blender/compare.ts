@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { requestLiveBlenderCompare } from "./bridge.js";
 import { dispatchDeferredJob } from "./jobs.js";
 import { normalizeViews } from "./montage.js";
-import type { CompareOptions, CompareResult, DeferredJobHandle } from "./types.js";
+import type { CompareOptions, CompareResult, ComparisonDiff, DeferredJobHandle } from "./types.js";
 import { getIterationPaths, loadWorkspaceManifest } from "./workspace.js";
 import { decodePng } from "./png.js";
 
@@ -110,6 +110,7 @@ async function executeCompare(options: CompareOptions): Promise<CompareResult> {
 		layout: bridgeResult.layout,
 		subject: bridgeResult.subject,
 		labels: bridgeResult.labels,
+		diff: bridgeResult.diff ?? null,
 		baseline: bridgeResult.baseline,
 		framing: bridgeResult.framing,
 		note: bridgeResult.note,
@@ -128,7 +129,7 @@ async function executeCompare(options: CompareOptions): Promise<CompareResult> {
  * Only the default comparison qualifies: a caller naming a baseline or a view
  * is asking a question the packet was not built to answer.
  */
-function storedPacketComparison(
+export function storedPacketComparison(
 	options: CompareOptions,
 	manifest: Awaited<ReturnType<typeof loadWorkspaceManifest>>,
 ): CompareResult | null {
@@ -138,7 +139,11 @@ function storedPacketComparison(
 	const current = runs[0];
 	const packet = current?.reviewPacket;
 	if (!current || !packet?.comparePath || !packet.dir || !existsSync(packet.comparePath)) return null;
-	let record: { panels?: { name: string; file: string }[]; cameraPlan?: { shots?: unknown[] } };
+	let record: {
+		panels?: { name: string; file: string }[];
+		cameraPlan?: { shots?: unknown[] };
+		diff?: ComparisonDiff | null;
+	};
 	try {
 		record = JSON.parse(readFileSync(join(packet.dir, "packet.json"), "utf-8"));
 	} catch {
@@ -175,6 +180,9 @@ function storedPacketComparison(
 		subject: [],
 		framing: { fromUnion: true, family: "orbit", center: [0, 0, 0], radius: 0, distance: 0, views: [] },
 		labels: { baseline: baselineLabel, current: currentLabel },
+		// Read back from the packet rather than recomputed: the number stored
+		// beside the sheet is the one the DIFF panel was labelled with.
+		diff: record.diff ?? null,
 		baseline: {
 			blendPath: "",
 			panelPaths: previousPanel ? [previousPanel] : [],

@@ -302,7 +302,16 @@ Every headless generation also stores its pictures under
 `modules/<name>/iterations/NN/`, and once a previous generation exists the run
 composes `compare.png` there. Tell the critic to read that comparison sheet when
 the result reports `reviewPacket.comparePath`; it is the current, previous and
-(if you pass `referenceId`) reference in one image, with no extra render.
+(if you pass `referenceId`) reference in one image, with no extra render. That
+sheet also prints the difference between the generations: a panel labelled
+`DIFF - MEAN <n>` where the change is bright, and `reviewPacket.diff` with
+`meanAbsDiff` (0.0 is identical), `structuralScore` (1.0 is identical) and
+`changedPixelRatio` (how much of the frame moved at all). Quote the number to
+the critic when the question is "is this a regression" — a small, evenly lit
+shift that side-by-side panels hide shows up as a nonzero mean, and an
+identical rebuild scores exactly 0. If the two panels came out at different
+sizes the heatmap is skipped and `diff.warnings` says so; the sheet then shows
+only the side-by-side, which is NOT evidence of a zero difference.
 
 The critic loop is PER MODULE and that is the unit of iteration. A module is run,
 framed automatically and rendered from its own camera, judged, re-briefed and run
