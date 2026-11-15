@@ -30,6 +30,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_THRESHOLDS, probeFixtureImage, reviewManifest, scratchWorkspace } from "./critic-proxy.mjs";
+import { resolveJiti } from "./jiti-resolver.mjs";
 
 const AXES = ["accuracy", "geometry", "materials", "completeness", "quality", "validity"];
 const USAGE =
@@ -224,11 +225,15 @@ export function isManifest(input) {
  *
  * jiti, not a native import: these modules use NodeNext-style `./png.js`
  * specifiers that resolve to `.ts` files, which Node's own loader will not do.
- * The package declares jiti through its dev setup, and the pi runtime ships it,
- * so it is resolvable from the repo without adding a dependency.
+ *
+ * It is loaded by PATH from scripts/jiti-resolver.mjs, not by a bare
+ * `import("jiti")`: jiti is not a dependency of this package (it arrives nested
+ * under @earendil-works/pi-coding-agent), so a bare specifier works only in a
+ * checkout where it happens to be reachable and fails in CI. The resolver is the
+ * same one the test harness uses, for the same reason.
  */
 async function loadMeasurers() {
-	const { createJiti } = await import("jiti");
+	const { createJiti } = await import(resolveJiti());
 	const jiti = createJiti(import.meta.url, { interopDefault: true });
 	const [probe, png, workspace] = await Promise.all([
 		jiti.import("../blender/image-probe.ts"),

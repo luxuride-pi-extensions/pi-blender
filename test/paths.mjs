@@ -5,142 +5,19 @@
  * `node --experimental-strip-types` cannot resolve, so the tests load the
  * extension's own modules through jiti -- the same loader pi uses.
  *
- * The jiti path is resolved by picking the NEWEST release directory rather than
- * a pinned version, so upgrading pi does not silently break the suite. If that
- * ever resolves to something without jiti, the loader below says so by name
- * instead of failing as an unresolved module.
- *
- * Overridable, because the "obvious" location is not always the real one:
- *   PI_HOME          defaults to ~/.pi
- *   PI_AGENT_DIR     defaults to $PI_HOME/agent
- *   PI_INSTALL_DIR   defaults to $PI_AGENT_DIR/install
- *   PI_JITI_PATH     point straight at jiti's jiti.mjs
+ * Where jiti is lives in scripts/jiti-resolver.mjs, not here: the calibration
+ * CLI needs the same answer, and one implementation is the only way the two stay
+ * agreed. That module documents the resolution order and the PI_JITI_PATH
+ * override; this one re-exports the result for the suite.
  */
 
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
-export const PI_HOME = process.env.PI_HOME ?? join(homedir(), ".pi");
-export const PI_AGENT_DIR = process.env.PI_AGENT_DIR ?? join(PI_HOME, "agent");
-export const PI_INSTALL_DIR = process.env.PI_INSTALL_DIR ?? join(PI_AGENT_DIR, "install");
+import { PI_AGENT_DIR, PI_HOME, PI_INSTALL_DIR, newestPiRelease, resolveJiti } from "../scripts/jiti-resolver.mjs";
 
-/** Newest pi release directory by name (versions sort correctly as strings). */
-export function newestPiRelease() {
-	const releases = join(PI_INSTALL_DIR, "releases");
-	if (!existsSync(releases)) {
-		throw new Error(
-			`No pi install directory at ${releases}. Set PI_INSTALL_DIR, or PI_HOME if your pi ` +
-				`directory is not at ~/.pi.`,
-		);
-	}
-	const names = readdirSync(releases).filter((name) => existsSync(join(releases, name, "node_modules")));
-	if (names.length === 0) {
-		throw new Error(`No pi release under ${releases} contains a node_modules directory.`);
-	}
-	names.sort();
-	const newest = names[names.length - 1];
-	return join(releases, newest);
-}
-
-/**
- * newestPiRelease(), or undefined when there is no pi install to look at.
- *
- * A CI runner has no ~/.pi/agent/install/releases, and newestPiRelease throws
- * when it cannot find one. resolveJiti needs the answer as a candidate, not as
- * a precondition, so it asks this instead and falls through to the repo-local
- * copy.
- */
-function safeNewestPiRelease() {
-	try {
-		return join(newestPiRelease(), "node_modules", "jiti", "lib", "jiti.mjs");
-	} catch {
-		return undefined;
-	}
-}
-
-/**
- * jiti found inside THIS repo's node_modules tree.
- *
- * Two facts make this necessary rather than merely tidy.
- *
- * First: a plain `npm install` does NOT put jiti in node_modules/jiti. It is a
- * dependency of @earendil-works/pi-coding-agent, which ships its own
- * shrinkwrap and pins its own copy, so the installed location is
- * node_modules/@earendil-works/pi-coding-agent/node_modules/jiti. A hardcoded
- * <repo>/node_modules/jiti path finds nothing in a clean checkout.
- *
- * Second: `createRequire(...).resolve("jiti/package.json")` does not find it
- * either. Node's resolution walks node_modules DIRECTORIES UPWARD from the
- * requiring file; it never descends into another package's nested
- * node_modules. So the copy that is physically present is invisible to the one
- * API that looks for packages by name.
- *
- * Hence the tree walk. It is bounded (a few hundred entries) and only runs when
- * the by-name resolution has already failed. Returns undefined rather than
- * throwing, so a repo without jiti falls through to the next candidate and is
- * reported by name.
- */
-function jitiFromHere() {
-	const byName = (() => {
-		try {
-			const require = createRequire(join(import.meta.dirname, "..", "package.json"));
-			// Through the package's own exports map, not by string concatenation:
-			// "jiti/lib/jiti.mjs" is not an exported subpath, so resolving THAT
-			// fails with ERR_PACKAGE_PATH_NOT_EXPORTED even when jiti sits right
-			// there. "./package.json" IS exported, which makes it the one reliable
-			// way in when the package is reachable by name at all.
-			return join(dirname(require.resolve("jiti/package.json")), "lib", "jiti.mjs");
-		} catch {
-			return undefined;
-		}
-	})();
-	if (byName) return byName;
-
-	const root = join(import.meta.dirname, "..", "node_modules");
-	if (!existsSync(root)) return undefined;
-	for (const entry of readdirSync(root)) {
-		// Scoped packages nest one level deeper: node_modules/@scope/pkg.
-		const scopes = entry.startsWith("@") ? readdirSync(join(root, entry)).map((n) => join(entry, n)) : [entry];
-		for (const name of scopes) {
-			const found = join(root, name, "node_modules", "jiti", "lib", "jiti.mjs");
-			if (existsSync(found)) return found;
-		}
-	}
-	return undefined;
-}
-
-function resolveJiti() {
-	const explicit = process.env.PI_JITI_PATH;
-	if (explicit) {
-		if (!existsSync(explicit)) throw new Error(`PI_JITI_PATH is set to ${explicit}, which does not exist.`);
-		return explicit;
-	}
-	// The harness is loaded through jiti, so jiti is either next to the release we
-	// just found or inside this repo's own dependencies.
-	const candidates = [
-		// Guarded, not called eagerly: this list is BUILT before the .find(), so
-		// an installed-pi path that throws here would take the repo-local candidate
-		// down with it -- and that candidate is the one a CI checkout resolves to.
-		safeNewestPiRelease(),
-		// node_modules resolves WALKING UP the tree, so this finds a hoisted jiti
-		// as well as a nested one. Hardcoded <repo>/node_modules/jiti found
-		// nothing in a plain `npm install`, which puts jiti under
-		// node_modules/@earendil-works/pi-coding-agent/node_modules/, because
-		// that package ships its own shrinkwrap and pins its own jiti.
-		jitiFromHere(),
-		join(import.meta.dirname, "..", "node_modules", "jiti", "lib", "jiti.mjs"),
-	];
-	const found = candidates.filter(Boolean).find((path) => existsSync(path));
-	if (!found) {
-		throw new Error(
-			`Could not find jiti. Looked in:\n  ${candidates.filter(Boolean).join("\n  ")}\nSet PI_JITI_PATH to point ` +
-				`at it explicitly. The harness cannot load this project's TypeScript without it.`,
-		);
-	}
-	return found;
-}
+export { PI_AGENT_DIR, PI_HOME, PI_INSTALL_DIR, newestPiRelease };
 
 export const JITI = resolveJiti();
 
