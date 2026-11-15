@@ -30,6 +30,7 @@ const render = await loadTs(`${fileURLToPath(new URL("../blender/render.ts", imp
 const compare = await loadTs(`${fileURLToPath(new URL("../blender/compare.ts", import.meta.url))}`);
 const png = await loadTs(`${fileURLToPath(new URL("../blender/png.ts", import.meta.url))}`);
 const exportAsset = await loadTs(`${fileURLToPath(new URL("../blender/export-asset.ts", import.meta.url))}`);
+const blockout = await loadTs(`${fileURLToPath(new URL("../blender/blockout.ts", import.meta.url))}`);
 
 /** Whether a real headless Blender can be launched at all. */
 async function blenderAvailable() {
@@ -106,6 +107,66 @@ json.loads(sys.argv[sys.argv.index("--") + 1])
 print("__PI_BLENDER_JSON_START__")
 print(json.dumps(sorted(m.name for m in bpy.data.materials)))
 print("__PI_BLENDER_JSON_END__")
+`,
+		payload: {},
+		timeoutMs: 120_000,
+	});
+}
+
+
+/**
+ * A dense, open, unwrapped shell exported as GLB.
+ *
+ * The same shape `test/blockout-import.py` builds, in the other language and in
+ * a scratch dir rather than the repository: a provider's answer, not a fixture
+ * somebody could mistake for authored geometry. Blender writes it because only
+ * Blender can produce a GLB this suite then imports back.
+ */
+async function writeDenseGlb(cwd, glbPath) {
+	const utils = await loadTs(fileURLToPath(new URL("../blender/utils.ts", import.meta.url)));
+	await utils.runBlenderJson({
+		cwd,
+		scriptSource: `
+import bmesh, bpy, json, sys
+args = sys.argv[sys.argv.index("--") + 1:]
+# args[0] is the JSON payload every script here shares; the real arguments start at 1.
+json.loads(args[0])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("Dense")
+bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=2.0)
+bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=16, use_grid_fill=True)
+for vertex in bm.verts:
+    vertex.co.z *= 5.0
+bm.faces.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[bm.faces[0]], context="FACES")
+bm.to_mesh(mesh)
+bm.free()
+obj = bpy.data.objects.new("Dense", mesh)
+bpy.context.scene.collection.objects.link(obj)
+bpy.ops.export_scene.gltf(filepath=args[1], export_format="GLB")
+print("__PI_BLENDER_JSON_START__" + json.dumps({"triangles": sum(len(p.vertices) - 2 for p in mesh.polygons)}) + "__PI_BLENDER_JSON_END__")
+`,
+		payload: {},
+		scriptArgs: [glbPath],
+		timeoutMs: 120_000,
+	});
+}
+
+/** What a blockout blend actually contains: its collections and which objects are tagged. */
+async function blockoutContents(cwd, blendPath) {
+	const utils = await loadTs(fileURLToPath(new URL("../blender/utils.ts", import.meta.url)));
+	return await utils.runBlenderJson({
+		cwd,
+		blendPath,
+		scriptSource: `
+import bpy, json, sys
+json.loads(sys.argv[sys.argv.index("--") + 1])
+print("__PI_BLENDER_JSON_START__" + json.dumps({
+    "collections": {c.name: sorted(o.name for o in c.objects) for c in bpy.data.collections},
+    "tagged": sorted(o.name for o in bpy.data.objects if o.get("pi_blender_blockout")),
+    "inScene": sorted(o.name for o in bpy.context.scene.objects),
+}) + "__PI_BLENDER_JSON_END__")
 `,
 		payload: {},
 		timeoutMs: 120_000,
@@ -2197,5 +2258,113 @@ test("the build contract follows the operations that record it", { skip, timeout
 		assert.equal(manifest.build?.stage, "staged", "a post-export change re-opens the build");
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a blockout this tool imported blocks a character module and only warns a prop", { skip, timeout: 900_000 }, async () => {
+	const ws = await makeWorkspace();
+	const sourceRoot = scratchRoot();
+	try {
+		const glbPath = join(sourceRoot, "generated.glb");
+		await writeDenseGlb(ws.root, glbPath);
+		assert.ok(existsSync(glbPath), "the provider-shaped GLB was written into a scratch dir");
+
+		// The successful path: everything above asserts refusals, and this is the
+		// one call that writes into the user's workspace.
+		const imported = await blockout.blenderBlockoutGenerate({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			provider: "local",
+			path: glbPath,
+			license: "CC0-1.0",
+			prompt: "a dense shell, not a finished asset",
+			seed: 7,
+			id: "shell",
+			targetBounds: { x: 1, y: 1, z: 2 },
+		});
+
+		assert.equal(imported.success, true, imported.error);
+		assert.equal(imported.status, "imported");
+		assert.equal(imported.collection, "Blockout");
+		assert.ok(imported.objects.length > 0, "the import reports the objects it made");
+
+		// Custody: the workspace holds the file, not the scratch dir it came from.
+		const storedGlb = join(ws.workspacePath, "blockouts", "shell.glb");
+		const storedBlend = join(ws.workspacePath, "blockouts", "shell.blend");
+		assert.equal(imported.blockoutPath, storedGlb);
+		assert.ok(existsSync(storedGlb), "the mesh is copied into the workspace");
+		assert.ok(existsSync(storedBlend), "the blockout blend is saved in the workspace");
+
+		const landed = await blockoutContents(ws.root, imported.blendPath);
+		assert.ok((landed.collections.Blockout ?? []).length > 0, "the produced blend has a Blockout collection");
+		assert.deepEqual(
+			landed.tagged,
+			[...landed.collections.Blockout].sort(),
+			"every object in the Blockout collection carries pi_blender_blockout",
+		);
+		assert.deepEqual([...landed.inScene].sort(), [...landed.collections.Blockout].sort(), "the blockout is linked into the scene");
+
+		const manifest = JSON.parse(readFileSync(join(ws.workspacePath, "blender-workspace.json"), "utf-8"));
+		const record = (manifest.blockouts ?? []).find((entry) => entry.id === "shell");
+		assert.ok(record, "the manifest records the blockout");
+		assert.equal(record.provider, "local");
+		assert.equal(record.license, "CC0-1.0");
+		assert.equal(record.prompt, "a dense shell, not a finished asset");
+		assert.equal(record.seed, 7);
+		assert.equal(record.path, storedGlb, "provenance points at the workspace copy");
+		assert.equal(record.blockout, true);
+		assert.ok(record.triangles > 1_000, `the provenance carries a real triangle count (${record.triangles})`);
+		assert.ok(record.bounds?.dimensions?.length === 3, "the provenance carries the normalised bounds");
+
+		// The assertion the feature exists for: a worker appends the blockout and
+		// hands it back as authored work. Preflight has only ever been proven
+		// against objects the probe built by hand, never against one this tool
+		// imported and tagged.
+		const appendBlockout = (library, objectName) => `
+import bpy
+
+with bpy.data.libraries.load(${JSON.stringify(library)}, link=False) as (source, target):
+    target.objects = [entry for entry in source.objects]
+
+for obj in target.objects:
+    if obj is None:
+        continue
+    bpy.context.scene.collection.objects.link(obj)
+    obj.name = ${JSON.stringify(objectName)}
+    print("appended", obj.name, "tagged", obj.get("pi_blender_blockout"))
+`;
+		writeScript(ws.workspacePath, "hero", appendBlockout(storedBlend, "Hero_Surface"));
+		const character = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "hero",
+			cameraProfile: "character",
+			timeoutSeconds: 300,
+		});
+		assert.equal(character.preflight?.checks.blockout.status, "block", JSON.stringify(character.preflight?.checks.blockout));
+		assert.ok(
+			character.preflight?.blockers.includes("blockout"),
+			`a character module made of a blockout is blocked (blockers: ${character.preflight?.blockers})`,
+		);
+		assert.equal(character.blocked, true, "the run does not ship raw generative topology");
+		assert.equal(character.renderOutputPath, null, "no render is spent on a module that cannot pass");
+
+		// The same geometry under a profile where a blockout is a warning: the gate
+		// is a ranking of risk, not a blanket refusal, so this must still stage.
+		writeScript(ws.workspacePath, "crate", appendBlockout(storedBlend, "Crate_Surface"));
+		const prop = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "crate",
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		assert.equal(prop.preflight?.checks.blockout.status, "warn");
+		assert.ok(prop.preflight?.warnings.includes("blockout"), "a prop is warned about the blockout");
+		assert.ok(!prop.preflight?.blockers.includes("blockout"));
+		assert.notEqual(prop.blocked, true, "a warned prop is not refused outright");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+		rmSync(sourceRoot, { recursive: true, force: true });
 	}
 });

@@ -81,6 +81,7 @@ export const CAPABILITY_BUNDLES: Record<CapabilityBundleName, readonly string[]>
 		"blender_save_view",
 	],
 	"blender.assemble": [
+		"blender_blockout_generate",
 		"blender_branch_apply",
 		"blender_module_revert",
 		"blender_export_asset",
@@ -116,6 +117,7 @@ export const AGENT_CAPABILITY_PROFILES: Record<string, AgentCapabilityProfile> =
 		],
 		"blender.review": ["blender_log_critique", "blender_compare"],
 		"blender.assemble": [
+			"blender_blockout_generate",
 			"blender_module_revert",
 			"blender_branch_apply",
 			"blender_export_asset",

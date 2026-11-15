@@ -6,7 +6,7 @@ vision-informed iteration, render loop) in stock pi, with fixes for a
 
 ## Tools
 
-Registered tools (`blender_*`, 38). Usage detail, per-tool notes and the
+Registered tools (`blender_*`, 39). Usage detail, per-tool notes and the
 verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Tool | What it does |
@@ -42,6 +42,7 @@ verified-history log live in [docs/DESIGN.md](docs/DESIGN.md).
 | `blender_window_layout` | read the live window/area layout and screenshot |
 | `blender_switch_workspace` | switch the live Blender window to another workspace |
 | `blender_import_asset` | import a model file into the workspace blend |
+| `blender_blockout_generate` | import a generated blockout (local GLB/OBJ or ComfyUI) as a starting point |
 | `blender_object_detail` | per-object mesh, modifier and material detail |
 | `blender_get_python_api_docs` | look up a bpy symbol in the bundled API docs |
 | `blender_search_api_docs` | search the bundled bpy API docs |

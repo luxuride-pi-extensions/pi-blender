@@ -33,6 +33,7 @@ export { ensureWorkspaceInitialized, findNearestWorkspace, loadWorkspaceManifest
 
 export { blenderExportAsset } from "./export-asset.js";
 export { blenderImportAsset } from "./import.js";
+export { blenderBlockoutGenerate, BLOCKOUT_PROVIDERS, DEFERRED_BLOCKOUT_PROVIDERS } from "./blockout.js";
 
 export { blenderRankAssets, parseCritiqueLog } from "./ranking.js";
 export { blenderIterationState } from "./iteration-state.js";

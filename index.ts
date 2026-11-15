@@ -219,6 +219,10 @@ const MANAGER_ALLOWED_TOOL_NAMES = new Set([
 	"blender_scene_info",
 	"blender_add_reference",
 	"blender_reference_search",
+	// A blockout is a starting point the manager commissions before any module
+	// exists, so the manager is the role that asks for one; the worker it fans
+	// out to rebuilds it. Also in the assemble bundle for the same reason.
+	"blender_blockout_generate",
 	"blender_module_revert",
 	// Retention is a workspace-level decision: which evidence may go is the
 	// manager's call, and the dry run keeps it inspectable before it is.

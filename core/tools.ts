@@ -7,6 +7,7 @@
 
 import { Type } from "typebox";
 import { DEFAULT_MODULE_TIMEOUT_SECONDS } from "../blender/types.js";
+import { blenderBlockoutGenerate } from "../blender/blockout.js";
 import type { AssetExportOptions, CameraFrontAxis, CameraProfile, CameraShotKind, ImportFormat } from "../blender/types.js";
 import { searchReferenceSources, type ReferenceSource } from "../blender/reference-sources.js";
 import { formatTimings } from "../blender/timings.js";
@@ -1625,6 +1626,53 @@ export const blenderImportAssetTool: CoreToolDefinition = {
 	},
 };
 
+export const blenderBlockoutGenerateTool: CoreToolDefinition = {
+	name: "blender_blockout_generate",
+	label: "Blender Blockout Generate",
+	annotations: {
+		readOnlyHint: false,
+		destructiveHint: false,
+		idempotentHint: false,
+		openWorldHint: true,
+	},
+	description:
+	'Import a generated blockout (local or ComfyUI); character/hard_surface/print block it until rebuilt. Full rules: skill `blender-create`.',
+	parameters: Type.Object({
+	workspace: Type.String({ description: 'Workspace path.' }),
+	provider: Type.String({
+		description: 'local or comfyui (others deferred).',
+		enum: ["local", "comfyui"],
+	}),
+	path: Type.Optional(Type.String({ description: 'Local file.' })),
+	workflow: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'ComfyUI graph.' })),
+	license: Type.String({ description: 'Licence id, e.g. CC0-1.0.' }),
+	prompt: Type.Optional(Type.String({ description: 'Prompt.' })),
+	imagePath: Type.Optional(Type.String({ description: 'Ref image.' })),
+	seed: Type.Optional(Type.Number({ description: 'Seed.' })),
+	targetBounds: Type.Optional(
+		Type.Object({ x: Type.Number(), y: Type.Number(), z: Type.Number() }, { description: 'Box size, m.' }),
+	),
+	async: Type.Optional(Type.Boolean({ description: 'Queue it.' })),
+}),
+	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
+	const result = await blenderBlockoutGenerate({
+		cwd: context?.cwd ?? process.cwd(),
+		workspace: params.workspace,
+		provider: params.provider,
+		path: params.path,
+		workflow: params.workflow as Record<string, unknown> | undefined,
+		license: params.license,
+		prompt: params.prompt,
+		imagePath: params.imagePath,
+		seed: params.seed,
+		targetBounds: params.targetBounds,
+		async: params.async,
+		signal: context?.signal,
+	});
+	return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+	},
+};
+
 export const blenderAddReferenceTool: CoreToolDefinition = {
 	name: "blender_add_reference",
 	label: "Blender Add Reference",
@@ -2548,6 +2596,7 @@ export const BLENDER_TOOLS: CoreToolDefinition[] = [
 	blenderCompareTool,
 	blenderObjectDetailTool,
 	blenderImportAssetTool,
+	blenderBlockoutGenerateTool,
 	blenderGetPythonApiDocsTool,
 	blenderSearchApiDocsTool,
 	blenderSearchManualDocsTool,
