@@ -1636,23 +1636,23 @@ export const blenderBlockoutGenerateTool: CoreToolDefinition = {
 		openWorldHint: true,
 	},
 	description:
-	'Import a generative blockout (local GLB/OBJ, or ComfyUI) as a starting point; character/hard_surface/print block it until rebuilt. Full rules: skill `blender-create`.',
+	'Import a generated blockout (local or ComfyUI); character/hard_surface/print block it until rebuilt. Full rules: skill `blender-create`.',
 	parameters: Type.Object({
-	workspace: Type.String({ description: 'Explicit workspace path.' }),
+	workspace: Type.String({ description: 'Workspace path.' }),
 	provider: Type.String({
-		description: 'local or comfyui; hunyuan/trellis/meshy/tripo deferred.',
+		description: 'local or comfyui (others deferred).',
 		enum: ["local", "comfyui"],
 	}),
-	path: Type.Optional(Type.String({ description: 'GLB/OBJ for local.' })),
-	workflow: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'ComfyUI API graph.' })),
-	license: Type.String({ description: 'Licence, e.g. CC0-1.0.' }),
-	prompt: Type.Optional(Type.String({ description: 'What to generate.' })),
-	imagePath: Type.Optional(Type.String({ description: 'Reference image.' })),
+	path: Type.Optional(Type.String({ description: 'Local file.' })),
+	workflow: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'ComfyUI graph.' })),
+	license: Type.String({ description: 'Licence id, e.g. CC0-1.0.' }),
+	prompt: Type.Optional(Type.String({ description: 'Prompt.' })),
+	imagePath: Type.Optional(Type.String({ description: 'Ref image.' })),
 	seed: Type.Optional(Type.Number({ description: 'Seed.' })),
 	targetBounds: Type.Optional(
-		Type.Object({ x: Type.Number(), y: Type.Number(), z: Type.Number() }, { description: 'Box in metres.' }),
+		Type.Object({ x: Type.Number(), y: Type.Number(), z: Type.Number() }, { description: 'Box size, m.' }),
 	),
-	async: Type.Optional(Type.Boolean({ description: 'Queue it (comfyui only).' })),
+	async: Type.Optional(Type.Boolean({ description: 'Queue it.' })),
 }),
 	execute: async (params, context?: CoreToolContext): Promise<CoreToolResult> => {
 	const result = await blenderBlockoutGenerate({
