@@ -461,9 +461,11 @@ Start pi in any project dir. The extension:
 - Every branch run also measures its geometry before the render: bounds and unit
   scale, unapplied scale, non-manifold and boundary edges, self-intersections,
   minimum wall thickness (print/character), symmetry, UVs, procedural
-  materials, and duplicate objects — a `<base>.NNN` name added by this run whose
-  base the module owns or the file already holds, because Blender renames a
-  re-created datablock instead of replacing it. The verdict names the method and
+  materials, meshes with no material or one still on Blender's default grey
+  (`missingMaterial`, `defaultMaterial` — blocking on paint, warnings on every
+  other profile), and duplicate objects — a `<base>.NNN` name added by this
+  run whose base the module owns or the file already holds, because Blender
+  renames a re-created datablock instead of replacing it. The verdict names the method and
   sample for each number, applies profile thresholds, and sets `blocking` when a
   critical check fails. A blocking verdict is a routing decision: the manager
   sends the numbers to the worker instead of spending a critic on a picture that
@@ -471,6 +473,20 @@ Start pi in any project dir. The extension:
   print, and a warning elsewhere — but the apply refuses a warned twin too,
   unless `forcePreflight` says the two copies were meant; the applied record
   then names them in `forcedDuplicates`, since a warning overrides no blocker.
+- The run then measures the render itself, once the PNG is saved: exposure
+  percentiles and the clipped share, the palette and each entry's share of the
+  subject, subject coverage, and whether the subject is one flat shade or all
+  neutral (`renderFacts.flatMaterial`, `nearMonochrome`). A probed default
+  material is a modelling failure, not a taste question, so those facts reach
+  the manager before a critic is spent. The probe runs in the Node process on
+  the saved file, and it measures against the backdrop that render actually
+  used — read from the image's own border ring, because the world colour is
+  linear and the file is not (the studio's linear 0.05 world lands at display
+  0.23), and because a gradient or an environment map has no single colour to
+  subtract. The facts are written into `packet.json` beside the preflight and
+  returned on the run as `renderFacts`, so the manager, the critic's brief and a
+  later reader all read the same numbers; a run that reused a previous render
+  carries that run's facts or none, never freshly invented ones.
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

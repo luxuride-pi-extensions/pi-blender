@@ -641,14 +641,23 @@ not an applied generation.
 
 Every headless module result carries `preflight`: bounds, unit scale, unapplied
 scale, non-manifold and boundary edges, self-intersections, wall thickness on
-print/character profiles, symmetry, UVs, procedural materials, and duplicate
-objects (a `<base>.NNN` copy Blender renamed into existence because the script
-re-created an object it already had). It also states the method and sample for
-each number.
+print/character profiles, symmetry, UVs, procedural materials, meshes with no
+material or one still on Blender's default grey, and duplicate objects (a
+`<base>.NNN` copy Blender renamed into existence because the script re-created
+an object it already had). It also states the method and sample for each number.
 
 Read it before you spawn a critic. If `preflight.blocking` is true, the harness
 marks the run `blocked`, skips the render and refuses to apply the branch. Send
 the `blockers` and their measured values back to the worker as the next brief.
+Two of those checks are about material, not geometry: `missingMaterial` (a mesh
+with no material slot, or every slot empty) and `defaultMaterial` (a Principled
+surface still on Blender's 0.8 grey with nothing linked into Base Color,
+Metallic, Roughness, Normal or Emission). On `paint` both block, because an
+unpainted surface is that profile's whole subject; on every other profile they
+warn, so they reach you as `warnings` to pass on rather than `blockers`. The fix
+in either case is to assign a material and paint it — a Base Color, a metallic
+or roughness value, or a linked texture — and not to change the geometry, which
+is usually already right.
 `forcePreflight: true` on the run and on `blender_branch_apply` overrides this
 and records the override in the manifest; use it only when the block is a known
 false positive. A hole, an interpenetration or a 0.4 mm wall cannot be judged
@@ -665,6 +674,33 @@ duplicate is not a blocker, so the overridden record does not read
 instead. Other non-blocking `warnings` belong in the critic's brief as facts to
 confirm, not as reasons to skip it.
 
+## The render is measured before it is judged
+
+Every headless result that produced a render carries `renderFacts`, and the same
+object is written into that generation's `packet.json` next to the preflight: the
+numbers you read are the numbers the critic reads. It holds `exposure` (luma
+percentiles and the clipped fractions over the subject only), `palette` (the
+dominant subject colours, largest share first), `subjectCoverage`,
+`flatMaterial`, `clipped`, `nearMonochrome` and the probe's own `warnings`. It is
+measured on the saved file, against the backdrop that render actually used, so
+it describes the picture rather than the scene you think you built.
+
+Read it BEFORE you spawn a critic, for the same reason you read `preflight`.
+`flatMaterial` means one shade covers most of the subject; `nearMonochrome` means
+every colour in it is near-neutral. Together they are the signature of a surface
+that was never assigned and painted — a white default material is a modelling
+failure, not a taste question, and no critic verdict will fix it. Send it back to
+the worker with the palette and coverage numbers as the brief. `clipped: true`
+means the highlight or shadow detail there cannot be judged from this image, so
+fix the lighting or the exposure before paying for a look that has to say "I
+cannot see it".
+
+A `renderFacts` warning that the backdrop was not flat means the world is a
+gradient or an environment rather than one colour, so `subjectCoverage` should be
+treated as approximate. `renderFacts` is absent when rendering was disabled, when
+the render failed, or when a reused generation was recorded before these facts
+existed; absence is not a clean bill of health, it only means nobody measured
+this one.
 
 ## Image budget
 

@@ -303,6 +303,14 @@ export interface BlenderBranchRunRecord {
 	/** True when a blocking preflight was explicitly overridden. */
 	preflightOverridden?: boolean;
 	/**
+	 * What this generation's picture says about material and exposure.
+	 *
+	 * Carried on the record so a run that reuses an unchanged generation's render
+	 * can hand the next critic the facts measured from that same file, instead of
+	 * re-measuring it or inventing facts for a picture nothing measured.
+	 */
+	renderFacts?: RenderFacts;
+	/**
 	 * `<base>.NNN` copies an explicit override merged for this branch.
 	 *
 	 * A warned duplicate is not a blocking defect, so `preflightOverridden` stays
@@ -467,6 +475,13 @@ export interface BranchRunResult {
 	stateDigest?: string;
 	/** Content the headless apply does not carry, such as world or scene settings. */
 	warnings?: string[];
+	/**
+	 * What the saved render measured, for the manager and the critic to read
+	 * before either spends a look on the image. Absent when nothing was measured:
+	 * rendering disabled, the render failed, or an unchanged run reused a
+	 * generation whose record predates these facts.
+	 */
+	renderFacts?: RenderFacts;
 	/** Structural checks measured before the render. */
 	preflight?: PreflightResult;
 	/** Measured cost of each stage of this run. */
@@ -1799,6 +1814,8 @@ export interface ModuleRunResult {
 	reviewPacket?: ReviewPacket;
 	/** Structural checks measured before the render, when the path can run them. */
 	preflight?: PreflightResult;
+	/** What the saved render measured about material and exposure; absent when nothing was measured. */
+	renderFacts?: RenderFacts;
 	/** Behaviour the caller should know about, e.g. options this path ignored. */
 	warnings?: string[];
 	/** Measured cost of each stage, on the headless paths that report one. */
@@ -2821,6 +2838,45 @@ export interface ReferenceCompleteness {
 	bestViewIoU: number;
 	/** The view that produced `bestViewIoU`. */
 	bestView?: string;
+}
+
+/**
+ * A render measured on the facts that decide whether a critic should spend a look.
+ *
+ * Material and exposure are checkable before anyone judges taste, and they are
+ * the two things a critic cannot recover from a picture it has already been
+ * told to judge: a grey default surface reads as "flat lighting" and a blown
+ * highlight as "bright material". So the numbers come first, in one object that
+ * both the manager and the critic read.
+ *
+ * The shape is the contract, not the measurement path: issue #98 will fill the
+ * same keys, in the same units, from render_scene.py instead of the Node decode
+ * of the saved PNG, and nothing downstream has to change.
+ */
+export interface RenderFacts {
+	/** Brightness over the subject only. Percentiles are luma in 0..1. */
+	exposure: ImageProbeResult["exposure"];
+	/** Dominant subject colours, most common first, as #rrggbb with fractions. */
+	palette: ImageProbeResult["palette"];
+	/** Share of the frame the subject covers, 0..1. */
+	subjectCoverage: number;
+	/**
+	 * One shade covers most of the subject, so no texture or material variation
+	 * reaches the image. True for an untouched default surface.
+	 */
+	flatMaterial: boolean;
+	/** Highlights or shadows clip across the subject, so detail there is unjudgeable. */
+	clipped: boolean;
+	/**
+	 * Every reported colour is near-neutral — what an unpainted default material
+	 * renders as, and what a colour-blind material choice looks like.
+	 */
+	nearMonochrome: boolean;
+	/**
+	 * What is wrong with the render or the measurement, in the reader's terms.
+	 * Non-empty means the image is not a reliable basis for a taste verdict.
+	 */
+	warnings: string[];
 }
 
 export interface GeometryProbeWorkspaceResult extends GeometryProbeResult {

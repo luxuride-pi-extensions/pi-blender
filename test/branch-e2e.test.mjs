@@ -202,6 +202,37 @@ bpy.context.scene.camera = cam
 `;
 
 /** The camera a blend file would render from, by name. */
+/**
+ * A sphere whose surface is Blender's untouched material, or a painted one.
+ *
+ * A sphere rather than a cube because the subject has to fill an unmistakable
+ * share of the frame: the facts under test are measured on the picture, so a
+ * subject too small to sample would make both cases read as no subject at all.
+ */
+function sphereWithMaterial(name, baseColor) {
+	const paint = baseColor
+		? `
+bsdf = next(node for node in mat.node_tree.nodes if node.type == "BSDF_PRINCIPLED")
+bsdf.inputs["Base Color"].default_value = (${baseColor.join(", ")}, 1.0)
+`
+		: "";
+	return `
+import bpy
+obj = bpy.data.objects.get("${name}")
+if obj is None:
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.6, segments=48, ring_count=24)
+    obj = bpy.context.object
+    obj.name = "${name}"
+mat = bpy.data.materials.get("${name}Mat")
+if mat is None:
+    mat = bpy.data.materials.new("${name}Mat")
+mat.use_nodes = True
+${paint}
+obj.data.materials.clear()
+obj.data.materials.append(mat)
+`;
+}
+
 async function activeCameraName(cwd, blendPath) {
 	const utils = await loadTs(fileURLToPath(new URL("../blender/utils.ts", import.meta.url)));
 	return await utils.runBlenderJson({
@@ -982,6 +1013,79 @@ test("each generation keeps its evidence and compares against the previous one",
 		});
 		assert.match(sheet.note, /stored review packets/);
 		assert.equal(sheet.montagePath, second.reviewPacket.comparePath);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a default material is reported as a flat, near-monochrome render", { skip }, async () => {
+	// The manager cannot see the picture, and a critic asked "is this good?" on
+	// an unpainted surface answers a taste question that was never a taste
+	// question. So the run measures its own output: one shade over most of the
+	// subject and no chromatic colour in it is the signature of a material that
+	// was assigned and never painted, and it is reported as a fact before anyone
+	// spends a critic on it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "unpainted", sphereWithMaterial("Ball"));
+		const result = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "unpainted",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		const facts = result.renderFacts;
+		assert.ok(facts, `the run must report what its render measured: ${JSON.stringify(result.warnings)}`);
+		assert.equal(facts.flatMaterial, true, `palette: ${JSON.stringify(facts.palette)}`);
+		assert.equal(facts.nearMonochrome, true, `palette: ${JSON.stringify(facts.palette)}`);
+		assert.ok(facts.subjectCoverage > 0.02, `the backdrop was measured away from the subject: ${facts.subjectCoverage}`);
+		assert.ok(
+			facts.warnings.some((warning) => /one shade|near-neutral/.test(warning)),
+			`the facts carry their own reason: ${JSON.stringify(facts.warnings)}`,
+		);
+		assert.equal(
+			typeof facts.exposure.lumaPercentiles.p50,
+			"number",
+			"exposure arrives with the same percentiles the image probe reports",
+		);
+
+		// The packet is what a critic and a later manager read, so the facts have
+		// to be there too — a fact only in the return value is a fact the reader
+		// who decides whether to spend a critic never sees.
+		assert.ok(result.reviewPacket?.dir, "the run stored its evidence");
+		const packet = JSON.parse(readFileSync(join(result.reviewPacket.dir, "packet.json"), "utf-8"));
+		assert.deepEqual(packet.renderFacts, facts, "packet.json carries the facts that were measured from this render");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a painted material is not reported as flat or near-monochrome", { skip }, async () => {
+	// The negative half: the same measurement on a subject that IS painted must
+	// not fire, or the warning trains the manager to ignore it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "painted", sphereWithMaterial("Ball", [0.7, 0.05, 0.05]));
+		const result = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "painted",
+			render: true,
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		const facts = result.renderFacts;
+		assert.ok(facts, `the run must report what its render measured: ${JSON.stringify(result.warnings)}`);
+		assert.ok(facts.subjectCoverage > 0.02, `the subject was actually measured: ${facts.subjectCoverage}`);
+		assert.equal(facts.flatMaterial, false, `palette: ${JSON.stringify(facts.palette)}`);
+		assert.equal(facts.nearMonochrome, false, `palette: ${JSON.stringify(facts.palette)}`);
+		assert.deepEqual(
+			facts.warnings.filter((warning) => /one shade|near-neutral/.test(warning)),
+			[],
+			"a painted surface raises neither of the unpainted-material warnings",
+		);
 	} finally {
 		rmSync(ws.root, { recursive: true, force: true });
 	}
