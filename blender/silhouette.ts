@@ -40,7 +40,6 @@ import type {
 const DEFAULT_GRID = 128;
 const MIN_GRID = 16;
 const MAX_GRID = 512;
-/** Box aspect ratios further apart than this are reported as different framing, not noise. */
 /**
  * Per-channel tolerance for the backdrop comparison, 0.02.
  *
@@ -51,7 +50,7 @@ const MAX_GRID = 512;
  * this number; it must be unified into one constant when that lands.
  */
 const DEFAULT_BACKDROP_TOLERANCE = 0.02;
-
+/** Box aspect ratios further apart than this are reported as different framing, not noise. */
 const ASPECT_MISMATCH_RATIO = 1.15;
 /** Subject coverage above this means the mask is the frame, so the background colour is wrong for the image. */
 const FRAME_FILLED_COVERAGE = 0.9;
