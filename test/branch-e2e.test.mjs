@@ -1052,6 +1052,81 @@ test("a review sheet renders the plan's other angles in the same run", { skip },
 	}
 });
 
+test("a multi-shot plan writes the review sheet without being asked", { skip }, async () => {
+	// The sheet only exists to show angles one image cannot, so it has to be the
+	// default: the caller who forgets the flag is the common case, and a critic
+	// judging 3D form from a single 3/4 view cannot see the back. No profile is
+	// passed, so this is the ordinary prop plan's two shots.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "defaultsheet", box("DefaultSheetPart", 1.2, 0.8, 0.6));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "defaultsheet",
+			timeoutSeconds: 300,
+		});
+		const sheetPath = join(ws.workspacePath, "modules", "defaultsheet", "review.png");
+		assert.ok(existsSync(sheetPath), `the default run writes ${sheetPath}`);
+		assert.ok(result.renderOutputPath, "the sheet still writes the hero render.png");
+		assert.ok(result.reviewSheet, `the run returns the sheet it wrote: ${JSON.stringify(result)}`);
+		assert.deepEqual(
+			result.reviewSheet.panels.map((panel) => panel.shot),
+			["hero", "front"],
+			"the sheet covers the plan's shots",
+		);
+		assert.equal(result.reviewSheet.panels[0].file, result.renderOutputPath, "the hero panel is the ordinary render");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("a single-shot plan pays for no review sheet", { skip }, async () => {
+	// One shot leaves nothing for a second panel to show, so the default must not
+	// spend the extra renders on it.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "singleshot", box("SingleShotPart", 1.0, 1.0, 1.0));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "singleshot",
+			cameraShots: ["hero"],
+			timeoutSeconds: 300,
+		});
+		assert.ok(result.renderOutputPath, "the single shot still renders");
+		assert.equal(result.reviewSheet, undefined);
+		assert.ok(
+			!existsSync(join(ws.workspacePath, "modules", "singleshot", "review.png")),
+			"a single-shot plan writes no review.png",
+		);
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
+test("reviewSheet false is the cheap single-view probe", { skip }, async () => {
+	// A probe that only needs to see that the shape reads at all should not pay
+	// for every angle in the plan, so the opt-out has to beat the default.
+	const ws = await makeWorkspace();
+	try {
+		writeScript(ws.workspacePath, "probe", box("ProbePart", 1.4, 0.6, 0.5));
+		const result = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "probe",
+			reviewSheet: false,
+			timeoutSeconds: 300,
+		});
+		const moduleDir = join(ws.workspacePath, "modules", "probe");
+		assert.ok(existsSync(join(moduleDir, "render.png")), "render.png is still written");
+		assert.equal(result.reviewSheet, undefined);
+		assert.ok(!existsSync(join(moduleDir, "review.png")), "reviewSheet: false writes only render.png");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
+
 test("re-framing follows the part when it changes", { skip }, async () => {
 	// A camera fitted once is the defect this replaced, so the test is that the
 	// SECOND run moves it. Without this the feature is "creates a camera", which

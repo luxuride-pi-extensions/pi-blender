@@ -291,11 +291,14 @@ Declare the camera contract in every brief: `cameraProfile` (`prop`, `character`
 (`-Y`, `+Y`, `-X`, `+X`). The front is a declaration, not a guess; a wrong axis
 photographs a character from behind. The profile selects the shot list, and
 `frameSubject: "module"` frames a parented detail on itself instead of on the
-body the widened apply set carries. Pass `reviewSheet: true` for geometry
-review: the run renders the plan's other angles and composes one sheet, so the
-critic sees the back and the profile without a second process or a second
-image. Read the panel map it returns and tell the critic which panel failed, if
-any. Every headless generation also stores its pictures under
+body the widened apply set carries. Geometry review gets `review.png` by
+default: when the resolved plan has more than one shot the run renders the
+other angles and composes one sheet, so the critic sees the back and the
+profile without a second process or a second image. Read the panel map it
+returns and tell the critic which panel failed, if any. Pass
+`reviewSheet: false` when all you need is a cheap single-view probe, and note
+that a single-shot plan (`cameraShots: ["hero"]`) pays for no sheet at all.
+Every headless generation also stores its pictures under
 `modules/<name>/iterations/NN/`, and once a previous generation exists the run
 composes `compare.png` there. Tell the critic to read that comparison sheet when
 the result reports `reviewPacket.comparePath`; it is the current, previous and

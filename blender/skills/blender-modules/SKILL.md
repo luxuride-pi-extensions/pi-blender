@@ -131,7 +131,7 @@ Run a workspace module: checkpoint model.blend as the run found it to modules/<n
 - **cameraShots** — Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered. A live run reports that it ignored this.
 - **frameSubject** — Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body. A live run reports that it ignored this.
 - **cameraDistance** — Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject. A live run reports that it ignored this.
-- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
+- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. On by default when the plan has more than one shot, so a geometry review sees the back and the profile at no second Blender start; false opts out for a cheap single-view probe, and a single-shot plan pays for nothing extra. Implies render; the critic still receives one image.
 - **direct** — Headless path only. Save model.blend in place instead of writing a branch and applying it, halving the Blender processes for a model no one else is editing. Other staged branches are not merged. Default false.
 - **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
 - **forcePreflight** — Override a blocking preflight. The default marks the run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. Use only for a known false positive.
@@ -155,7 +155,7 @@ Run a workspace module HEADLESSLY against its own private copy of model.blend (m
 - **cameraShots** — Headless path only. Explicit shot list overriding the profile's default. The first shot is rendered.
 - **frameSubject** — Headless path only. Frame the geometry this run touched (module) or the widened apply set including parents (apply). Defaults to apply; use module for a detail parented to a body.
 - **cameraDistance** — Headless path only. Minimum camera distance; a larger subject still fits. Omit to fit the subject.
-- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. Implies render; the critic still receives one image.
+- **reviewSheet** — Also render the plan's other shots into modules/<name>/review.png and return the panel map. On by default when the plan has more than one shot, so a geometry review sees the back and the profile at no second Blender start; false opts out for a cheap single-view probe, and a single-shot plan pays for nothing extra. Implies render; the critic still receives one image.
 - **forceRender** — Headless path only. Render even when the content fingerprint says the script changed nothing, e.g. after changing a texture on disk. Default false.
 - **forcePreflight** — Override a blocking preflight. The default marks the run `blocked`, skips the render and refuses apply; the override renders, applies, and records `preflightOverridden` in the manifest. Use only for a known false positive.
 - **referenceId** — Reference id whose image is copied into this generation's comparison sheet (see blender_add_reference). Omit to compare current and previous only.

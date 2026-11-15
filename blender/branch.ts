@@ -1005,7 +1005,6 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		);
 	}
 
-	const renderRequested = options.render !== false || options.reviewSheet === true;
 	// A saved view or a named camera is resolved here, before the run, because it
 	// belongs in the render payload. The module's own auto-framed camera is not
 	// known until the script has run, so it is chosen inside that same process
@@ -1036,6 +1035,12 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		},
 		previousPlan,
 	);
+	// The sheet is the default for a plan with more than one shot: a critic judging
+	// 3D form from a single 3/4 view cannot see the back or the profile. A caller
+	// that only wants a cheap probe passes reviewSheet: false, and a plan that
+	// resolves to one shot has no other angle to pay for.
+	const effectiveReviewSheet = options.reviewSheet ?? (options.render !== false && cameraPlan.shots.length > 1);
+	const renderRequested = options.render !== false || options.reviewSheet === true;
 
 	// The picture an unchanged run may reuse. Only an applied generation has a
 	// picture the critic can be pointed at; a staged branch's render was never
@@ -1072,7 +1077,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 		resolution: options.resolution ?? DEFAULT_BRANCH_RENDER_RESOLUTION,
 		samples: options.samples ?? null,
 		renderEngine: options.renderEngine ?? null,
-		reviewSheet: options.reviewSheet === true,
+		reviewSheet: effectiveReviewSheet,
 		scene: appliedWatermark,
 	});
 	const forceRender =
@@ -1139,7 +1144,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 				cameraPlan,
 				forceRender,
 				forcePreflight: options.forcePreflight === true,
-				reviewSheet: options.reviewSheet === true,
+				reviewSheet: effectiveReviewSheet,
 				render: renderRequested
 					? {
 							outputPath: join(moduleDir, RENDER_FILE),
@@ -1256,7 +1261,7 @@ export async function blenderBranchRun(options: BranchRunOptions): Promise<Branc
 	const renderOutputPath = renderSkipped
 		? (previousRenderRun?.renderOutputPath ?? null)
 		: (payload.render?.outputPath ?? null);
-	const reusedSheet = renderSkipped && options.reviewSheet === true ? previousRenderRun?.reviewSheet : undefined;
+	const reusedSheet = renderSkipped && effectiveReviewSheet ? previousRenderRun?.reviewSheet : undefined;
 	const reviewSheet = payload.reviewSheet ?? reusedSheet;
 	const renderError = payload.renderError ?? undefined;
 	const { processStartedAt, ...measured } = payload.timings;
