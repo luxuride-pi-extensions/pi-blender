@@ -641,14 +641,23 @@ not an applied generation.
 
 Every headless module result carries `preflight`: bounds, unit scale, unapplied
 scale, non-manifold and boundary edges, self-intersections, wall thickness on
-print/character profiles, symmetry, UVs, procedural materials, and duplicate
-objects (a `<base>.NNN` copy Blender renamed into existence because the script
-re-created an object it already had). It also states the method and sample for
-each number.
+print/character profiles, symmetry, UVs, procedural materials, meshes with no
+material or one still on Blender's default grey, and duplicate objects (a
+`<base>.NNN` copy Blender renamed into existence because the script re-created
+an object it already had). It also states the method and sample for each number.
 
 Read it before you spawn a critic. If `preflight.blocking` is true, the harness
 marks the run `blocked`, skips the render and refuses to apply the branch. Send
 the `blockers` and their measured values back to the worker as the next brief.
+Two of those checks are about material, not geometry: `missingMaterial` (a mesh
+with no material slot, or every slot empty) and `defaultMaterial` (a Principled
+surface still on Blender's 0.8 grey with nothing linked into Base Color,
+Metallic, Roughness, Normal or Emission). On `paint` both block, because an
+unpainted surface is that profile's whole subject; on every other profile they
+warn, so they reach you as `warnings` to pass on rather than `blockers`. The fix
+in either case is to assign a material and paint it — a Base Color, a metallic
+or roughness value, or a linked texture — and not to change the geometry, which
+is usually already right.
 `forcePreflight: true` on the run and on `blender_branch_apply` overrides this
 and records the override in the manifest; use it only when the block is a known
 false positive. A hole, an interpenetration or a 0.4 mm wall cannot be judged
