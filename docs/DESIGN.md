@@ -460,11 +460,16 @@ Start pi in any project dir. The extension:
   without a second process or a second image.
 - Every branch run also measures its geometry before the render: bounds and unit
   scale, unapplied scale, non-manifold and boundary edges, self-intersections,
-  minimum wall thickness (print/character), symmetry, UVs and procedural
-  materials. The verdict names the method and sample for each number, applies
-  profile thresholds, and sets `blocking` when a critical check fails. A
-  blocking verdict is a routing decision: the manager sends the numbers to the
-  worker instead of spending a critic on a picture that cannot answer them.
+  minimum wall thickness (print/character), symmetry, UVs, procedural
+  materials, and duplicate objects — a `<base>.NNN` name added by this run whose
+  base the module owns or the file already holds, because Blender renames a
+  re-created datablock instead of replacing it. The verdict names the method and
+  sample for each number, applies profile thresholds, and sets `blocking` when a
+  critical check fails. A blocking verdict is a routing decision: the manager
+  sends the numbers to the worker instead of spending a critic on a picture that
+  cannot answer them. Duplicates are critical on character, hard-surface and
+  print, and a warning elsewhere — but the apply refuses a warned twin too,
+  unless `forcePreflight` says the two copies were meant.
 - `blender_read_only_python` takes Python as inline text and returns what it
   printed, for a read-only role that has no `write` tool. The refusal is
   enforced in `blender/readonly_guard.py`, in the Blender process, by patching

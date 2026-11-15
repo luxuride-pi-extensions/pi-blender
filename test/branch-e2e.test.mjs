@@ -145,9 +145,16 @@ ${box(name, sx, sy, sz, x, y, z).replace(/^import bpy\n/, "")}`;
 
 const ADD_BOX_AT = `
 import bpy
+name = "{name}"
 bpy.ops.mesh.primitive_cube_add(size=1.0)
 obj = bpy.context.object
-obj.name = "{name}"
+# Replace a box this fixture made on an earlier run instead of letting Blender
+# rename the second one to <name>.001: a re-run of a fixture must stay one
+# object, which is the contract the worker prompt states and preflight checks.
+previous = bpy.data.objects.get(name)
+if previous is not None:
+    bpy.data.objects.remove(previous, do_unlink=True)
+obj.name = name
 obj.scale = ({sx}, {sy}, {sz})
 obj.location = ({x}, {y}, {z})
 `;
@@ -841,18 +848,21 @@ test("the declared front and the frame subject change what the camera sees", { s
 			timeoutSeconds: 300,
 		});
 
-		writeScript(
-			ws.workspacePath,
-			"detail",
-			`
+		// A detail the run replaces rather than stacks (#130), as a function of its
+		// size: the widened run below needs a scene that genuinely changed, because a
+		// run that only re-frames the camera reports changed:false and no framing.
+		const detailScript = (size) => `
 import bpy
-bpy.ops.mesh.primitive_cube_add(size=1)
+bpy.ops.mesh.primitive_cube_add(size=${size})
 detail = bpy.context.object
+previous = bpy.data.objects.get("Detail")
+if previous is not None:
+    bpy.data.objects.remove(previous, do_unlink=True)
 detail.name = "Detail"
 detail.parent = bpy.data.objects["Body"]
 detail.matrix_world.translation = (8.0, 0.0, 0.0)
-`,
-		);
+`;
+		writeScript(ws.workspacePath, "detail", detailScript(1));
 		const framed = await module.blenderModuleRun({
 			cwd: ws.root,
 			workspace: ws.workspacePath,
@@ -883,6 +893,7 @@ detail.matrix_world.translation = (8.0, 0.0, 0.0)
 			"the front shot is not the old fixed three-quarter direction",
 		);
 
+		writeScript(ws.workspacePath, "detail", detailScript(1.5));
 		const widened = await module.blenderModuleRun({
 			cwd: ws.root,
 			workspace: ws.workspacePath,
@@ -1619,6 +1630,78 @@ _bm.free()
 	}
 });
 
+
+test("a re-created object is refused as a duplicate twin until it is overridden", { skip, timeout: 600_000 }, async () => {
+	const ws = await makeWorkspace();
+	try {
+		// #130: a script that recreates an object it already owns without reusing or
+		// removing it. Blender renames the second datablock to Hero.001, the content
+		// diff reports a new object, and an apply would carry BOTH into model.blend.
+		const recreate = (first, second) => `
+import bpy
+
+def part(name, x):
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, 0.0, 0.0))
+    bpy.context.object.name = name
+
+part("${first}", 0.0)
+part("${second}", 2.0)
+print("second datablock is", bpy.context.object.name)
+`;
+		writeScript(ws.workspacePath, "hero", recreate("Hero", "Hero"));
+		const staged = await branch.blenderBranchRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "hero",
+			cameraProfile: "prop",
+			timeoutSeconds: 300,
+		});
+		assert.ok(staged.preflight, "a headless run reports a preflight");
+		assert.deepEqual(
+			staged.preflight.checks.duplicateObjects.value.duplicates,
+			[{ base: "Hero", copies: ["Hero.001"] }],
+			"the check names the base and the copy Blender made",
+		);
+		assert.equal(staged.preflight.blocking, false, "a prop duplicate warns rather than blocks");
+		assert.ok(staged.preflight.warnings.includes("duplicateObjects"));
+
+		const refused = await branch.blenderBranchApply({ cwd: ws.root, workspace: ws.workspacePath, modules: ["hero"], timeoutSeconds: 300 });
+		assert.equal(refused.applied.length, 0, "a warned duplicate twin is still not merged silently");
+		assert.match(refused.skipped[0]?.reason ?? "", /duplicate objects would be applied: Hero\.001/);
+		const untouched = await objectNames(ws.root, ws.blendPath);
+		assert.ok(!untouched.includes("Hero.001"), "model.blend did not take the copy");
+
+		const overridden = await branch.blenderBranchApply({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			modules: ["hero"],
+			forcePreflight: true,
+			timeoutSeconds: 300,
+		});
+		assert.equal(overridden.applied.length, 1, "an explicit override lands the branch");
+		const merged = await objectNames(ws.root, ws.blendPath);
+		assert.ok(merged.includes("Hero") && merged.includes("Hero.001"), "the override applies both copies");
+
+		// A profile where a stacked twin cannot be judged away refuses the run
+		// itself: no render is spent on it and the branch is not applied.
+		writeScript(ws.workspacePath, "statue", recreate("Statue", "Statue"));
+		const printed = await module.blenderModuleRun({
+			cwd: ws.root,
+			workspace: ws.workspacePath,
+			moduleName: "statue",
+			cameraProfile: "print",
+			timeoutSeconds: 300,
+		});
+		assert.equal(printed.preflight?.checks.duplicateObjects.status, "block");
+		assert.ok(printed.preflight?.blockers.includes("duplicateObjects"), JSON.stringify(printed.preflight?.blockers));
+		assert.equal(printed.blocked, true, "a print duplicate stops the run");
+		assert.equal(printed.renderOutputPath, null, "no render is spent on a run that cannot pass");
+		const afterPrint = await objectNames(ws.root, ws.blendPath);
+		assert.ok(!afterPrint.includes("Statue.001"), "the blocked branch stayed in its own blend");
+	} finally {
+		rmSync(ws.root, { recursive: true, force: true });
+	}
+});
 
 test("a branch run and its apply run through the warm pool", { skip, timeout: 240_000 }, async () => {
 	const ws = await makeWorkspace();

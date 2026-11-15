@@ -443,7 +443,7 @@ export interface BranchApplyOptions {
 	workspace: string;
 	/** Modules to apply, in any order; conflicts are computed over all staged runs. */
 	modules: string[];
-	/** Apply a branch whose preflight blocked it. */
+	/** Apply a branch whose preflight blocked it, or one whose warned duplicate copy would otherwise be refused. */
 	forcePreflight?: boolean;
 	timeoutSeconds?: number;
 	signal?: AbortSignal;

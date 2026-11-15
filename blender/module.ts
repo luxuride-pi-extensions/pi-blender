@@ -235,10 +235,17 @@ async function runModuleHeadless(options: ModuleRunOptions): Promise<ModuleRunRe
 	const blocking = skipped.filter((entry) => entry.reason !== "unchanged");
 	const merged = applyResult.applied.some((entry) => entry.module === moduleName);
 	if (blocking.length > 0 || applyResult.missing.includes(moduleName) || (!merged && branchResult.changed !== false)) {
+		// A skip may carry its own reason (the apply refused a duplicate twin), and
+		// a conflict carries the contested datablock instead. Reporting "its branch
+		// blend went missing" over either sends the manager after the wrong thing.
+		const cause =
+			blocking[0]?.reason ??
+			(blocking[0]?.conflicts
+				.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`)
+				.join("; ") || "its branch blend went missing");
 		throw new Error(
-			`Module "${moduleName}" ran headlessly but was NOT merged into model.blend: ` +
-				`${blocking[0]?.conflicts.map((conflict) => `this run and ${conflict.modules.filter((name) => name !== moduleName).join(", ")} both touched object "${conflict.objectName}"`).join("; ") ?? "its branch blend went missing"}. ` +
-				`The work is intact in ${branchResult.branchPath}. Resolve the conflict and re-run.`,
+			`Module "${moduleName}" ran headlessly but was NOT merged into model.blend: ${cause}. ` +
+				`The work is intact in ${branchResult.branchPath}. Resolve that and re-run.`,
 		);
 	}
 
