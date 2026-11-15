@@ -2734,8 +2734,14 @@ export interface SilhouetteIoUOptions {
 	 * from it for the same reason.
 	 */
 	referenceBackground?: [number, number, number];
-	/** Per-channel tolerance, 0..1, for calling a pixel background. */
+	/**
+	 * Per-channel tolerance, 0..1, for calling a pixel background. Defaults to
+	 * 0.02 — the same bar the backdrop facts use — because dithering and film
+	 * grain put code values a little off the mode, and a stricter reading turns
+	 * the whole frame into foreground.
+	 */
 	tolerance?: number;
+	/** The reference side's own tolerance; falls back to `tolerance`. */
 	referenceTolerance?: number;
 	/** Cells per side of the comparison grid, 16..512. Default 128. */
 	grid?: number;

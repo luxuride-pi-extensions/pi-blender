@@ -41,6 +41,17 @@ const DEFAULT_GRID = 128;
 const MIN_GRID = 16;
 const MAX_GRID = 512;
 /** Box aspect ratios further apart than this are reported as different framing, not noise. */
+/**
+ * Per-channel tolerance for the backdrop comparison, 0.02.
+ *
+ * Must agree with the backdrop facts' own tolerance: if the palette calls a pixel
+ * backdrop and the mask does not (or the other way round), the two disagree about
+ * what the subject is, and a handful of code values of dither or film grain is
+ * enough to make the difference the whole frame. #133/#144 owns a second copy of
+ * this number; it must be unified into one constant when that lands.
+ */
+const DEFAULT_BACKDROP_TOLERANCE = 0.02;
+
 const ASPECT_MISMATCH_RATIO = 1.15;
 /** Subject coverage above this means the mask is the frame, so the background colour is wrong for the image. */
 const FRAME_FILLED_COVERAGE = 0.9;
@@ -62,12 +73,17 @@ export async function computeSilhouetteIoU(
 	const grid = normalizeGrid(options.grid);
 	const renderImage = await readImage(renderPath, "render");
 	const referenceImage = await readImage(referencePath, "reference");
-	const renderSide = splitForeground(renderImage.image, "render", options.background, options.tolerance ?? 0);
+	const renderSide = splitForeground(
+		renderImage.image,
+		"render",
+		options.background,
+		options.tolerance ?? DEFAULT_BACKDROP_TOLERANCE,
+	);
 	const referenceSide = splitForeground(
 		referenceImage.image,
 		"reference",
 		options.referenceBackground,
-		options.referenceTolerance ?? options.tolerance ?? 0,
+		options.referenceTolerance ?? options.tolerance ?? DEFAULT_BACKDROP_TOLERANCE,
 	);
 	if (!renderSide.measured || !referenceSide.measured) {
 		const reasons = [renderSide, referenceSide]
@@ -214,8 +230,6 @@ export async function measureReferenceCompleteness(options: {
 			bestView = name;
 			bestViewIoU = result.iou;
 		}
-	}
-	for (const [name, result] of measured) {
 		for (const warning of result.warnings) warnings.push(`view "${name}": ${warning}`);
 	}
 

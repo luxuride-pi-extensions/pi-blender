@@ -84,14 +84,25 @@ const DEFAULT_BRANCH_RENDER_RESOLUTION = { x: 1200, y: 900 } as const;
 const RENDER_TIMEOUT_MS = 360_000;
 const BRANCH_SAVED_MARKER = "branch-saved";
 
-/** The module's branch blend: its private copy of model.blend. */
+/**
+ * The module's branch blend: its private copy of model.blend.
+ */
+export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
+	return join(getModuleDir(workspacePath, moduleName), BRANCH_FILE);
+}
+
 /**
  * The share of the render's border ring that has to hold one colour before that
- * colour can be called the backdrop. Below it the ring is a gradient or a mix of
- * two surfaces, and splitting on the mode would put part of the frame in the
- * mask.
+ * colour can be called the backdrop.
+ *
+ * This is exactly the bar #144 applies before it records `backgroundUniform` and
+ * calls the mode the backdrop, deliberately read from the consumer side: at 0.5 a
+ * ring that is 40% something else would still be split on the mode, which is the
+ * mask contamination the measurement exists to avoid — and it would smuggle a
+ * guessed backdrop into `referenceCompleteness` after all. One number, one
+ * meaning, so the producer and this consumer cannot drift apart.
  */
-const MIN_BACKDROP_UNIFORMITY = 0.5;
+const MIN_BACKDROP_UNIFORMITY = 0.9;
 
 /**
  * The render's backdrop as #133 records it on the render payload, when it is one
@@ -107,10 +118,6 @@ function measuredBackdrop(render: unknown): [number, number, number] | undefined
 	const values = channels.map(Number);
 	if (values.some((channel) => !Number.isFinite(channel))) return undefined;
 	return [values[0], values[1], values[2]] as [number, number, number];
-}
-
-export function getBranchBlendPath(workspacePath: string, moduleName: string): string {
-	return join(getModuleDir(workspacePath, moduleName), BRANCH_FILE);
 }
 
 /* ------------------------------------------------------------------ *
